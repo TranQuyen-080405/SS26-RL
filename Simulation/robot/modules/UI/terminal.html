@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Terminal</title>
+    <link rel="stylesheet" href="/terminal.css">
+</head>
+<body>
+    <div id="out"></div>
+    <script>
+        const out = document.getElementById('out');
+
+        function isNearBottom() {
+            return out.scrollHeight - out.scrollTop - out.clientHeight < 40;
+        }
+
+        function isSelecting() {
+            const sel = window.getSelection();
+            return sel && sel.type === 'Range' && out.contains(sel.anchorNode);
+        }
+
+        async function poll() {
+            try {
+                const res = await fetch('/api/log');
+                const lines = await res.json();
+                const text = lines.join('\n');
+                if (out.textContent === text || isSelecting()) {
+                    return;
+                }
+                const stick = isNearBottom();
+                out.textContent = text;
+                if (stick) {
+                    out.scrollTop = out.scrollHeight;
+                }
+            } catch (e) {}
+        }
+        setInterval(poll, 200);
+        poll();
+    </script>
+</body>
+</html>
