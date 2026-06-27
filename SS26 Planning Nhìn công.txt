@@ -1,0 +1,41 @@
+[SS26] Planning
+|Nhìn công việc tổng thể và phân chia cho mọi người|
+
++ Vật tư: Bạt, Tường, Robot
+- 
++ Văn bản: Đặc tả đề bài, 
++ service cho học sinh: sheet, form
++ Code: logic, mapping với robot thật
+
+------------------
+[mục đích học trên máy tính nhưng phải infer (nạp state vô ra đuợc action phù hợp trên mạch ESP32-S3 Dual Core 240MHz, 16MB Flash, 8MB PSRAM)]
+Chia cac class và object tương tác:
+
+1. Robot
+- Thuộc tính:
++ Vị trị: x và y
++ hướng: [W,S,N,D]
+- Phương thức:
++ cập nhật vị trí khi dùng action dạng di chuyển (trong robot thật thì nó là là cảm biến đi tới node thì cập nhât)
++ action: 3 hàm mang tính trừu tuợng để gọi class Action.
++ update state: từ vị trí robot hiện tại và hướng hiện tại, gọi qua một hàm get obstacle từ bên map (map này là lớp thay thế cho map thật)
+Khi đã bỏ input hướng và và vị tri sẽ lấy ra đưọw trạng thái is_obtacle của hướng trong node đó.
+
+2. Action
+
+
+3. map
+4. node 
+-> trong phương thức node này có thể cập nhật cả phương thức liên quan. ví dụ, nếu node[x][y] có N_obstacle = 1 thì node[x][y+1] sẽ cập nhật S_obstacle = 1 luôn để đồng bộ.
+
+
+======Bên trên là tính chất và phuơng thức dành cho Robot=================
+-> còn thiếu get_policy [forward]
+
+Đặc tả phần reward và hàm học.[backward]
+
+
+?+ từ state suy ra đuợc reward?
+=> 
+?+ từ reward cập nhật lại đuợc hàm Q -> nên xem xét giữa cách học trọng số (cách ít cần một trận quá bự) thay vì
+dùng ma trận Q_table.

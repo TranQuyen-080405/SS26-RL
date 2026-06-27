@@ -1,20 +1,13 @@
-from button import btn_onboard
-from ultrasonic import ultrasonic
-from utility import wait_for
-from robot import robot
-# from modules.logics.action import *
-import time
+"""Vòng chính robot — infer policy (khung)."""
 
-# from button import btn_onboard
-# from ultrasonic import ultrasonic
-# from utility import wait_for
-# from robot import robot
+from robot_map import init_robot_map
+from robot_state import make_robot
+from policy_io import load_policy_bin
+from action import run_policy_step
 
-# import sys
-# sys.path.insert(0, '/')
-# from robocon_xbot import *
 
-# import time
+MAP_W = 10
+MAP_H = 10
 
 
 def run():
@@ -22,16 +15,18 @@ def run():
     print("SUMMER SCHOOL 2026 - ROBOT REINFORCEMENT LEARNING")
     print("--------------------------------------------------")
 
-    # wait_for(lambda: btn_onboard.is_pressed())
+    q = load_policy_bin("Q_table/policy.bin")
+    if not q:
+        print("Q_table/policy.bin not found — train on PC first")
+        return
 
-    # while True:
-    #     if ultrasonic.distance_cm(1) < 13:
-    #         print("Obstacle detected")
-    #         break
+    rmap = init_robot_map(MAP_W, MAP_H)
+    bot = make_robot(0, 0, "N", rmap)
+
+    # TODO: dist_goal / dist_cp từ nguồn thật hoặc config map
+    dist_goal = 0
+    dist_cp = [0, 0, 0]
+
     while True:
-        robot.forward(25)
-    # time.sleep_ms(1000)
-
-
-    # robot.forward(25,0.5)
-    # forward_action()
+        run_policy_step(bot, q, dist_goal, dist_cp)
+        # TODO: break khi at_goal
