@@ -1,5 +1,5 @@
 """
-Tab Learn Lab — map 5×5 + cấu hình state/reward (UX học sinh).
+Tab Learn Lab — map 37×5 + cấu hình state/reward (UX học sinh).
 """
 
 import importlib
@@ -23,14 +23,19 @@ from RL_lib.lab_registry import (
     REWARD_ELEMENTS,
     ELEMENT_WEIGHT_KEY,
     THRESHOLD_LABELS,
-    elements_for_module,
     FORMULA_HELP,
 )
 from RL_lib.student_formula import default_total_formula
 from RL_lib.lab_export import export_reward_config_py, export_robot_reward_constants
 from RL_lib.rl_core import N_ROWS
 from Ui_app.lab_scenario_map import LabScenarioMap5
-from Ui_app.formula_builder import FormulaBuilder
+from Ui_app.formula_builder import FormulaBuilder, module_chip_style, reward_eids_in_formula
+
+_THRESHOLD_FOR_EID = {
+    "excess_rotate": "MAX_ROTATE_STREAK",
+    "revisit": "MAX_NODE_REVISITS",
+    "ping_pong": "MAX_PING_PONG_CYCLES",
+}
 
 # Giá trị mặc định weight theo cục reward (học sinh thấy tên tiếng Việt)
 _DEFAULT_WEIGHTS = {
@@ -66,8 +71,8 @@ class LearnLabApp:
         self._module_vars = {}
         self._weight_vars = {}
         self._threshold_vars = {}
-        self._module_reward_frames = {}
         self._weight_rows = {}
+        self._threshold_rows = {}
 
         self._build_ui()
         self._load_from_module()
@@ -79,7 +84,7 @@ class LearnLabApp:
         paned.pack(fill=tk.BOTH, expand=True, padx=6, pady=6)
         left = ttk.Frame(paned)
         right = ttk.Frame(paned)
-        paned.add(left, weight=3)
+        paned.add(left, weight=1)
         paned.add(right, weight=2)
 
         self.scenario_map = LabScenarioMap5(left, self.world, on_change=self._on_scenario_event)
@@ -146,42 +151,53 @@ class LearnLabApp:
 
         ttk.Label(
             self._reward_scroll_inner,
-            text="Điểm mỗi cục (0 = tắt). Bật state → thêm nút reward; tự kéo vào công thức.",
+            text="Điểm mỗi cục trong công thức (0 = tắt) — màu khớp chip reward:",
             font=("", 8),
             foreground="#555",
         ).pack(anchor=tk.W, pady=(0, 4))
 
-        for mod in STATE_MODULES:
-            mid = mod["id"]
-            elems = elements_for_module(mid)
-            if not elems:
-                continue
-            box = ttk.LabelFrame(self._reward_scroll_inner, text=mod["label"], padding=6)
-            self._module_reward_frames[mid] = box
-            for eid in elems:
-                meta = REWARD_ELEMENTS[eid]
-                row = ttk.Frame(box)
-                row.pack(fill=tk.X, pady=2)
-                ttk.Label(row, text=meta["label"], width=28).pack(side=tk.LEFT)
-                var = tk.StringVar(value=str(_DEFAULT_WEIGHTS.get(eid, 0)))
-                self._weight_vars[eid] = var
-                ttk.Spinbox(row, from_=-500, to=500, width=8, textvariable=var).pack(side=tk.LEFT, padx=4)
-                var.trace_add("write", lambda *_: self._on_weight_edited())
-                self._weight_rows[eid] = row
+        self._weights_container = ttk.Frame(self._reward_scroll_inner)
+        self._weights_container.pack(fill=tk.X)
 
-            if mid in ("rotation", "explore_penalty"):
-                for tk_key, tk_lbl in THRESHOLD_LABELS.items():
-                    if mid == "rotation" and tk_key != "MAX_ROTATE_STREAK":
-                        continue
-                    if mid == "explore_penalty" and tk_key == "MAX_ROTATE_STREAK":
-                        continue
-                    tr = ttk.Frame(box)
-                    tr.pack(fill=tk.X, pady=2)
-                    ttk.Label(tr, text=tk_lbl, width=28).pack(side=tk.LEFT)
-                    tv = tk.StringVar(value="4")
-                    self._threshold_vars[tk_key] = tv
-                    ttk.Spinbox(tr, from_=0, to=50, width=8, textvariable=tv).pack(side=tk.LEFT, padx=4)
-                    tv.trace_add("write", lambda *_: self._on_weight_edited())
+        for eid, meta in REWARD_ELEMENTS.items():
+            mod = meta["module"]
+            chip = module_chip_style(mod)
+            row = tk.Frame(self._weights_container, bg=chip["bg"], padx=6, pady=4)
+            self._weight_rows[eid] = row
+            tk.Label(
+                row,
+                text=meta["label"],
+                bg=chip["bg"],
+                fg=chip["fg"],
+                font=("", 9, "bold"),
+                anchor=tk.W,
+                width=28,
+            ).pack(side=tk.LEFT)
+            var = tk.StringVar(value=str(_DEFAULT_WEIGHTS.get(eid, 0)))
+            self._weight_vars[eid] = var
+            ttk.Spinbox(row, from_=-500, to=500, width=8, textvariable=var).pack(side=tk.LEFT, padx=4)
+            var.trace_add("write", lambda *_: self._on_weight_edited())
+
+        for eid, tk_key in _THRESHOLD_FOR_EID.items():
+            if tk_key not in THRESHOLD_LABELS:
+                continue
+            mod = REWARD_ELEMENTS[eid]["module"]
+            chip = module_chip_style(mod)
+            tr = tk.Frame(self._weights_container, bg=chip["bg"], padx=6, pady=4)
+            self._threshold_rows[tk_key] = tr
+            tk.Label(
+                tr,
+                text=THRESHOLD_LABELS[tk_key],
+                bg=chip["bg"],
+                fg=chip["fg"],
+                font=("", 9),
+                anchor=tk.W,
+                width=28,
+            ).pack(side=tk.LEFT)
+            tv = tk.StringVar(value="4")
+            self._threshold_vars[tk_key] = tv
+            ttk.Spinbox(tr, from_=0, to=50, width=8, textvariable=tv).pack(side=tk.LEFT, padx=4)
+            tv.trace_add("write", lambda *_: self._on_weight_edited())
 
         self._bind_reward_wheel_tree(self._reward_scroll_canvas)
 
@@ -216,6 +232,38 @@ class LearnLabApp:
         enabled = self._enabled_modules()
         return [REWARD_ELEMENTS[e]["label"] for e, m in REWARD_ELEMENTS.items() if m["module"] in enabled]
 
+    def _formula_reward_eids(self):
+        return reward_eids_in_formula(self.formula_builder.get_tokens())
+
+    def _refresh_weight_panel(self):
+        eids = self._formula_reward_eids()
+        eid_set = set(eids)
+
+        for row in self._weight_rows.values():
+            row.pack_forget()
+        for tr in self._threshold_rows.values():
+            tr.pack_forget()
+
+        for eid in eids:
+            row = self._weight_rows.get(eid)
+            if row:
+                row.pack(fill=tk.X, pady=2, padx=2)
+            tk_key = _THRESHOLD_FOR_EID.get(eid)
+            if tk_key and tk_key in self._threshold_rows and eid in eid_set:
+                self._threshold_rows[tk_key].pack(fill=tk.X, pady=(0, 2), padx=2)
+
+        if not eids:
+            if not getattr(self, "_weights_empty_hint", None) or not self._weights_empty_hint.winfo_exists():
+                self._weights_empty_hint = ttk.Label(
+                    self._weights_container,
+                    text="→ Kéo reward vào công thức để chỉnh điểm",
+                    font=("", 9, "italic"),
+                    foreground="#888",
+                )
+            self._weights_empty_hint.pack(pady=8)
+        elif getattr(self, "_weights_empty_hint", None) and self._weights_empty_hint.winfo_exists():
+            self._weights_empty_hint.pack_forget()
+
     def _on_modules_changed(self):
         reward_config.set_enabled_modules(self._enabled_modules())
         self._refresh_reward_panel()
@@ -223,20 +271,10 @@ class LearnLabApp:
         self._refresh_export()
 
     def _refresh_reward_panel(self):
-        enabled = self._enabled_modules()
         labels = self._enabled_labels()
         self.formula_builder.set_labels(labels)
-
-        for mid, box in self._module_reward_frames.items():
-            if mid in enabled:
-                box.pack(fill=tk.X, pady=4, padx=2)
-            else:
-                box.pack_forget()
-                for eid in elements_for_module(mid):
-                    if eid in self._weight_vars:
-                        self._weight_vars[eid].set("0")
-
         self._sync_config_from_ui()
+        self._refresh_weight_panel()
         self._bind_reward_wheel_tree(self._reward_scroll_inner)
 
     def _collect_element_weights(self):
@@ -272,6 +310,7 @@ class LearnLabApp:
 
     def _on_formula_changed(self):
         self._sync_config_from_ui()
+        self._refresh_weight_panel()
         self._refresh_export()
 
     def _on_scenario_event(self, action_name):
@@ -288,29 +327,37 @@ class LearnLabApp:
         enabled = self._enabled_modules()
         snap = self.world.get_state_snapshot(enabled)
         n, w, e, s = snap["obs"]
-        lines = [
-            "── STATE ──",
+        state_rows = [
             "Vị trí (%d,%d)  hướng %s" % (snap["pos"][0], snap["pos"][1], snap["heading"]),
             "s = %d" % snap["s"],
         ]
         if "obstacle" in enabled:
-            lines.append("Tường nhìn thấy: trước=%d trái=%d phải=%d sau=%d" % (n, w, e, s))
+            state_rows.append(
+                "Tường nhìn thấy: trước=%d trái=%d phải=%d sau=%d" % (n, w, e, s)
+            )
         if "goal" in enabled:
-            lines.append("Trend goal: %+d" % snap["goal_trend"])
+            state_rows.append("Trend goal: %+d" % snap["goal_trend"])
         if "checkpoint" in enabled:
-            lines.append("Trend CP: %s" % snap["cp_trends"])
+            state_rows.append("Trend CP: %s" % snap["cp_trends"])
 
-        if self.world.last_action:
-            lines.extend(["", "── REWARD ──", "Công thức: %s" % reward_config.get_total_formula_student()])
-            sign = "+" if self.world.last_total >= 0 else ""
-            lines.append("TỔNG: %s%.1f điểm" % (sign, self.world.last_total))
-            for eid, val in self.world.last_parts.items():
-                if val and REWARD_ELEMENTS.get(eid, {}).get("module") in enabled:
-                    lines.append("  • %s: %+.1f" % (self._label_for_eid(eid), val))
-        else:
-            lines.extend(["", "→ Bấm Forward / Rotate trên map"])
+        has_action = bool(self.world.last_action)
+        parts = []
+        if has_action:
+            for eid in self._formula_reward_eids():
+                val = self.world.last_parts.get(eid, 0)
+                if not val:
+                    continue
+                style = module_chip_style(REWARD_ELEMENTS[eid]["module"])
+                parts.append((self._label_for_eid(eid), style["bg"], style["fg"], val))
 
-        self.scenario_map.set_result_text("\n".join(lines))
+        self.scenario_map.set_result_display(
+            state_rows=state_rows,
+            has_action=has_action,
+            action_name=self.world.last_action or "",
+            formula=self.formula_builder.get_expr(),
+            total=self.world.last_total,
+            parts=parts,
+        )
         self._refresh_export()
 
     def _load_from_module(self):

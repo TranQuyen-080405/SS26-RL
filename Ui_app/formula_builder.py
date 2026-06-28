@@ -35,6 +35,7 @@ _DROP_LINE_GLOW = "#89b4fa"
 _GHOST_ALPHA = 0.88
 
 _LABEL_MODULE = {meta["label"]: meta["module"] for meta in REWARD_ELEMENTS.values()}
+_LABEL_TO_EID = {meta["label"]: eid for eid, meta in REWARD_ELEMENTS.items()}
 
 _DRAG_THRESHOLD = 6
 _INNER_PAD = 4
@@ -66,7 +67,7 @@ class FormulaBuilder(ttk.Frame):
 
         ttk.Label(
             self,
-            text="Công thức tổng — kéo reward/phép từ trên hoặc dưới lên; × góc phải để xóa:",
+            text="Công thức tổng — kéo reward/phép vào đây; cuộn ngang nếu dài; × góc phải để xóa:",
             font=("", 9, "bold"),
         ).pack(anchor=tk.W)
 
@@ -74,17 +75,26 @@ class FormulaBuilder(ttk.Frame):
         bar_outer.pack(fill=tk.X, pady=4)
         self._bar_outer = bar_outer
 
+        chip_wrap = ttk.Frame(bar_outer)
+        chip_wrap.pack(side=tk.LEFT, fill=tk.X, expand=True)
+
         self._chip_canvas = tk.Canvas(
-            bar_outer, height=44, bg=_BAR_BG, highlightthickness=1, highlightbackground="#45475a"
+            chip_wrap, height=44, bg=_BAR_BG, highlightthickness=1, highlightbackground="#45475a"
         )
+        self._chip_scroll = ttk.Scrollbar(chip_wrap, orient=tk.HORIZONTAL, command=self._chip_canvas.xview)
+        self._chip_canvas.configure(xscrollcommand=self._chip_scroll.set, xscrollincrement=8)
         self._chip_canvas.configure(takefocus=True)
-        self._chip_canvas.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        self._chip_canvas.pack(side=tk.TOP, fill=tk.X, expand=True)
+        self._chip_scroll.pack(side=tk.BOTTOM, fill=tk.X)
         self._chip_inner = tk.Frame(self._chip_canvas, bg=_BAR_BG)
         self._chip_win = self._chip_canvas.create_window(
             (_INNER_PAD, _INNER_PAD), window=self._chip_inner, anchor=tk.NW
         )
         self._chip_inner.bind("<Configure>", self._on_inner_configure)
         self._chip_canvas.bind("<Configure>", self._on_canvas_configure)
+        for seq in ("<MouseWheel>", "<Shift-MouseWheel>", "<Button-4>", "<Button-5>"):
+            self._chip_canvas.bind(seq, self._on_formula_wheel)
+            self._chip_inner.bind(seq, self._on_formula_wheel)
 
         for w in (self._chip_canvas, self._chip_inner, bar_outer, self):
             w.bind("<BackSpace>", self._on_backspace)
@@ -216,11 +226,41 @@ class FormulaBuilder(ttk.Frame):
         self._chip_canvas.focus_set()
 
     def _on_inner_configure(self, event):
+        self._chip_canvas.configure(scrollregion=self._chip_canvas.bbox("all"))
+        h = max(44, event.height + _INNER_PAD * 2)
+        self._chip_canvas.configure(height=h)
+        if self._chip_canvas.bbox("all"):
+            x1, _, x2, _ = self._chip_canvas.bbox("all")
+            if x2 - x1 > self._chip_canvas.winfo_width():
+                self._chip_scroll.pack(side=tk.BOTTOM, fill=tk.X)
+            else:
+                self._chip_scroll.pack_forget()
+                self._chip_canvas.xview_moveto(0)
         if self._drag and self._drag.get("active"):
             self._refresh_drop_visual(self._drag.get("insert_idx", 0))
 
     def _on_canvas_configure(self, event):
-        self._chip_canvas.itemconfigure(self._chip_win, width=max(event.width - 8, 4))
+        pass
+
+    def _on_formula_wheel(self, event):
+        if self._drag:
+            return "break"
+        if event.delta:
+            self._chip_canvas.xview_scroll(int(-event.delta / 120), "units")
+        elif event.num == 4:
+            self._chip_canvas.xview_scroll(-3, "units")
+        elif event.num == 5:
+            self._chip_canvas.xview_scroll(3, "units")
+        return "break"
+
+    def _bind_formula_wheel_tree(self, widget):
+        if getattr(widget, "_formula_wheel_tag", False):
+            return
+        widget._formula_wheel_tag = True
+        for seq in ("<MouseWheel>", "<Shift-MouseWheel>", "<Button-4>", "<Button-5>"):
+            widget.bind(seq, self._on_formula_wheel, add="+")
+        for child in widget.winfo_children():
+            self._bind_formula_wheel_tree(child)
 
     def _on_backspace(self, event):
         self.pop_token()
@@ -615,10 +655,12 @@ class FormulaBuilder(ttk.Frame):
             hint.pack(side=tk.LEFT, padx=2, pady=4)
             hint.bind("<BackSpace>", self._on_backspace)
             hint.bind("<Button-1>", self._focus_bar)
+            self._bind_formula_wheel_tree(hint)
             return
 
         for i, t in enumerate(self._tokens):
             self._make_chip_frame(i, t)
+        self._bind_formula_wheel_tree(self._chip_inner)
 
     def _finish_drag_silent(self):
         if self._drag and self._drag.get("source_btn"):
@@ -638,3 +680,25 @@ class FormulaBuilder(ttk.Frame):
     def _notify(self):
         if self.on_change:
             self.on_change()
+
+
+def module_chip_style(module_id):
+    return dict(_MODULE_CHIP.get(module_id, _DEFAULT_REWARD))
+
+
+def eid_for_reward_label(label):
+    return _LABEL_TO_EID.get(label)
+
+
+def reward_eids_in_formula(tokens):
+    """Thứ tự reward trong công thức (lần đầu xuất hiện)."""
+    out = []
+    seen = set()
+    for t in tokens:
+        if t.get("kind") != "reward":
+            continue
+        eid = _LABEL_TO_EID.get(t.get("value"))
+        if eid and eid not in seen:
+            out.append(eid)
+            seen.add(eid)
+    return out

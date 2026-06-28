@@ -1,4 +1,4 @@
-"""Thế giới 5×5 cho Learn Lab — robot, goal, CP, tường, action thật."""
+"""Thế giới 37×5 cho Learn Lab — robot, goal, CP, tường, action thật."""
 
 import os
 import sys
@@ -16,9 +16,10 @@ from robot.robot_map import get_obstacle_nwes, get_node, n_checkpoints
 from RL_lib.reward_config import compute_reward_breakdown, get_enabled_modules
 from RL_lib.lab_state_test import encode_for_lab
 
-LAB_SIZE = 5
-DEFAULT_GOAL = (4, 4)
-DEFAULT_CP = (2, 2)
+LAB_WIDTH = 37
+LAB_HEIGHT = 5
+DEFAULT_GOAL = (36, 4)
+DEFAULT_CP = (18, 2)
 DEFAULT_START = (0, 0)
 
 
@@ -38,8 +39,8 @@ def _robot_map_from_sim(sim_map):
 class LabWorld5:
     def __init__(self):
         self.sim_map = init_sim_map(
-            LAB_SIZE,
-            LAB_SIZE,
+            LAB_WIDTH,
+            LAB_HEIGHT,
             goal=DEFAULT_GOAL,
             checkpoints=[DEFAULT_CP],
             start=DEFAULT_START,
@@ -81,7 +82,8 @@ class LabWorld5:
         self.paint_tool = tool
 
     def place_robot(self, x, y):
-        if 0 <= x < LAB_SIZE and 0 <= y < LAB_SIZE:
+        w, h = self.sim_map["width"], self.sim_map["height"]
+        if 0 <= x < w and 0 <= y < h:
             rb.update_position(self.robot, x, y)
             rb.inject_distances_from_map(self.robot)
             rb.perceive_facing_from_sim(self.robot, self.sim_map)
@@ -106,8 +108,8 @@ class LabWorld5:
 
     def reset_scenario(self):
         self.sim_map = init_sim_map(
-            LAB_SIZE,
-            LAB_SIZE,
+            LAB_WIDTH,
+            LAB_HEIGHT,
             goal=DEFAULT_GOAL,
             checkpoints=[DEFAULT_CP],
             start=DEFAULT_START,

@@ -99,11 +99,11 @@ def compile_student_formula(expr, enabled_eids):
 def eval_student_formula(expr, part_values, enabled_eids):
     compiled = compile_student_formula(expr, enabled_eids)
     if not compiled:
-        return sum(part_values.get(e, 0.0) for e in enabled_eids)
+        return 0.0
     variables = {}
     for eid in enabled_eids:
         variables["%s%s" % (_PART_PREFIX, eid)] = float(part_values.get(eid, 0.0))
     try:
         return safe_eval_formula(compiled, variables)
     except (ValueError, SyntaxError, TypeError, ZeroDivisionError):
-        return sum(part_values.get(e, 0.0) for e in enabled_eids)
+        return 0.0
