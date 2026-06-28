@@ -1,6 +1,6 @@
 """RL thuần hàm — bản MicroPython (sync từ RL_lib/rl_core.py)."""
 
-from grid import DIRECTIONS
+from modules.logics.grid import DIRECTIONS
 
 N_CP_MAX = 3
 ACTIONS = ("forward", "rotate left", "rotate right")

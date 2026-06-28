@@ -6,7 +6,6 @@ Lưu tại: <repo>/map/train/map_train_*.json | <repo>/map/infer/map_infer_*.jso
 import json
 import os
 import re
-import glob
 
 _SIM_MAP_DIR = os.path.dirname(os.path.abspath(__file__))
 _REPO_ROOT = os.path.abspath(os.path.join(_SIM_MAP_DIR, "..", ".."))
@@ -127,15 +126,21 @@ def build_sim_map_from_file(path):
 
 
 def list_map_files(kind=None):
+    """Liệt kê mọi file .json trong map/train/ hoặc map/infer/."""
     ensure_maps_dir("train")
     ensure_maps_dir("infer")
-    if kind == "train":
-        pattern = os.path.join(TRAIN_MAPS_DIR, "map_train_*.json")
-    elif kind == "infer":
-        pattern = os.path.join(INFER_MAPS_DIR, "map_infer_*.json")
-    else:
+
+    def _json_in_dir(directory):
+        if not os.path.isdir(directory):
+            return []
         return sorted(
-            glob.glob(os.path.join(TRAIN_MAPS_DIR, "map_train_*.json"))
-            + glob.glob(os.path.join(INFER_MAPS_DIR, "map_infer_*.json"))
+            os.path.join(directory, name)
+            for name in os.listdir(directory)
+            if name.lower().endswith(".json")
         )
-    return sorted(glob.glob(pattern))
+
+    if kind == "train":
+        return _json_in_dir(TRAIN_MAPS_DIR)
+    if kind == "infer":
+        return _json_in_dir(INFER_MAPS_DIR)
+    return _json_in_dir(TRAIN_MAPS_DIR) + _json_in_dir(INFER_MAPS_DIR)

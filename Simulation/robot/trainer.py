@@ -20,28 +20,35 @@ from robot import robot as rb
 from robot import action as act
 from robot import robot_map as rm
 from robot.policy_io import copy_q_table, empty_q_table, export_policy
+from RL_lib.reward_config import (
+    COLLISION_RESET,
+    MAX_NODE_REVISITS,
+    MAX_PING_PONG_CYCLES,
+    MAX_ROTATE_STREAK,
+    MAX_STEPS_PER_EPISODE,
+    R_COLLISION,
+    R_CP_CLOSER,
+    R_CP_FARTHER,
+    R_CHECKPOINT_FIRST,
+    R_FACING_CLEAR,
+    R_FORWARD_CLEAR,
+    R_GOAL_CLOSER,
+    R_GOAL_FARTHER,
+    R_GOAL_REACHED,
+    R_ROTATE_IN_PLACE,
+    R_STEP,
+    R_WASTED_ROTATE,
+    compute_reward,
+)
+
+LOG_EVERY_EPISODES = 100
 
 
-# --- Công thức reward (chỉnh số tại đây) ---
-R_STEP = -1.0
-R_COLLISION = -20.0
-R_GOAL_CLOSER = 5.0
-R_GOAL_FARTHER = 0.0  # không phạt đi xa — mê cung phức tạp cần detour
-R_CP_CLOSER = 8.0
-R_CP_FARTHER = 0.0
-R_CHECKPOINT_FIRST = 30.0
-R_GOAL_REACHED = 100.0
-R_ROTATE_IN_PLACE = -3.0
-R_FACING_CLEAR = 5.0  # xoay xong hướng mở + gần target hơn (nhỏ, không thay forward)
-R_FORWARD_CLEAR = 4.0  # forward qua ô mở (bất kể xa/gần goal)
-R_WASTED_ROTATE = -12.0  # xoay khi trước đó đã có thể forward
-MAX_ROTATE_STREAK = 4
-MAX_NODE_REVISITS = 5
-MAX_PING_PONG_CYCLES = 2  # đi qua lại 2 ô > 2 chu kỳ → phạt
-
-COLLISION_RESET = False
-MAX_STEPS_PER_EPISODE = 600
-LOG_EVERY_EPISODES = 100_000
+def _episode_at_goal(robot, sim_map):
+    """Chạm goal → kết thúc episode (runtime, không phụ thuộc reward config)."""
+    if sm.is_at_goal(sim_map, robot["x"], robot["y"]):
+        return True
+    return rb.is_at_goal(robot)
 
 
 def _copy_q_table(q_table):
@@ -49,7 +56,13 @@ def _copy_q_table(q_table):
 
 
 def make_robot_for_sim(sim_map):
-    rmap = rm.init_robot_map(sim_map["width"], sim_map["height"])
+    rmap = rm.init_robot_map(
+        sim_map["width"],
+        sim_map["height"],
+        goal=sim_map.get("goal"),
+        checkpoints=sim_map.get("checkpoints"),
+        start=sim_map.get("start"),
+    )
     sx, sy = sim_map["start"]
     return rb.make_robot(sx, sy, "N", rmap)
 
@@ -62,18 +75,24 @@ def eval_greedy_policy(sim_map, q_table, max_steps=None):
     """Chạy greedy từ start — cùng logic run_infer. Trả (được goal?, số bước)."""
     if max_steps is None:
         max_steps = _max_steps_for_map(sim_map)
-    rmap = rm.init_robot_map(sim_map["width"], sim_map["height"])
+    rmap = rm.init_robot_map(
+        sim_map["width"],
+        sim_map["height"],
+        goal=sim_map.get("goal"),
+        checkpoints=sim_map.get("checkpoints"),
+        start=sim_map.get("start"),
+    )
     bot = rb.make_robot(sim_map["start"][0], sim_map["start"][1], "N", rmap)
     _reset_episode_at_start(bot, sim_map)
     for step in range(1, max_steps + 1):
-        if sm.is_at_goal(sim_map, bot["x"], bot["y"]):
+        if _episode_at_goal(bot, sim_map):
             return True, step - 1
         s = rb.build_encoded_state(bot)
         a_name = get_policy(s, q_table)
         result = act.execute_action_sim(bot, sim_map, a_name)
         if result.get("collision"):
             return False, step
-        if sm.is_at_goal(sim_map, bot["x"], bot["y"]):
+        if _episode_at_goal(bot, sim_map):
             return True, step
     return False, max_steps
 
@@ -110,27 +129,6 @@ def _maybe_save_best(q, train_sims, eval_sims, label, best_q, best_label, best_s
     return best_q, best_label, best_steps, best_tier
 
 
-def _reward_facing_clear_toward_target(robot, sim_map):
-    """Thưởng nhẹ khi xoay xong: hướng mở và bước tiếp gần CP (chưa qua) / goal hơn."""
-    x, y = robot["x"], robot["y"]
-    d = robot["direct"]
-    if not sm.can_move(sim_map, x, y, d):
-        return 0.0
-    nx, ny = neighbor_xy(x, y, d)
-    visited = robot.get("cp_visited") or []
-    n_cp = sm.n_checkpoints(sim_map)
-    for i in range(n_cp):
-        if i < len(visited) and not visited[i]:
-            cur = sm.dist_to_checkpoints(sim_map, x, y)[i]
-            nxt = sm.dist_to_checkpoints(sim_map, nx, ny)[i]
-            if nxt < cur:
-                return R_FACING_CLEAR
-            return 0.0
-    if sm.dist_to_goal(sim_map, nx, ny) < sm.dist_to_goal(sim_map, x, y):
-        return R_FACING_CLEAR
-    return 0.0
-
-
 def _bump_node_visit(robot, moved):
     """Đếm lần forward tới ô (x,y) trong episode."""
     key = (robot["x"], robot["y"])
@@ -162,79 +160,6 @@ def _track_ping_pong(robot, moved):
     return count
 
 
-def compute_reward(robot, sim_map, result, action_name=None, could_forward_before=False):
-    r_collision = R_COLLISION if result.get("collision") else 0
-
-    rotated = (
-        result.get("success")
-        and not result.get("moved")
-        and not result.get("collision")
-    )
-    r_excess_rotate = (
-        R_COLLISION if robot.get("rotate_streak", 0) > MAX_ROTATE_STREAK else 0
-    )
-
-    moved = result.get("moved")
-    node_visits = _bump_node_visit(robot, moved)
-    r_revisit = R_COLLISION if node_visits > MAX_NODE_REVISITS else 0
-
-    ping_pong = _track_ping_pong(robot, moved)
-    r_ping_pong = R_COLLISION if ping_pong > MAX_PING_PONG_CYCLES else 0
-
-    trend = robot["dist_goal_trend"]
-    if moved and trend == 1:
-        r_goal_trend = R_GOAL_CLOSER
-    elif moved and trend == -1 and R_GOAL_FARTHER != 0:
-        r_goal_trend = R_GOAL_FARTHER
-    else:
-        r_goal_trend = 0
-
-    r_cp_trend = 0
-    n_cp = sm.n_checkpoints(sim_map)
-    visited = robot["cp_visited"]
-    if moved:
-        for i in range(n_cp):
-            if i < len(visited) and not visited[i]:
-                ct = robot["dist_cp_trend"][i]
-                if ct == 1:
-                    r_cp_trend = R_CP_CLOSER
-                elif ct == -1 and R_CP_FARTHER != 0:
-                    r_cp_trend = R_CP_FARTHER
-                break
-
-    r_checkpoint = 0
-    for i in range(n_cp):
-        if sm.is_at_checkpoint(sim_map, robot["x"], robot["y"], i):
-            if i < len(visited) and not visited[i]:
-                r_checkpoint = R_CHECKPOINT_FIRST
-                visited[i] = True
-                break
-
-    r_goal = R_GOAL_REACHED if sm.is_at_goal(sim_map, robot["x"], robot["y"]) else 0
-
-    r_rotate = R_ROTATE_IN_PLACE if rotated else 0
-    r_facing_clear = _reward_facing_clear_toward_target(robot, sim_map) if rotated else 0
-    r_wasted_rotate = R_WASTED_ROTATE if rotated and could_forward_before else 0
-    r_forward_clear = R_FORWARD_CLEAR if moved and not result.get("collision") else 0
-
-    r = (
-        R_STEP
-        + r_collision
-        + r_excess_rotate
-        + r_revisit
-        + r_ping_pong
-        + r_goal_trend
-        + r_cp_trend
-        + r_checkpoint
-        + r_goal
-        + r_rotate
-        + r_facing_clear
-        + r_wasted_rotate
-        + r_forward_clear
-    )
-    return r
-
-
 def q_update(q_table, s, action_idx, r, s_prime, done, alpha=0.3, gamma=0.95):
     row = q_table[s]
     target = r
@@ -252,7 +177,7 @@ def _reset_episode_at_start(robot, sim_map):
     sx, sy = sim_map["start"]
     robot["direct"] = "N"
     rb.update_position(robot, sx, sy)
-    rb.reset_cp_visited(robot, sm.n_checkpoints(sim_map))
+    rb.reset_cp_visited(robot, rm.n_checkpoints(robot["robot_map"]))
     robot["has_prev_node"] = False
     robot["dist_goal_trend"] = 0
     robot["dist_cp_trend"] = [0, 0, 0]
@@ -261,11 +186,7 @@ def _reset_episode_at_start(robot, sim_map):
     robot["pos_history"] = []
     robot["ping_pong_count"] = 0
     rb.clear_obstacle_memory(robot)
-    rb.inject_distances(
-        robot,
-        sm.dist_to_goal(sim_map, sx, sy),
-        sm.dist_to_checkpoints(sim_map, sx, sy),
-    )
+    rb.inject_distances_from_map(robot)
     rb.perceive_facing_from_sim(robot, sim_map)
 
 
@@ -288,7 +209,7 @@ def run_episode(
     for step in range(1, max_steps + 1):
         if should_stop and should_stop():
             break
-        if sm.is_at_goal(sim_map, robot["x"], robot["y"]):
+        if _episode_at_goal(robot, sim_map):
             reached_goal = True
             break
 
@@ -324,7 +245,7 @@ def run_episode(
             robot, sim_map, result, action_name=a_name, could_forward_before=could_fwd
         )
         collision = result.get("collision")
-        at_goal = sm.is_at_goal(sim_map, robot["x"], robot["y"])
+        at_goal = _episode_at_goal(robot, sim_map)
         q_update(q_table, s, _action_idx(a_name), r, s_prime, done=(collision or at_goal))
         total_r += r
         if collision and COLLISION_RESET:
@@ -347,9 +268,14 @@ def train_multi(
     step_wait=None,
     should_stop=None,
     initial_q=None,
+    map_mode="random",
+    sequential_plan=None,
 ):
-    """Train luân phiên nhiều map; export Q tốt nhất theo greedy eval (ưu tiên eval maps)."""
+    """Train nhiều map; map_mode='random' | 'sequential'. sequential_plan: [(sim, n_ep), ...]."""
     eval_sims = eval_sims or []
+    if not train_sims and not sequential_plan:
+        raise ValueError("Không có map train")
+
     if initial_q is not None:
         q = copy_q_table(initial_q)
         print("resume train from checkpoint (%d rows)" % len(q))
@@ -364,48 +290,84 @@ def train_multi(
     n_goal = 0
     episodes_done = 0
     stopped = False
-    if n_episodes > 0:
-        for ep in range(n_episodes):
-            if should_stop and should_stop():
-                stopped = True
-                print("Stopped by user at episode %d" % ep)
-                break
-            eps = epsilon_min + (epsilon - epsilon_min) * (1.0 - ep / max(n_episodes - 1, 1))
-            sim = random.choice(train_sims)
-            if on_episode_start:
-                on_episode_start(sim, ep, eps, n_episodes)
-            if should_stop and should_stop():
-                stopped = True
-                print("Stopped by user at episode %d" % ep)
-                break
-            bot = make_robot_for_sim(sim)
-            _, reached_goal = run_episode(
-                bot,
-                sim,
+
+    def _run_one_episode(sim, ep_index, eps, total_eps):
+        nonlocal n_goal, episodes_done, stopped, best_q, best_label, best_steps, best_tier
+        if should_stop and should_stop():
+            stopped = True
+            return False
+        if on_episode_start:
+            on_episode_start(sim, ep_index, eps, total_eps)
+        if should_stop and should_stop():
+            stopped = True
+            return False
+        bot = make_robot_for_sim(sim)
+        _, reached_goal = run_episode(
+            bot,
+            sim,
+            q,
+            epsilon=eps,
+            on_step=on_step,
+            step_wait=step_wait,
+            should_stop=should_stop,
+        )
+        episodes_done = ep_index + 1
+        if should_stop and should_stop():
+            stopped = True
+            return False
+        if reached_goal:
+            n_goal += 1
+            best_q, best_label, best_steps, best_tier = _maybe_save_best(
                 q,
-                epsilon=eps,
-                on_step=on_step,
-                step_wait=step_wait,
-                should_stop=should_stop,
+                train_sims,
+                eval_sims,
+                "episode %d" % ep_index,
+                best_q,
+                best_label,
+                best_steps,
+                best_tier,
             )
-            episodes_done = ep + 1
-            if should_stop and should_stop():
-                stopped = True
+        if ep_index % LOG_EVERY_EPISODES == 0:
+            tag = sim.get("name", "?")
+            if map_mode == "sequential":
+                print("episode", ep_index, "| epsilon %.3f | map %s (sequential)" % (eps, tag))
+            else:
+                print("episode", ep_index, "| epsilon %.3f | map random" % eps)
+        return True
+
+    if map_mode == "sequential" and sequential_plan:
+        total_eps = sum(n for _, n in sequential_plan)
+        if total_eps <= 0:
+            raise ValueError("Sequential plan: tổng episodes = 0")
+        print("train sequential: %d episodes on %d map(s)" % (total_eps, len(sequential_plan)))
+        for name, n_ep in [(s.get("name", "?"), n) for s, n in sequential_plan]:
+            print("  ", name, "→", n_ep, "episodes")
+        ep_global = 0
+        for sim, n_map_ep in sequential_plan:
+            if stopped:
                 break
-            if reached_goal:
-                n_goal += 1
-                best_q, best_label, best_steps, best_tier = _maybe_save_best(
-                    q,
-                    train_sims,
-                    eval_sims,
-                    "episode %d" % ep,
-                    best_q,
-                    best_label,
-                    best_steps,
-                    best_tier,
+            for _ in range(n_map_ep):
+                if stopped:
+                    break
+                eps = epsilon_min + (epsilon - epsilon_min) * (
+                    1.0 - ep_global / max(total_eps - 1, 1)
                 )
-            if ep % LOG_EVERY_EPISODES == 0:
-                print("episode", ep, "| epsilon %.3f | map random" % eps)
+                if not _run_one_episode(sim, ep_global, eps, total_eps):
+                    break
+                ep_global += 1
+        n_episodes = total_eps
+    else:
+        if n_episodes > 0:
+            print("train random: %d episodes on %d map(s)" % (n_episodes, len(train_sims)))
+            for ep in range(n_episodes):
+                if should_stop and should_stop():
+                    stopped = True
+                    print("Stopped by user at episode %d" % ep)
+                    break
+                eps = epsilon_min + (epsilon - epsilon_min) * (1.0 - ep / max(n_episodes - 1, 1))
+                sim = random.choice(train_sims)
+                if not _run_one_episode(sim, ep, eps, n_episodes):
+                    break
 
     if stopped:
         print("export policy: stopped early (current Q)")

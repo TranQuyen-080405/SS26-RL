@@ -17,10 +17,10 @@ def main():
     parser.add_argument(
         "--policy",
         default=None,
-        help="File .json trong Q_table/ (vd. policy.json); mặc định policy.json hoặc policy.bin",
+        help="File .bin trong Q_table/ (vd. policy.bin); mặc định policy.bin",
     )
     args = parser.parse_args()
-    run_infer(policy_json=args.policy)
+    run_infer(policy_bin=args.policy)
 
 
 if __name__ == "__main__":

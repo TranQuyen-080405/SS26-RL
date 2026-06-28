@@ -23,7 +23,7 @@ def main():
     parser.add_argument(
         "--checkpoint",
         default=None,
-        help="Tên trong Q_table/ (vd. policy) hoặc đường dẫn .json/.bin để train tiếp",
+        help="Tên trong Q_table/ (vd. policy) hoặc đường dẫn .bin để train tiếp",
     )
     args = parser.parse_args()
     run_train(n_episodes=args.episodes, checkpoint=args.checkpoint)

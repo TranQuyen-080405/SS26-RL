@@ -33,10 +33,19 @@ EDGE_HIT = 10
 
 
 class MapEditorApp:
-    def __init__(self):
-        self.root = tk.Tk()
-        self.root.title("SS26 Map Editor")
-        self.root.minsize(720, 560)
+    def __init__(self, parent=None, root=None, on_saved=None):
+        if parent is None:
+            self.root = tk.Tk()
+            self.root.title("SS26 Map Editor")
+            self.root.minsize(720, 560)
+            self.container = self.root
+            self._standalone = True
+        else:
+            self.root = root or parent.winfo_toplevel()
+            self.container = parent
+            self._standalone = False
+
+        self._on_saved = on_saved
 
         self.width = 10
         self.height = 10
@@ -55,7 +64,7 @@ class MapEditorApp:
         self.apply_size()
 
     def _build_toolbar(self):
-        bar = ttk.Frame(self.root, padding=8)
+        bar = ttk.Frame(self.container, padding=8)
         bar.pack(fill=tk.X)
 
         ttk.Label(bar, text="Width").grid(row=0, column=0, padx=(0, 4))
@@ -79,7 +88,7 @@ class MapEditorApp:
         ttk.Radiobutton(bar, text="train", variable=self.kind, value="train").grid(row=0, column=9)
         ttk.Radiobutton(bar, text="infer", variable=self.kind, value="infer").grid(row=0, column=10, padx=(0, 12))
 
-        row2 = ttk.Frame(self.root, padding=(8, 0, 8, 8))
+        row2 = ttk.Frame(self.container, padding=(8, 0, 8, 8))
         row2.pack(fill=tk.X)
 
         ttk.Label(row2, text="Start (x,y)").pack(side=tk.LEFT)
@@ -98,7 +107,7 @@ class MapEditorApp:
         ttk.Button(row2, text="Clear walls", command=self.clear_walls).pack(side=tk.RIGHT, padx=4)
 
     def _build_canvas(self):
-        wrap = ttk.Frame(self.root, padding=8)
+        wrap = ttk.Frame(self.container, padding=8)
         wrap.pack(fill=tk.BOTH, expand=True)
 
         self.canvas = tk.Canvas(wrap, bg="#1e1e2e", highlightthickness=0)
@@ -107,7 +116,7 @@ class MapEditorApp:
         self.canvas.bind("<Configure>", lambda e: self.redraw())
 
         hint = ttk.Label(
-            self.root,
+            self.container,
             text="Click cạnh giữa 2 ô để chặn / bỏ chặn. Góc map = tường cứng (biên).",
             padding=(8, 0),
         )
@@ -115,7 +124,7 @@ class MapEditorApp:
 
     def _build_status(self):
         self.status = tk.StringVar(value="Ready")
-        ttk.Label(self.root, textvariable=self.status, relief=tk.SUNKEN, anchor=tk.W, padding=4).pack(
+        ttk.Label(self.container, textvariable=self.status, relief=tk.SUNKEN, anchor=tk.W, padding=4).pack(
             fill=tk.X, side=tk.BOTTOM
         )
 
@@ -207,6 +216,11 @@ class MapEditorApp:
             return
         self.status.set("Saved: %s" % path)
         folder = "train" if self.kind.get() == "train" else "infer"
+        if self._on_saved:
+            try:
+                self._on_saved(self.kind.get(), path)
+            except Exception:
+                pass
         messagebox.showinfo("Saved", "Đã lưu vào map/%s/\n%s" % (folder, path))
 
     def load_json(self):
@@ -320,8 +334,12 @@ class MapEditorApp:
                     c.create_line(x1, y1, x2, y2, fill=color, width=width)
 
     def run(self):
-        self.root.mainloop()
+        if self._standalone:
+            self.root.mainloop()
 
 
-def run_app():
-    MapEditorApp().run()
+def run_app(parent=None, root=None, on_saved=None):
+    app = MapEditorApp(parent=parent, root=root, on_saved=on_saved)
+    if parent is None:
+        app.run()
+    return app

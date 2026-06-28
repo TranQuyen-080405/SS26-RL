@@ -18,6 +18,9 @@ from robot.robot_map import (
     get_node,
     get_obstacle_nwes,
     set_distances,
+    dist_to_goal,
+    dist_to_checkpoints,
+    is_at_goal as map_is_at_goal,
     perceive_edge as _perceive_edge,
 )
 
@@ -67,6 +70,17 @@ def inject_distances(robot, dist_goal, dist_cp_list):
     if node is None:
         return
     set_distances(node, dist_goal, dist_cp_list)
+
+
+def inject_distances_from_map(robot):
+    """Cập nhật dist trên node hiện tại từ goal/checkpoints lưu trong RobotMap."""
+    rmap = robot["robot_map"]
+    x, y = robot["x"], robot["y"]
+    inject_distances(robot, dist_to_goal(rmap, x, y), dist_to_checkpoints(rmap, x, y))
+
+
+def is_at_goal(robot):
+    return map_is_at_goal(robot["robot_map"], robot["x"], robot["y"])
 
 
 def compute_trends_after_move(robot):

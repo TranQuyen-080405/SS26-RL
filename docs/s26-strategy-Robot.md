@@ -3,7 +3,8 @@
 > Spec lớp Robot và các object liên quan trên **robot thật (ESP32)** và **simulation khi chạy policy**.  
 > Bám brainstorm [SS26 Planning Nhìn công](../SS26%20Planning%20Nhìn%20công.txt) (dòng 11–30).  
 > Phần train backward và SimMap ground truth: xem [s26-strategy-simMap.md](./s26-strategy-simMap.md).  
-> Phần Q-learning / reward: xem [ss26-strategy-RLtraining.md](./ss26-strategy-RLtraining.md).
+> Phần Q-learning / reward: xem [ss26-strategy-RLtraining.md](./ss26-strategy-RLtraining.md).  
+> **Triển khai firmware + BLE đang chạy:** [ss26-robot-runtime.md](./ss26-robot-runtime.md), [ss26-ble-pipeline.md](./ss26-ble-pipeline.md).
 
 ---
 

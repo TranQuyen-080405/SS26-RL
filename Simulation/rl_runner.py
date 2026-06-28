@@ -35,14 +35,25 @@ def run_train(
     step_wait=None,
     should_stop=None,
     checkpoint=None,
+    train_map_mode="random",
+    train_sims=None,
+    sequential_plan=None,
 ):
     from robot import trainer
     from robot.policy_io import resolve_checkpoint
     from RL_lib import rl_core
 
-    train_sims, eval_sims, train_paths, infer_paths = load_train_and_eval_maps()
+    all_train_sims, eval_sims, train_paths, infer_paths = load_train_and_eval_maps()
+    if train_sims is not None:
+        train_sims = list(train_sims)
+    else:
+        train_sims = all_train_sims
+    if not train_sims:
+        raise FileNotFoundError("Không có map train được chọn")
+
     print("N_ROWS train:", rl_core.N_ROWS)
-    print("train maps (%d):" % len(train_paths), [s.get("name") for s in train_sims])
+    print("train maps (%d):" % len(train_sims), [s.get("name") for s in train_sims])
+    print("train map mode:", train_map_mode)
     if infer_paths:
         print("eval maps (%d):" % len(infer_paths), [s.get("name") for s in eval_sims])
     else:
@@ -63,8 +74,10 @@ def run_train(
         step_wait=step_wait,
         should_stop=should_stop,
         initial_q=initial_q,
+        map_mode=train_map_mode,
+        sequential_plan=sequential_plan,
     )
-    print("exported Q_table/policy.json + Q_table/policy.bin")
+    print("exported Q_table/policy.bin")
     if result.get("stopped"):
         print("========train stopped — Q_table updated=========")
     else:
@@ -78,29 +91,35 @@ def load_policy():
     return load_q_table()
 
 
-def load_policy_for_infer(policy_json=None):
-    """Nạp Q-table cho infer; mặc định ưu tiên .bin rồi .json. Truyền policy_json để đọc file .json cụ thể."""
-    from robot.policy_io import (
-        DEFAULT_POLICY_BIN,
-        DEFAULT_POLICY_JSON,
-        load_policy_json,
-        load_q_table,
-        policy_json_path,
-    )
+def load_policy_for_infer(policy_bin=None):
+    """Nạp Q-table cho infer từ .bin."""
+    from robot.policy_io import DEFAULT_POLICY_BIN, load_policy_bin, load_q_table, policy_bin_path
 
-    if policy_json:
-        path = policy_json if os.path.isabs(policy_json) else policy_json_path(policy_json)
-        return load_policy_json(path), path
+    if policy_bin:
+        path = policy_bin if os.path.isabs(policy_bin) else policy_bin_path(policy_bin)
+        if not os.path.isfile(path):
+            return None, path
+        return load_policy_bin(path), path
 
     q = load_q_table()
     if q is None:
         return None, None
-    path = DEFAULT_POLICY_BIN if os.path.isfile(DEFAULT_POLICY_BIN) else DEFAULT_POLICY_JSON
-    return q, path
+    return q, DEFAULT_POLICY_BIN
+
+
+def _robot_map_from_sim(sim_map):
+    from robot import robot_map as rm
+
+    return rm.init_robot_map(
+        sim_map["width"],
+        sim_map["height"],
+        goal=sim_map.get("goal"),
+        checkpoints=sim_map.get("checkpoints"),
+        start=sim_map.get("start"),
+    )
 
 
 def _reset_at_start(robot, sim_map):
-    from map import sim_map as sm
     from robot import robot as rb
 
     sx, sy = sim_map["start"]
@@ -111,29 +130,33 @@ def _reset_at_start(robot, sim_map):
     robot["dist_cp_trend"] = [0, 0, 0]
     robot["rotate_streak"] = 0
     rb.clear_obstacle_memory(robot)
-    rb.inject_distances(
-        robot,
-        sm.dist_to_goal(sim_map, sx, sy),
-        sm.dist_to_checkpoints(sim_map, sx, sy),
-    )
+    rb.inject_distances_from_map(robot)
     rb.perceive_facing_from_sim(robot, sim_map)
+
+
+def _episode_at_goal(robot, sim_map):
+    """Chạm goal → kết thúc episode (runtime, không phụ thuộc reward config)."""
+    from map import sim_map as sm
+    from robot import robot as rb
+
+    if sm.is_at_goal(sim_map, robot["x"], robot["y"]):
+        return True
+    return rb.is_at_goal(robot)
 
 
 def run_infer_episode(sim_map, q_table, max_steps=MAX_STEPS_INFER, verbose=True, on_step=None):
     """Chạy policy thuần (argmax Q). Trả dict status, steps, log."""
     from RL_lib.rl_core import get_policy
-    from map import sim_map as sm
-    from robot import robot_map as rm
     from robot import robot as rb
     from robot import action as act
 
-    rmap = rm.init_robot_map(sim_map["width"], sim_map["height"])
+    rmap = _robot_map_from_sim(sim_map)
     bot = rb.make_robot(sim_map["start"][0], sim_map["start"][1], "N", rmap)
     _reset_at_start(bot, sim_map)
     log = []
 
     for step in range(1, max_steps + 1):
-        if sm.is_at_goal(sim_map, bot["x"], bot["y"]):
+        if _episode_at_goal(bot, sim_map):
             if verbose:
                 print("GOAL — tới đích sau %d bước." % (step - 1))
             return {"status": "goal", "steps": step - 1, "log": log}
@@ -167,7 +190,7 @@ def run_infer_episode(sim_map, q_table, max_steps=MAX_STEPS_INFER, verbose=True,
                 print("COLLISION — dừng infer (forward đụng tường / mép map).")
             return {"status": "collision", "steps": step, "log": log}
 
-        if sm.is_at_goal(sim_map, bot["x"], bot["y"]):
+        if _episode_at_goal(bot, sim_map):
             if verbose:
                 print("GOAL — tới đích sau %d bước." % step)
             return {"status": "goal", "steps": step, "log": log}
@@ -182,24 +205,24 @@ def run_infer_episode_for_map(
     max_steps=MAX_STEPS_INFER,
     verbose=True,
     on_step=None,
-    policy_json=None,
+    policy_bin=None,
 ):
     """Nạp map + policy, chạy một episode infer."""
     from map.map_io import build_sim_map_from_file
 
-    q, _policy_path = load_policy_for_infer(policy_json)
+    q, _policy_path = load_policy_for_infer(policy_bin)
     if not q:
-        raise FileNotFoundError("Không tìm thấy policy — chạy train trước hoặc chọn file .json.")
+        raise FileNotFoundError("Không tìm thấy policy — chạy train trước hoặc chọn file .bin.")
     sim = build_sim_map_from_file(map_path)
     return sim, run_infer_episode(sim, q, max_steps=max_steps, verbose=verbose, on_step=on_step)
 
 
-def run_infer(map_path=None, max_steps=MAX_STEPS_INFER, verbose=True, policy_json=None):
+def run_infer(map_path=None, max_steps=MAX_STEPS_INFER, verbose=True, policy_bin=None):
     from map.map_io import list_map_files, build_sim_map_from_file
 
-    q, policy_path = load_policy_for_infer(policy_json)
+    q, policy_path = load_policy_for_infer(policy_bin)
     if not q:
-        print("Không tìm thấy policy — chạy train trước hoặc chọn file .json.")
+        print("Không tìm thấy policy — chạy train trước hoặc chọn file .bin.")
         return None
 
     if map_path is None:

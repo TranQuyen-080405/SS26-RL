@@ -1,34 +1,746 @@
 #!/usr/bin/env python3
-"""Mở UI Train / Infer — map đọc từ map/train/ và map/infer/."""
+"""
+SS26-RL — ứng dụng PC thống nhất (4 tab):
+  1. Tạo map
+  2. Train / Infer
+  3. State & Reward (Learn Lab)
+  4. Robot Monitor (BLE)
+"""
 
+import asyncio
+import json
 import os
 import sys
+import threading
+import tkinter as tk
+from tkinter import ttk, scrolledtext, messagebox
 
 _ROOT = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, _ROOT)
-sys.path.insert(0, os.path.join(_ROOT, "Simulation"))
+_SIM = os.path.join(_ROOT, "Simulation")
+if _ROOT not in sys.path:
+    sys.path.insert(0, _ROOT)
+if _SIM not in sys.path:
+    sys.path.insert(0, _SIM)
+
+try:
+    from bleak import BleakClient, BleakScanner
+    from bleak.exc import BleakError, BleakCharacteristicNotFoundError
+except ImportError:
+    BleakClient = None
+    BleakScanner = None
+    BleakError = Exception
+    BleakCharacteristicNotFoundError = Exception
+
+SERVICE_UUID = "6e400001-b5a3-f393-e0a9-e50e24dcca9e"
+TX_CHAR_UUID = "6e400003-b5a3-f393-e0a9-e50e24dcca9e"
+RX_CHAR_UUID = "6e400002-b5a3-f393-e0a9-e50e24dcca9e"
+_STD_SVC = ("00001800", "00001801", "0000180a")
+
+MAP_W = 10
+MAP_H = 10
+MAP_START = (0, 0)
+MAP_GOAL = (MAP_W - 1, MAP_H - 1)
+
+CELL = 44
+MARGIN = 24
+_DIR_ARROW = {"N": (0, -10), "E": (10, 0), "S": (0, 10), "W": (-10, 0)}
+
+
+# --- Robot Monitor (BLE) ---
+
+
+_PHASE_LABEL = {
+    "i": "Idle (chờ Start)",
+    "r": "Đang infer",
+    "g": "Goal",
+    "c": "Collision",
+}
+
+
+class MonitorMapModel:
+    def __init__(self):
+        self.w = MAP_W
+        self.h = MAP_H
+        self.start = MAP_START
+        self.goal = MAP_GOAL
+        self.x = MAP_START[0]
+        self.y = MAP_START[1]
+        self.d = "N"
+        self.phase = "i"
+        self.step = 0
+        self.last_action = ""
+        self.walls = set()
+        self._init_boundary_walls()
+
+    def _init_boundary_walls(self):
+        self.walls.clear()
+        for y in range(self.h):
+            self.walls.add((0, y, "W"))
+            self.walls.add((self.w - 1, y, "E"))
+        for x in range(self.w):
+            self.walls.add((x, 0, "S"))
+            self.walls.add((x, self.h - 1, "N"))
+
+    def reset_robot(self):
+        self.x, self.y = self.start
+        self.d = "N"
+        self.phase = "i"
+        self.step = 0
+        self.last_action = ""
+
+    def apply_ble(self, msg):
+        if not msg:
+            return
+        prev_phase = self.phase
+        if "x" in msg:
+            self.x = int(msg["x"])
+        if "y" in msg:
+            self.y = int(msg["y"])
+        if "d" in msg:
+            self.d = str(msg["d"])
+        if "p" in msg:
+            self.phase = str(msg["p"])
+        if "n" in msg:
+            self.step = int(msg["n"])
+        if "a" in msg:
+            self.last_action = str(msg["a"])
+        if "walls" in msg:
+            self.walls.clear()
+            self._init_boundary_walls()
+            for item in msg["walls"]:
+                if not item or len(item) < 3:
+                    continue
+                self.walls.add((int(item[0]), int(item[1]), str(item[2])))
+        return prev_phase
+
+    def phase_label(self):
+        return _PHASE_LABEL.get(self.phase, self.phase)
+
+    def wall_count(self):
+        return len(self.walls)
+
+    def robot_pos(self):
+        return (self.x, self.y)
+
+
+def _ble_display_name(device, adv=None):
+    name = ""
+    if adv is not None:
+        name = (getattr(adv, "local_name", None) or "").strip()
+    if not name:
+        name = (device.name or "").strip()
+    return name or "(khong ten)"
+
+
+def _gatt_summary(client):
+    lines = []
+    for svc in client.services:
+        lines.append("svc %s" % svc.uuid)
+        for ch in svc.characteristics:
+            lines.append("  ch %s props=%s" % (ch.uuid, ",".join(ch.properties)))
+    return "\n".join(lines) if lines else "(khong co service)"
+
+
+def _is_std_service(uuid_str):
+    u = uuid_str.lower().replace("-", "")
+    return any(u.startswith(s) for s in _STD_SVC)
+
+
+def _find_io_chars(client):
+    nus_tx = client.services.get_characteristic(TX_CHAR_UUID)
+    nus_rx = client.services.get_characteristic(RX_CHAR_UUID)
+    if nus_tx and nus_rx:
+        return nus_tx, nus_rx
+
+    tx_char = None
+    rx_char = None
+    for svc in client.services:
+        if _is_std_service(svc.uuid):
+            continue
+        for ch in svc.characteristics:
+            props = set(ch.properties)
+            if tx_char is None and ("notify" in props or "indicate" in props):
+                tx_char = ch
+            if rx_char is None and ("write" in props or "write-without-response" in props):
+                rx_char = ch
+    if tx_char and rx_char:
+        return tx_char, rx_char
+
+    for ch in client.services.characteristics.values():
+        props = set(ch.properties)
+        if tx_char is None and ("notify" in props or "indicate" in props):
+            tx_char = ch
+        if rx_char is None and ("write" in props or "write-without-response" in props):
+            rx_char = ch
+    return tx_char, rx_char
+
+
+def _has_io_chars(client):
+    tx, rx = _find_io_chars(client)
+    return tx is not None and rx is not None
+
+
+async def _force_rescan_gatt(client):
+    backend = getattr(client, "_backend", None)
+    if backend is None or not hasattr(backend, "_get_services"):
+        return False
+    try:
+        from winsdk.windows.devices.bluetooth import BluetoothCacheMode
+
+        backend.services = None
+        client.services = await backend._get_services(
+            service_cache_mode=BluetoothCacheMode.UNCACHED,
+            cache_mode=BluetoothCacheMode.UNCACHED,
+        )
+        return _has_io_chars(client)
+    except Exception:
+        return False
+
+
+class RobotMapCanvas:
+    def __init__(self, parent):
+        self.frame = ttk.Frame(parent)
+        self.canvas = tk.Canvas(self.frame, bg="#1e1e2e", highlightthickness=0)
+        self.canvas.pack(fill=tk.BOTH, expand=True)
+        self.model = MonitorMapModel()
+        self.path = []
+        self.info_var = tk.StringVar(value="Map %dx%d — cho du lieu tu robot." % (MAP_W, MAP_H))
+        ttk.Label(self.frame, textvariable=self.info_var, anchor=tk.W).pack(fill=tk.X, pady=(4, 0))
+        self.redraw()
+
+    def pack(self, **kwargs):
+        self.frame.pack(**kwargs)
+
+    def cell_px(self, x, y, h):
+        px = MARGIN + x * CELL
+        py = MARGIN + (h - 1 - y) * CELL
+        return px, py
+
+    def cell_center(self, x, y, h):
+        px, py = self.cell_px(x, y, h)
+        return px + CELL // 2, py + CELL // 2
+
+    def apply_ble(self, msg):
+        prev_phase = self.model.apply_ble(msg)
+        pos = self.model.robot_pos()
+        if self.model.phase == "r" and self.model.step == 1 and prev_phase != "r":
+            self.path = [pos]
+        elif not self.path or self.path[-1] != pos:
+            self.path.append(pos)
+        gx, gy = self.model.goal
+        parts = []
+        if self.model.step:
+            parts.append("bước %d" % self.model.step)
+        if self.model.last_action:
+            parts.append(self.model.last_action)
+        extra = (" | " + " | ".join(parts)) if parts else ""
+        self.info_var.set(
+            "[%s] Robot (%d,%d) %s | goal (%d,%d)%s"
+            % (self.model.phase_label(), self.model.x, self.model.y, self.model.d, gx, gy, extra)
+        )
+        self.redraw()
+
+    def reset_to_start(self):
+        self.model.reset_robot()
+        self.path = [self.model.robot_pos()]
+        self.redraw()
+
+    def reset_path(self):
+        self.path = [self.model.robot_pos()]
+        self.redraw()
+
+    def redraw(self):
+        c = self.canvas
+        c.delete("all")
+        m = self.model
+        w, h = m.w, m.h
+        start, goal = m.start, m.goal
+
+        cw = max(w * CELL + 2 * MARGIN, 200)
+        ch = max(h * CELL + 2 * MARGIN, 200)
+        c.config(scrollregion=(0, 0, cw, ch))
+
+        for y in range(h):
+            for x in range(w):
+                px, py = self.cell_px(x, y, h)
+                fill = "#313244"
+                if (x, y) == start:
+                    fill = "#a6e3a1"
+                elif (x, y) == goal:
+                    fill = "#f38ba8"
+                c.create_rectangle(px, py, px + CELL, py + CELL, fill=fill, outline="#45475a")
+                c.create_text(px + CELL // 2, py + CELL // 2, text="%d,%d" % (x, y), fill="#6c7086", font=("", 7))
+
+        for y in range(h):
+            for x in range(w):
+                px, py = self.cell_px(x, y, h)
+                for d, x1, y1, x2, y2 in [
+                    ("N", px, py, px + CELL, py),
+                    ("E", px + CELL, py, px + CELL, py + CELL),
+                    ("S", px, py + CELL, px + CELL, py + CELL),
+                    ("W", px, py, px, py + CELL),
+                ]:
+                    is_wall = (x, y, d) in m.walls
+                    color = "#f38ba8" if is_wall else "#585b70"
+                    width = 5 if is_wall else 2
+                    c.create_line(x1, y1, x2, y2, fill=color, width=width)
+
+        if self.path:
+            pts = [self.cell_center(self.path[0][0], self.path[0][1], h)]
+            for x, y in self.path[1:]:
+                pts.append(self.cell_center(x, y, h))
+            for i in range(len(pts) - 1):
+                c.create_line(pts[i][0], pts[i][1], pts[i + 1][0], pts[i + 1][1], fill="#89b4fa", width=3)
+
+        cx, cy = self.cell_center(m.x, m.y, h)
+        r = CELL // 4
+        c.create_oval(cx - r, cy - r, cx + r, cy + r, fill="#cba6f7", outline="#cdd6f4", width=2)
+        dx, dy = _DIR_ARROW.get(m.d, (0, -10))
+        c.create_line(cx, cy, cx + dx, cy + dy, fill="#1e1e2e", width=3, arrow=tk.LAST, arrowshape=(8, 10, 4))
+
+
+class RobotMonitorApp:
+    def __init__(self, parent=None, root=None):
+        if parent is None:
+            self.root = tk.Tk()
+            self.root.title("SS26 Robot Monitor — BLE")
+            self.root.geometry("1100x640")
+            self.root.minsize(800, 480)
+            self.container = self.root
+            self._standalone = True
+        else:
+            self.root = root or parent.winfo_toplevel()
+            self.container = parent
+            self._standalone = False
+
+        if BleakScanner is None:
+            messagebox.showerror("BLE", "Cần cài bleak: pip install bleak")
+            if self._standalone:
+                sys.exit(1)
+            return
+
+        self._devices = []
+        self._address = None
+        self._connected = False
+        self._stop_ble = threading.Event()
+        self._ble_thread = None
+        self._client = None
+        self._rx_char = None
+        self._tx_buf = ""
+        self._start_infer_event = threading.Event()
+        self._infer_running = False
+        self._build_ui()
+
+    def _build_ui(self):
+        bar = ttk.Frame(self.container, padding=8)
+        bar.pack(fill=tk.X)
+
+        ttk.Label(bar, text="Device").pack(side=tk.LEFT, padx=(0, 4))
+        self.device_var = tk.StringVar(value="(chưa quét)")
+        self.combo_device = ttk.Combobox(bar, textvariable=self.device_var, width=36, state="readonly")
+        self.combo_device.pack(side=tk.LEFT, padx=(0, 8))
+
+        ttk.Button(bar, text="Quét BLE", command=self.scan_devices).pack(side=tk.LEFT, padx=2)
+        self.btn_connect = ttk.Button(bar, text="Kết nối", command=self.toggle_connect)
+        self.btn_connect.pack(side=tk.LEFT, padx=2)
+        self.btn_start = ttk.Button(bar, text="Start infer", command=self.request_start_infer, state=tk.DISABLED)
+        self.btn_start.pack(side=tk.LEFT, padx=2)
+        ttk.Button(bar, text="Xóa log", command=self.clear_log).pack(side=tk.LEFT, padx=2)
+        ttk.Button(bar, text="Reset path", command=self.reset_path).pack(side=tk.LEFT, padx=2)
+
+        self.infer_var = tk.StringVar(value="Infer: chưa chạy")
+        ttk.Label(bar, textvariable=self.infer_var, width=28).pack(side=tk.LEFT, padx=(8, 0))
+
+        self.status_var = tk.StringVar(
+            value="Quét BLE → chọn thiết bị → Kết nối → Start infer (tương đương Robot_embbed/main.py)."
+        )
+        ttk.Label(bar, textvariable=self.status_var).pack(side=tk.LEFT, padx=12)
+
+        paned = ttk.Panedwindow(self.container, orient=tk.HORIZONTAL)
+        paned.pack(fill=tk.BOTH, expand=True, padx=8, pady=(0, 8))
+
+        log_frame = ttk.LabelFrame(paned, text="Terminal robot (print)", padding=4)
+        self.log = scrolledtext.ScrolledText(
+            log_frame,
+            wrap=tk.WORD,
+            font=("Consolas", 10),
+            bg="#11111b",
+            fg="#cdd6f4",
+            insertbackground="#cdd6f4",
+        )
+        self.log.pack(fill=tk.BOTH, expand=True)
+        self.log.configure(state=tk.DISABLED)
+
+        map_frame = ttk.LabelFrame(paned, text="Robot map (từ BLE)", padding=4)
+        self.map_view = RobotMapCanvas(map_frame)
+        self.map_view.pack(fill=tk.BOTH, expand=True)
+
+        paned.add(log_frame, weight=1)
+        paned.add(map_frame, weight=1)
+
+    def append_log(self, text):
+        self.log.configure(state=tk.NORMAL)
+        self.log.insert(tk.END, text)
+        self.log.see(tk.END)
+        self.log.configure(state=tk.DISABLED)
+
+    def clear_log(self):
+        self.log.configure(state=tk.NORMAL)
+        self.log.delete("1.0", tk.END)
+        self.log.configure(state=tk.DISABLED)
+
+    def reset_path(self):
+        self.map_view.reset_path()
+
+    def _selected_address(self):
+        sel = self.combo_device.current()
+        if sel < 0 or sel >= len(self._devices):
+            return None
+        return self._devices[sel][0]
+
+    def scan_devices(self):
+        if self._connected:
+            messagebox.showinfo("BLE", "Ngắt kết nối trước khi quét lại.")
+            return
+        self.status_var.set("Đang quét BLE...")
+        threading.Thread(target=self._scan_thread, daemon=True).start()
+
+    def _scan_thread(self):
+        async def _scan():
+            found = []
+            results = await BleakScanner.discover(timeout=10.0, return_adv=True)
+            for _addr, (d, ad) in results.items():
+                name = _ble_display_name(d, ad)
+                found.append((d.address, name))
+            found.sort(key=lambda x: (x[1].lower(), x[0]))
+            return found
+
+        try:
+            found = asyncio.run(_scan())
+        except Exception as exc:
+            err = exc
+            self.root.after(0, lambda e=err: self.status_var.set("Lỗi quét: %s" % e))
+            return
+
+        def _update():
+            self._devices = found
+            labels = ["%s  [%s]" % (name, addr) for addr, name in found]
+            self.combo_device["values"] = labels
+            if labels:
+                self.combo_device.current(0)
+                self._address = found[0][0]
+                self.status_var.set("Tìm thấy %d thiết bị — bấm Kết nối." % len(labels))
+            else:
+                self._address = None
+                self.status_var.set("Khong thay thiet bi BLE nao — bat Bluetooth / bat robot.")
+
+        self.root.after(0, _update)
+
+    def toggle_connect(self):
+        if self._connected:
+            self.disconnect()
+        else:
+            addr = self._selected_address()
+            if not addr:
+                messagebox.showwarning("BLE", "Quét và chọn thiết bị trước.")
+                return
+            self._address = addr
+            self.connect()
+
+    def connect(self):
+        if not self._address or self._ble_thread:
+            return
+        self._stop_ble.clear()
+        self._start_infer_event.clear()
+        self._ble_thread = threading.Thread(target=self._ble_loop, daemon=True)
+        self._ble_thread.start()
+        self.btn_connect.configure(text="Ngắt")
+        self.status_var.set("Đang kết nối %s..." % self._address)
+
+    def disconnect(self):
+        self._stop_ble.set()
+        self._start_infer_event.set()
+        self._connected = False
+        self._client = None
+        self._rx_char = None
+        self._tx_buf = ""
+        self.btn_connect.configure(text="Kết nối")
+        self.btn_start.configure(state=tk.DISABLED)
+        self.status_var.set("Đã ngắt kết nối.")
+        self._set_infer_status("Infer: chưa kết nối", running=False)
+        if self._ble_thread:
+            self._ble_thread.join(timeout=3.0)
+            self._ble_thread = None
+
+    def _set_infer_status(self, text, running=None):
+        self.infer_var.set(text)
+        if running is not None:
+            self._infer_running = running
+            if running:
+                self.btn_start.configure(state=tk.DISABLED)
+            elif self._connected:
+                self.btn_start.configure(state=tk.NORMAL)
+
+    def _handle_ble_state(self, state):
+        self.map_view.apply_ble(state)
+        phase = state.get("p", "")
+        if phase == "r":
+            self._set_infer_status("Infer: đang chạy (bước %d)" % state.get("n", 0), running=True)
+        elif phase == "g":
+            self._set_infer_status("Infer: GOAL ✓", running=False)
+        elif phase == "c":
+            self._set_infer_status("Infer: dừng (collision)", running=False)
+        elif phase == "i":
+            if not self._infer_running:
+                self._set_infer_status("Infer: idle — bấm Start infer", running=False)
+
+    def _handle_ble_log(self, text):
+        self.append_log(text)
+        line = text.strip()
+        if "RX START" in line:
+            self.status_var.set("Robot đã nhận lệnh Start...")
+        elif "START OK" in line or "infer loop" in line:
+            self._set_infer_status("Infer: đang chạy", running=True)
+            self.status_var.set("Robot đã bắt đầu infer.")
+        elif line.startswith("GOAL"):
+            self._set_infer_status("Infer: GOAL ✓", running=False)
+
+    def request_start_infer(self):
+        if not self._connected:
+            messagebox.showwarning("BLE", "Kết nối robot trước.")
+            return
+        self._start_infer_event.set()
+        self._set_infer_status("Infer: đang gửi Start...", running=False)
+        self.status_var.set("Đã gửi lệnh Start infer — chờ robot phản hồi...")
+
+    def _on_tx_notify(self, _handle, data):
+        try:
+            chunk = bytes(data).decode("utf-8", errors="replace")
+        except Exception:
+            return
+        self._tx_buf += chunk
+        while "\n" in self._tx_buf:
+            line, self._tx_buf = self._tx_buf.split("\n", 1)
+            if not line:
+                continue
+            if line.startswith("S:"):
+                try:
+                    state = json.loads(line[2:])
+                except Exception as exc:
+                    bad = line[:80]
+                    self.root.after(
+                        0,
+                        lambda e=exc, b=bad: self.append_log("L:[parse err] %s | %s...\n" % (e, b)),
+                    )
+                    continue
+                self.root.after(0, lambda s=state: self._handle_ble_state(s))
+            elif line.startswith("L:"):
+                text = line[2:] + "\n"
+                self.root.after(0, lambda t=text: self._handle_ble_log(t))
+            else:
+                text = line + "\n"
+                self.root.after(0, lambda t=text: self._handle_ble_log(t))
+
+    async def _write_rx(self, client, payload):
+        if self._rx_char is None:
+            raise BleakError("Chua tim thay RX characteristic")
+        await client.write_gatt_char(self._rx_char, payload, response=False)
+
+    async def _send_start(self, client):
+        await self._write_rx(client, b"S")
+
+    async def _wait_io_gatt(self, client, timeout=12.0):
+        steps = max(1, int(timeout / 0.35))
+        rescanned = False
+        for i in range(steps):
+            if not client.is_connected:
+                return False
+            if _has_io_chars(client):
+                return True
+            if not rescanned and i >= 2:
+                rescanned = await _force_rescan_gatt(client)
+            await asyncio.sleep(0.35)
+        if not rescanned:
+            await _force_rescan_gatt(client)
+        return _has_io_chars(client)
+
+    async def _connect_with_gatt(self, device):
+        last_err = None
+        for attempt, use_cache in enumerate((False, True)):
+            client = BleakClient(device, timeout=45.0, winrt={"use_cached_services": use_cache})
+            try:
+                await client.connect()
+                if not client.is_connected:
+                    raise BleakError("Ket noi that bai")
+                if await self._wait_io_gatt(client):
+                    return client
+                detail = _gatt_summary(client)
+                raise BleakError(
+                    "Khong thay TX(notify)+RX(write). GATT:\n"
+                    + detail
+                    + "\n--- Xoa thiet bi cu trong Bluetooth Windows, upload ble_monitor.py len robot."
+                )
+            except Exception as exc:
+                last_err = exc
+                if client.is_connected:
+                    try:
+                        await client.disconnect()
+                    except Exception:
+                        pass
+                if attempt == 0:
+                    await asyncio.sleep(1.5)
+        raise last_err or BleakError("Khong ket noi duoc GATT")
+
+    def _ble_loop(self):
+        async def _run():
+            client = None
+            try:
+                device = await BleakScanner.find_device_by_address(self._address, timeout=15.0, adv=True)
+                if device is None:
+                    raise BleakError("Khong tim thay %s — quet lai roi ket noi ngay." % self._address)
+
+                self._tx_buf = ""
+                client = await self._connect_with_gatt(device)
+                self.root.after(0, lambda a=device.address: self.append_log("Ket noi MAC: %s\n" % a))
+
+                tx_char, rx_char = _find_io_chars(client)
+                if not tx_char or not rx_char:
+                    detail = _gatt_summary(client)
+                    self.root.after(0, lambda d=detail: self.append_log("GATT:\n" + d + "\n"))
+                    raise BleakError("Thieu TX/RX.")
+
+                await client.start_notify(tx_char, self._on_tx_notify)
+
+                self._client = client
+                self._rx_char = rx_char
+                self._connected = True
+                self.root.after(0, lambda: self.map_view.reset_to_start())
+                self.root.after(0, lambda: self._set_infer_status("Infer: idle — bấm Start infer", running=False))
+                self.root.after(
+                    0,
+                    lambda: (
+                        self.status_var.set("Da ket noi — bam Start infer hoac nut board."),
+                        self.btn_start.configure(state=tk.NORMAL),
+                    ),
+                )
+
+                while not self._stop_ble.is_set():
+                    if not client.is_connected:
+                        break
+                    if self._start_infer_event.is_set():
+                        self._start_infer_event.clear()
+                        try:
+                            await self._send_start(client)
+                            self.root.after(
+                                0,
+                                lambda: self.status_var.set("Lenh Start infer da gui — cho robot phan hoi..."),
+                            )
+                        except Exception as exc:
+                            self.root.after(0, lambda e=exc: self.status_var.set("Loi gui Start: %s" % e))
+                    await asyncio.sleep(0.15)
+
+            except BleakCharacteristicNotFoundError as exc:
+                hint = "Upload lai ble_monitor.py len robot, xoa thiet bi cu trong Bluetooth Windows."
+                err, h = exc, hint
+                self.root.after(0, lambda e=err, t=h: self.status_var.set("BLE loi: %s. %s" % (e, t)))
+            except Exception as exc:
+                msg = str(exc)
+                hint = ""
+                if "Unreachable" in msg or "GATT services" in msg:
+                    hint = " — reset robot, xoa thiet bi cu trong Bluetooth Windows."
+                m, h = msg, hint
+                self.root.after(0, lambda t=m, x=h: self.status_var.set("BLE loi: %s%s" % (t, x)))
+            finally:
+                self._connected = False
+                self._client = None
+                self._rx_char = None
+                self._tx_buf = ""
+                if client and client.is_connected:
+                    try:
+                        await client.disconnect()
+                    except Exception:
+                        pass
+                self.root.after(
+                    0,
+                    lambda: (
+                        self.btn_connect.configure(text="Kết nối"),
+                        self.btn_start.configure(state=tk.DISABLED),
+                    ),
+                )
+                self._ble_thread = None
+
+        asyncio.run(_run())
+
+    def run(self):
+        if self._standalone:
+            self.root.mainloop()
+
+
+# --- App shell (3 tab) ---
+
+
+class SS26App:
+    def __init__(self, initial_tab=0):
+        self.root = tk.Tk()
+        self.root.title("SS26-RL")
+        self.root.geometry("1200x720")
+        self.root.minsize(900, 560)
+
+        self._monitor = None
+        self._build_ui(initial_tab)
+        self.root.protocol("WM_DELETE_WINDOW", self._on_close)
+
+    def _build_ui(self, initial_tab):
+        nb = ttk.Notebook(self.root)
+        nb.pack(fill=tk.BOTH, expand=True)
+
+        tab_map = ttk.Frame(nb)
+        tab_rl = ttk.Frame(nb)
+        tab_lab = ttk.Frame(nb)
+        tab_robot = ttk.Frame(nb)
+
+        nb.add(tab_map, text="Tạo map")
+        nb.add(tab_rl, text="Train / Infer")
+        nb.add(tab_lab, text="State & Reward")
+        nb.add(tab_robot, text="Robot Monitor")
+
+        from Ui_app.create_map_UI import MapEditorApp
+        from Ui_app.rl_app_UI import RlApp
+        from Ui_app.learn_lab_UI import LearnLabApp
+
+        self.rl_app = RlApp(parent=tab_rl, root=self.root)
+        MapEditorApp(parent=tab_map, root=self.root, on_saved=self.rl_app.notify_map_saved)
+        LearnLabApp(parent=tab_lab, root=self.root)
+        self._monitor = RobotMonitorApp(parent=tab_robot, root=self.root)
+
+        if 0 <= initial_tab < 4:
+            nb.select(initial_tab)
+
+    def _on_close(self):
+        if self._monitor is not None:
+            try:
+                self._monitor.disconnect()
+            except Exception:
+                pass
+        self.root.destroy()
+
+    def run(self):
+        self.root.mainloop()
+
+
+def run_app(initial_tab=0):
+    SS26App(initial_tab=initial_tab).run()
 
 
 def main():
-    from Ui_app.rl_app_UI import run_app
+    from map.map_io import MAP_ROOT, TRAIN_MAPS_DIR, INFER_MAPS_DIR, list_map_files
 
-    run_app()
+    print("SS26-RL app")
+    print("MAP_ROOT:", MAP_ROOT)
+    print("  train:", len(list_map_files("train")), "file(s) ->", TRAIN_MAPS_DIR)
+    print("  infer:", len(list_map_files("infer")), "file(s) ->", INFER_MAPS_DIR)
+    run_app(initial_tab=0)
 
 
 if __name__ == "__main__":
     main()
-
-
-'''
-1. Huấn luyện và chạy trên map test cho sẵn -> tính đứa nhiều điểm nhất
-2. Present đủ ý -> ý hay -> sáng tạo
-
-3. imple trên map thật (nên bàn cho flow hợp lý) -> khó hơn như nào 
-= Tính điểm dựa trên 3 mục trên.
-
-
-========
-nhanh nhất -> 
-tối ưu ->
-
-'''

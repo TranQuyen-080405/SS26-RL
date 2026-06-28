@@ -16,6 +16,7 @@ description: >-
 3. **Không gộp** `Simulation/` và `Robot_embbed/` thành một runtime; **không** bỏ `Robot_embbed/` (cần cho ESP32).
 4. Sửa `RL_lib/` → **sync** bản copy sang `Robot_embbed/modules/logics/` (`grid.py`, `rl_core.py`).
 5. Chi tiết reward/train/map: đọc `docs/ss26-strategy-RLtraining.md`, `docs/s26-strategy-Robot.md`, `docs/s26-strategy-simMap.md` — không đổi quyết định §8 trừ khi user yêu cầu.
+6. Deploy BLE + infer firmware + PC monitor: đọc `docs/ss26-robot-runtime.md`, `docs/ss26-ble-pipeline.md`, `docs/ss26-pc-app.md` — **logic đã chốt theo code hiện tại** (memoryview policy, compact BLE state, wait_for_start).
 
 ---
 

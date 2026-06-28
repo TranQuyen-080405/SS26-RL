@@ -34,11 +34,7 @@ def execute_action_sim(robot, sim_map, action_name):
         rb.snapshot_dist_before_move(robot)
         nx, ny = neighbor_xy(x, y, d)
         rb.update_position(robot, nx, ny)
-        rb.inject_distances(
-            robot,
-            sm.dist_to_goal(sim_map, nx, ny),
-            sm.dist_to_checkpoints(sim_map, nx, ny),
-        )
+        rb.inject_distances_from_map(robot)
         rb.compute_trends_after_move(robot)
         rb.mark_moved(robot)
         rb.perceive_facing_from_sim(robot, sim_map)

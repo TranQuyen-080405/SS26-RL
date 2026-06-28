@@ -1,9 +1,9 @@
 import time
-from line_array import line_array
 from ultrasonic import ultrasonic
-
-# Khai báo ngoài vòng lặp — tái sử dụng buffer, tránh tạo list mới mỗi vòng
+from line_array import line_array
 _line_sensors = [0, 0, 0, 0]
+
+
 def read_sensors(port=0):
     """Đọc S1..S4 vào buffer cố định, trả về cùng list (không cấp phát mới)."""
     raw = line_array.read(port)
@@ -13,39 +13,31 @@ def read_sensors(port=0):
     _line_sensors[3] = raw[3]
     return _line_sensors
 
+
 def read_obstacle(port=1):
-    time.sleep_ms(50)
-    dist = ultrasonic.distance_cm(port)
-    if dist >= 200:          # out-of-range
+    try:
+        time.sleep_ms(30)
+        dist = ultrasonic.distance_cm(port)
+    except Exception:
         return None
-    elif dist < 8:
+    if dist >= 200:
+        return None
+    if dist < 8:
         return 1
+    return None
 
 
 def read_line(port=0):
-    # S1 S2 S3 S4 — 0: nền trắng, 1: line đen
-    match read_sensors(port):
-
-        case (0, 0, 0, 0):
-            # Mất line → lùi chậm (speed*0.7) để tìm lại line
-            return "lost"
-
-        case (1, 1, 1, 1):
-            # dừng - cập nhật state
-            return "node"
-
-        case (0, 1, 1, 0):
-            # Giữa line (S2,S3 đều thấy đen) → tiến thẳng
-            return "forward"
-
-        case (1, 1, 0, 0) | (1, 0, 0, 0):
-            # Lệch qua phải → rẽ trái
-            return "right"
-
-        case (0, 0, 1, 1) | (0, 0, 0, 1):
-            # Lệch qua trái → rẽ phải
-            return "left"
-
-        case _:
-            # Pattern chưa map — giữ tốc thấp hoặc dừng, log để bổ sung case
-            return "unknown"
+    # S1 S2 S3 S4 — 0: nền trắng, 1: line đen (if/elif — tương thích MicroPython)
+    s = tuple(read_sensors(port))
+    if s == (0, 0, 0, 0):
+        return "lost"
+    if s == (1, 1, 1, 1):
+        return "node"
+    if s == (0, 1, 1, 0):
+        return "forward"
+    if s in ((1, 1, 0, 0), (1, 0, 0, 0)):
+        return "right"
+    if s in ((0, 0, 1, 1), (0, 0, 0, 1)):
+        return "left"
+    return "unknown"
