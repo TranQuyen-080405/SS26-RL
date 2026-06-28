@@ -6,7 +6,7 @@ from RL_lib.lab_registry import REWARD_ELEMENTS
 from RL_lib.reward_formula import safe_eval_formula
 
 _PART_PREFIX = "_p_"
-_OP_DISPLAY = {"+": "+", "-": "−", "*": "×", "/": "÷", "(": "(", ")": ")"}
+_OP_DISPLAY = {"+": "+", "-": "−", "*": "×", "/": "÷", "^": "^", "(": "(", ")": ")"}
 
 
 def label_for(eid):
@@ -38,11 +38,11 @@ def tokens_to_expr(tokens):
         kind = t["kind"]
         val = t["value"]
         if kind == "reward":
-            if parts and parts[-1] not in "(+-*/":
+            if parts and parts[-1] not in "(+-*/^":
                 parts.append(" ")
             parts.append(val)
         elif kind == "num":
-            if parts and parts[-1] not in "(+-*/":
+            if parts and parts[-1] not in "(+-*/^":
                 parts.append(" ")
             parts.append(val)
         else:
@@ -68,7 +68,7 @@ def parse_expr_to_tokens(expr, known_labels):
                 i += len(lbl)
                 break
         else:
-            if s[i] in "+-*/()":
+            if s[i] in "+-*/()^":
                 ch = s[i]
                 tokens.append(
                     {"kind": "op", "value": ch, "display": _OP_DISPLAY.get(ch, ch)}

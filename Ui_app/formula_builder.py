@@ -23,6 +23,7 @@ _OP_CHIP = {
     "-": {"bg": "#eba0ac", "fg": "#1e1e2e"},
     "*": {"bg": "#89dceb", "fg": "#1e1e2e"},
     "/": {"bg": "#f5c2e7", "fg": "#1e1e2e"},
+    "^": {"bg": "#ffd166", "fg": "#1e1e2e"},
     "(": {"bg": "#9399b2", "fg": "#eff1f5"},
     ")": {"bg": "#9399b2", "fg": "#eff1f5"},
 }
@@ -109,7 +110,7 @@ class FormulaBuilder(ttk.Frame):
         op = ttk.Frame(self)
         op.pack(fill=tk.X, pady=2)
         ttk.Label(op, text="Phép — kéo lên công thức:", font=("", 8)).pack(side=tk.LEFT, padx=(0, 4))
-        for sym, disp in (("+", "+"), ("-", "−"), ("*", "×"), ("/", "÷"), ("(", "("), (")", ")")):
+        for sym, disp in (("+", "+"), ("-", "−"), ("*", "×"), ("/", "÷"), ("^", "^"), ("(", "("), (")", ")")):
             style = _OP_CHIP.get(sym, _DEFAULT_OP)
             btn = tk.Button(
                 op,
@@ -159,7 +160,7 @@ class FormulaBuilder(ttk.Frame):
         return {
             "kind": "op",
             "value": sym,
-            "display": {"+": "+", "-": "−", "*": "×", "/": "÷"}.get(sym, sym),
+            "display": {"+": "+", "-": "−", "*": "×", "/": "÷", "^": "^"}.get(sym, sym),
         }
 
     def _on_palette_frame_configure(self, event):

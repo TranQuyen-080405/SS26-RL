@@ -2,12 +2,14 @@
 
 import ast
 import operator
+import re
 
 _BIN = {
     ast.Add: operator.add,
     ast.Sub: operator.sub,
     ast.Mult: operator.mul,
     ast.Div: operator.truediv,
+    ast.Pow: operator.pow,
 }
 _CMP = {
     ast.Eq: operator.eq,
@@ -20,10 +22,16 @@ _CMP = {
 _BOOL = {ast.And: all, ast.Or: any}
 
 
+def _normalize_power(expr):
+    """Học sinh dùng ^ ; Python AST dùng **."""
+    return re.sub(r"\s*\^\s*", " ** ", str(expr))
+
+
 def safe_eval_formula(expr, variables):
     if not expr or not str(expr).strip():
         return 0.0
-    tree = ast.parse(str(expr).strip(), mode="eval")
+    normalized = _normalize_power(expr)
+    tree = ast.parse(normalized.strip(), mode="eval")
     return float(_eval_node(tree.body, variables))
 
 

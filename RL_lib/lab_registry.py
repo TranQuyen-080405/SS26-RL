@@ -170,7 +170,7 @@ THRESHOLD_LABELS = {
     "MAX_PING_PONG_CYCLES": "Ngưỡng ping-pong",
 }
 
-FORMULA_HELP = "Ghép tên reward + phép + - * / ( ). Ví dụ: Mỗi bước + Va tường * 2"
+FORMULA_HELP = "Ghép reward + phép + − × ÷ ^ ( ). Ví dụ: 2 ^ Mỗi bước + Va tường × 2"
 
 
 def module_by_id(mid):
