@@ -79,9 +79,9 @@ class RlApp:
         self._build_toolbar()
         self._build_checkpoint_bar()
         self._build_infer_policy_bar()
+        self._build_actions()
         self._build_workspace()
         self._build_map_list()
-        self._build_actions()
         self.mode.trace_add("write", lambda *_: self._on_mode_change())
         self.view.trace_add("write", lambda *_: self._on_view_change())
         self._on_mode_change()
@@ -335,7 +335,7 @@ class RlApp:
 
     def _build_actions(self):
         bar = ttk.LabelFrame(self.container, text="Train / Inference", padding=8)
-        bar.pack(fill=tk.X, padx=8, pady=(4, 8))
+        bar.pack(side=tk.BOTTOM, fill=tk.X, padx=8, pady=(4, 8))
         self.btn_run = ttk.Button(bar, text="▶ Run", command=self.on_run)
         self.btn_run.pack(side=tk.LEFT, padx=(0, 8))
         self.btn_stop = ttk.Button(bar, text="■ Stop", command=self.on_stop, state=tk.DISABLED)
