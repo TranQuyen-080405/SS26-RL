@@ -334,11 +334,11 @@ class RlApp:
     def _build_actions(self):
         bar = ttk.LabelFrame(self.container, text="Train / Inference", padding=8)
         bar.pack(fill=tk.X, padx=8, pady=(4, 8))
-        self.btn_run = box_button(bar, text="▶ Run", command=self.on_run, role="primary")
+        self.btn_run = ttk.Button(bar, text="▶ Run", command=self.on_run)
         self.btn_run.pack(side=tk.LEFT, padx=(0, 8))
-        self.btn_stop = box_button(bar, text="■ Stop", command=self.on_stop, role="danger", state=tk.DISABLED)
+        self.btn_stop = ttk.Button(bar, text="■ Stop", command=self.on_stop, state=tk.DISABLED)
         self.btn_stop.pack(side=tk.LEFT)
-        box_button(bar, text="Refresh map", command=self.refresh_map_view, role="secondary").pack(side=tk.LEFT, padx=(8, 0))
+        ttk.Button(bar, text="Refresh map", command=self.refresh_map_view).pack(side=tk.LEFT, padx=(8, 0))
         self.status = tk.StringVar(value="Ready")
         ttk.Label(bar, textvariable=self.status).pack(side=tk.LEFT, padx=12)
 
@@ -791,11 +791,22 @@ class RlApp:
         return self._stop_requested
 
     def on_stop(self):
-        if not self._running or self.mode.get() != "train":
+        if not self._running:
             return
         self._stop_requested = True
-        self._ui_done.set()
-        self.status.set("Stopping...")
+        if self.mode.get() == "train":
+            self._ui_done.set()
+            self.status.set("Stopping...")
+        else:
+            if self._anim_after_id:
+                self.root.after_cancel(self._anim_after_id)
+                self._anim_after_id = None
+            self._running = False
+            self.btn_run.configure(state=tk.NORMAL)
+            self.btn_stop.configure(state=tk.DISABLED)
+            self.status.set("Stopped")
+            self.map_view.set_status("Đã dừng infer")
+
 
     def _begin_train(self):
         self._running = True
@@ -966,7 +977,9 @@ class RlApp:
         map_path = self._map_paths[idx]
         policy_bin = self._infer_policy_bin()
         self._running = True
+        self._stop_requested = False
         self.btn_run.configure(state=tk.DISABLED)
+        self.btn_stop.configure(state=tk.NORMAL)
         self.status.set("Running...")
         self.log.configure(state=tk.NORMAL)
         self.log.delete("1.0", tk.END)
@@ -993,7 +1006,9 @@ class RlApp:
         map_path = self._map_paths[idx]
         policy_bin = self._infer_policy_bin()
         self._running = True
+        self._stop_requested = False
         self.btn_run.configure(state=tk.DISABLED)
+        self.btn_stop.configure(state=tk.NORMAL)
         self.status.set("Computing path...")
         if self._anim_after_id:
             self.root.after_cancel(self._anim_after_id)
