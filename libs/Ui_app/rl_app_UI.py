@@ -5,6 +5,7 @@ View: Log text hoặc bản đồ (preview + animation train/infer).
 
 import os
 import sys
+import queue
 import threading
 import tkinter as tk
 from tkinter import ttk, messagebox, scrolledtext
@@ -73,6 +74,7 @@ class RlApp:
         self._drag_src_iid = None
         self._eps_entry = None
         self._eps_edit_iid = None
+        self._start_queue_processing()
 
         self._build_toolbar()
         self._build_checkpoint_bar()
@@ -787,6 +789,51 @@ class RlApp:
 
         self._start_train()
 
+    def _start_queue_processing(self):
+        self._ui_queue = queue.Queue()
+        self._poll_after_id = self.root.after(20, self._process_ui_queue)
+
+    def _process_ui_queue(self):
+        while not self._ui_queue.empty():
+            try:
+                fn, evt, delay_ms = self._ui_queue.get_nowait()
+            except queue.Empty:
+                break
+            
+            try:
+                if not self._stop_requested:
+                    fn()
+            except Exception as e:
+                print("UI sync error:", e)
+            
+            if delay_ms > 0:
+                self.root.after(delay_ms, evt.set)
+            else:
+                evt.set()
+                
+            self._ui_queue.task_done()
+            
+        self._poll_after_id = self.root.after(20, self._process_ui_queue)
+
+    def _ui_sync(self, fn):
+        """Chạy fn trên main thread và chờ xong (dùng từ thread train)."""
+        if self._stop_requested:
+            return
+        evt = threading.Event()
+        self._ui_queue.put((fn, evt, 0))
+        evt.wait()
+
+    def _ui_sync_after_delay(self, fn, delay_ms):
+        if self._stop_requested:
+            return
+        evt = threading.Event()
+        self._ui_queue.put((fn, evt, delay_ms))
+        evt.wait()
+
+    def _ui_async(self, fn):
+        """Chạy fn trên main thread bất đồng bộ (không block thread gọi)."""
+        self._ui_queue.put((fn, threading.Event(), 0))
+
     def _should_stop_train(self):
         return self._stop_requested
 
@@ -794,6 +841,13 @@ class RlApp:
         if not self._running:
             return
         self._stop_requested = True
+        # Unblock any waiting sync threads in the queue
+        while not self._ui_queue.empty():
+            try:
+                fn, evt, delay_ms = self._ui_queue.get_nowait()
+                evt.set()
+            except Exception:
+                break
         if self.mode.get() == "train":
             self._ui_done.set()
             self.status.set("Stopping...")
@@ -835,33 +889,6 @@ class RlApp:
         if export_name:
             self.infer_policy_var.set(export_name)
             self.export_policy_var.set(os.path.splitext(export_name)[0])
-
-    def _ui_sync(self, fn):
-        """Chạy fn trên main thread và chờ xong (dùng từ thread train)."""
-        if self._stop_requested:
-            return
-        self._ui_done.clear()
-
-        def wrapper():
-            try:
-                fn()
-            finally:
-                self._ui_done.set()
-
-        self.root.after(0, wrapper)
-        self._ui_done.wait()
-
-    def _ui_sync_after_delay(self, fn, delay_ms):
-        if self._stop_requested:
-            return
-        self._ui_done.clear()
-
-        def wrapper():
-            fn()
-            self.root.after(delay_ms, self._ui_done.set)
-
-        self.root.after(0, wrapper)
-        self._ui_done.wait()
 
     def _make_train_callbacks(self, n_episodes):
         def on_episode_start(sim, ep, eps, total):
@@ -928,7 +955,7 @@ class RlApp:
                 stopped = result.get("stopped", False) if isinstance(result, dict) else False
                 ep_done = result.get("episodes_done", 0) if isinstance(result, dict) else 0
                 out = result.get("export_path", export_path) if isinstance(result, dict) else export_path
-                self.root.after(0, lambda s=stopped, e=ep_done, p=out: self._end_train(s, e, p))
+                self._ui_async(lambda s=stopped, e=ep_done, p=out: self._end_train(s, e, p))
 
         threading.Thread(target=work, daemon=True).start()
 
@@ -967,9 +994,9 @@ class RlApp:
                 stopped = result.get("stopped", False)
                 ep_done = result.get("episodes_done", 0)
                 out = result.get("export_path", export_path)
-                self.root.after(0, lambda s=stopped, e=ep_done, p=out: self._end_train(s, e, p))
+                self._ui_async(lambda s=stopped, e=ep_done, p=out: self._end_train(s, e, p))
             except Exception as exc:
-                self.root.after(0, lambda err=exc: self._infer_error(err))
+                self._ui_async(lambda err=exc: self._infer_error(err))
 
         threading.Thread(target=work, daemon=True).start()
 
@@ -998,7 +1025,7 @@ class RlApp:
                 print("ERROR:", exc)
             finally:
                 sys.stdout = old_stdout
-                self.root.after(0, self._run_done)
+                self._ui_async(self._run_done)
 
         threading.Thread(target=work, daemon=True).start()
 
@@ -1021,9 +1048,9 @@ class RlApp:
                 sim, outcome = rl_runner.run_infer_episode_for_map(
                     map_path, verbose=False, policy_bin=policy_bin
                 )
-                self.root.after(0, lambda s=sim, o=outcome: self._start_animation(s, o))
+                self._ui_async(lambda s=sim, o=outcome: self._start_animation(s, o))
             except Exception as exc:
-                self.root.after(0, lambda err=exc: self._infer_error(err))
+                self._ui_async(lambda err=exc: self._infer_error(err))
 
         threading.Thread(target=work, daemon=True).start()
 
