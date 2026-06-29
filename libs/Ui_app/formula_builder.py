@@ -72,21 +72,18 @@ class FormulaBuilder(ttk.Frame):
             font=("", 9, "bold"),
         ).pack(anchor=tk.W)
 
-        bar_outer = ttk.Frame(self)
+        bar_outer = tk.Frame(self, bg=_BAR_BG)
         bar_outer.pack(fill=tk.X, pady=4)
         self._bar_outer = bar_outer
 
-        chip_wrap = ttk.Frame(bar_outer)
+        chip_wrap = tk.Frame(bar_outer, bg=_BAR_BG)
         chip_wrap.pack(side=tk.LEFT, fill=tk.X, expand=True)
 
         self._chip_canvas = tk.Canvas(
             chip_wrap, height=44, bg=_BAR_BG, highlightthickness=1, highlightbackground="#45475a"
         )
-        self._chip_scroll = ttk.Scrollbar(chip_wrap, orient=tk.HORIZONTAL, command=self._chip_canvas.xview)
-        self._chip_canvas.configure(xscrollcommand=self._chip_scroll.set, xscrollincrement=8)
         self._chip_canvas.configure(takefocus=True)
         self._chip_canvas.pack(side=tk.TOP, fill=tk.X, expand=True)
-        self._chip_scroll.pack(side=tk.BOTTOM, fill=tk.X)
         self._chip_inner = tk.Frame(self._chip_canvas, bg=_BAR_BG)
         self._chip_win = self._chip_canvas.create_window(
             (_INNER_PAD, _INNER_PAD), window=self._chip_inner, anchor=tk.NW
@@ -102,10 +99,20 @@ class FormulaBuilder(ttk.Frame):
             w.bind("<Delete>", self._on_backspace)
             w.bind("<Button-1>", self._focus_bar)
 
-        btn_col = ttk.Frame(bar_outer)
-        btn_col.pack(side=tk.LEFT, padx=(4, 0))
-        ttk.Button(btn_col, text="⌫", width=3, command=self.pop_token).pack(pady=1)
-        ttk.Button(btn_col, text="Xóa hết", width=7, command=self.clear).pack(pady=1)
+        btn_col = tk.Frame(bar_outer, bg=_BAR_BG)
+        btn_col.pack(side=tk.LEFT, padx=6)
+        btn_style = {
+            "bg": "#45475a",
+            "fg": "#cdd6f4",
+            "activebackground": "#585b70",
+            "activeforeground": "#eff1f5",
+            "relief": tk.RAISED,
+            "bd": 1,
+            "font": ("", 8, "bold"),
+            "cursor": "hand2",
+        }
+        tk.Button(btn_col, text="⌫", width=3, command=self.pop_token, **btn_style).pack(pady=2)
+        tk.Button(btn_col, text="Xóa hết", width=7, command=self.clear, **btn_style).pack(pady=2)
 
         op = ttk.Frame(self)
         op.pack(fill=tk.X, pady=2)
@@ -134,6 +141,7 @@ class FormulaBuilder(ttk.Frame):
         ttk.Entry(num_row, textvariable=self._num, width=6).pack(side=tk.LEFT)
         ttk.Button(num_row, text="Thêm số", command=self._append_number).pack(side=tk.LEFT, padx=4)
 
+        self._last_layout_w = -1
         root = self.winfo_toplevel()
         root.bind("<B1-Motion>", self._global_motion, add="+")
         root.bind("<ButtonRelease-1>", self._global_release, add="+")
@@ -230,28 +238,21 @@ class FormulaBuilder(ttk.Frame):
         self._chip_canvas.configure(scrollregion=self._chip_canvas.bbox("all"))
         h = max(44, event.height + _INNER_PAD * 2)
         self._chip_canvas.configure(height=h)
-        if self._chip_canvas.bbox("all"):
-            x1, _, x2, _ = self._chip_canvas.bbox("all")
-            if x2 - x1 > self._chip_canvas.winfo_width():
-                self._chip_scroll.pack(side=tk.BOTTOM, fill=tk.X)
-            else:
-                self._chip_scroll.pack_forget()
-                self._chip_canvas.xview_moveto(0)
         if self._drag and self._drag.get("active"):
             self._refresh_drop_visual(self._drag.get("insert_idx", 0))
 
     def _on_canvas_configure(self, event):
-        pass
+        w = event.width
+        if w <= 1 or w == self._last_layout_w:
+            return
+        self._last_layout_w = w
+        try:
+            self._chip_canvas.itemconfig(self._chip_win, width=w - _INNER_PAD * 2)
+        except tk.TclError:
+            pass
+        self._redraw_chips()
 
     def _on_formula_wheel(self, event):
-        if self._drag:
-            return "break"
-        if event.delta:
-            self._chip_canvas.xview_scroll(int(-event.delta / 120), "units")
-        elif event.num == 4:
-            self._chip_canvas.xview_scroll(-3, "units")
-        elif event.num == 5:
-            self._chip_canvas.xview_scroll(3, "units")
         return "break"
 
     def _bind_formula_wheel_tree(self, widget):
@@ -345,17 +346,35 @@ class FormulaBuilder(ttk.Frame):
             to_idx -= 1
         self._tokens.insert(to_idx, item)
 
-    def _drop_index(self, x_root):
+    def _drop_index(self, x_root, y_root):
         if not self._chip_frames:
             return 0
+        gaps = []
         for i, w in enumerate(self._chip_frames):
             if not w.winfo_exists():
                 continue
-            x1 = w.winfo_rootx()
-            x2 = x1 + w.winfo_width()
-            if x_root < (x1 + x2) // 2:
-                return i
-        return len(self._chip_frames)
+            x = w.winfo_rootx()
+            y = w.winfo_rooty()
+            h = w.winfo_height()
+            gaps.append((i, x, y + h / 2))
+        if self._chip_frames:
+            w = self._chip_frames[-1]
+            if w.winfo_exists():
+                x = w.winfo_rootx()
+                y = w.winfo_rooty()
+                width = w.winfo_width()
+                h = w.winfo_height()
+                gaps.append((len(self._chip_frames), x + width, y + h / 2))
+        if not gaps:
+            return 0
+        best_idx = 0
+        best_dist = 1e9
+        for idx, gx, gy in gaps:
+            dist = (gx - x_root) ** 2 + (gy - y_root) ** 2
+            if dist < best_dist:
+                best_dist = dist
+                best_idx = idx
+        return best_idx
 
     def _is_over_formula_bar(self, x_root, y_root):
         target = self._bar_outer if self._bar_outer and self._bar_outer.winfo_exists() else self._chip_canvas
@@ -367,51 +386,48 @@ class FormulaBuilder(ttk.Frame):
         y2 = y1 + target.winfo_height()
         return x1 <= x_root <= x2 and y1 <= y_root <= y2
 
-    def _insert_x_canvas(self, insert_idx):
-        """Tọa độ X trên canvas cho vạch chèn."""
+    def _insert_pos_inner(self, insert_idx):
+        """Trả về (x, y, h) tương đối với self._chip_inner cho vạch chỉ thị."""
         if not self._chip_frames:
-            return _INNER_PAD + 8
+            return 8, 4, 32
+
+        try:
+            inner_rx = self._chip_inner.winfo_rootx()
+            inner_ry = self._chip_inner.winfo_rooty()
+        except tk.TclError:
+            return 8, 4, 32
+
         if insert_idx <= 0:
             w = self._chip_frames[0]
-            return _INNER_PAD + max(w.winfo_x() - 3, 2)
-        if insert_idx >= len(self._chip_frames):
+            rx = w.winfo_rootx() - 4
+            ry = w.winfo_rooty()
+            rh = w.winfo_height()
+        elif insert_idx >= len(self._chip_frames):
             w = self._chip_frames[-1]
-            return _INNER_PAD + w.winfo_x() + w.winfo_width() + 3
-        w = self._chip_frames[insert_idx]
-        return _INNER_PAD + max(w.winfo_x() - 3, 2)
+            rx = w.winfo_rootx() + w.winfo_width() + 2
+            ry = w.winfo_rooty()
+            rh = w.winfo_height()
+        else:
+            w = self._chip_frames[insert_idx]
+            rx = w.winfo_rootx() - 4
+            ry = w.winfo_rooty()
+            rh = w.winfo_height()
+
+        return rx - inner_rx, ry - inner_ry, rh
 
     def _hide_drop_visual(self):
-        self._chip_canvas.delete("drop_indicator")
-        try:
-            self._chip_canvas.tag_raise(self._chip_win)
-        except tk.TclError:
-            pass
+        if hasattr(self, "_drop_indicator"):
+            self._drop_indicator.place_forget()
 
     def _refresh_drop_visual(self, insert_idx):
-        self._hide_drop_visual()
         if insert_idx is None:
+            self._hide_drop_visual()
             return
-        try:
-            self._chip_canvas.tag_lower(self._chip_win)
-        except tk.TclError:
-            pass
-        canvas_h = max(self._chip_canvas.winfo_height(), 44)
-        x = self._insert_x_canvas(insert_idx)
-        y1, y2 = 2, canvas_h - 2
-        self._chip_canvas.create_line(
-            x, y1, x, y2, fill=_DROP_LINE_GLOW, width=9, tags="drop_indicator", capstyle=tk.ROUND
-        )
-        self._chip_canvas.create_line(
-            x, y1, x, y2, fill=_DROP_LINE_CORE, width=3, tags="drop_indicator", capstyle=tk.ROUND
-        )
-        self._chip_canvas.create_polygon(
-            x, y1, x - 5, y1 + 8, x + 5, y1 + 8,
-            fill=_DROP_LINE_CORE, outline=_DROP_LINE_GLOW, tags="drop_indicator",
-        )
-        self._chip_canvas.create_polygon(
-            x, y2, x - 5, y2 - 8, x + 5, y2 - 8,
-            fill=_DROP_LINE_CORE, outline=_DROP_LINE_GLOW, tags="drop_indicator",
-        )
+        if not hasattr(self, "_drop_indicator"):
+            self._drop_indicator = tk.Frame(self._chip_inner, bg="#a6e3a1", width=4)
+        x, y, h = self._insert_pos_inner(insert_idx)
+        self._drop_indicator.place(x=x, y=y, height=h, width=4)
+        self._drop_indicator.lift()
 
     def _show_ghost(self, event, token):
         self._hide_ghost()
@@ -479,13 +495,15 @@ class FormulaBuilder(ttk.Frame):
             return
         self._move_ghost(event)
         if self._is_over_formula_bar(event.x_root, event.y_root):
-            insert_at = self._drop_index(event.x_root)
-            self._drag["insert_idx"] = insert_at
-            self._refresh_drop_visual(insert_at)
-            self._chip_canvas.configure(highlightbackground="#f38ba8")
+            insert_at = self._drop_index(event.x_root, event.y_root)
+            if self._drag.get("insert_idx") != insert_at:
+                self._drag["insert_idx"] = insert_at
+                self._refresh_drop_visual(insert_at)
+            self._chip_canvas.configure(highlightbackground="#a6e3a1")
         else:
-            self._drag["insert_idx"] = None
-            self._hide_drop_visual()
+            if self._drag.get("insert_idx") is not None:
+                self._drag["insert_idx"] = None
+                self._hide_drop_visual()
             self._chip_canvas.configure(highlightbackground="#45475a")
 
     def _finish_drag(self, event):
@@ -519,7 +537,7 @@ class FormulaBuilder(ttk.Frame):
             self._redraw_chips()
             return
 
-        to_idx = self._drop_index(event.x_root)
+        to_idx = self._drop_index(event.x_root, event.y_root)
         if drag["mode"] in ("new", "new_op"):
             self.insert_token(drag["token"], to_idx)
         elif drag["mode"] == "reorder":
@@ -601,10 +619,10 @@ class FormulaBuilder(ttk.Frame):
         chip.bind("<ButtonPress-1>", lambda e, i=index: self._chip_press(e, i))
         chip.bind("<B1-Motion>", self._chip_motion)
 
-    def _make_chip_frame(self, index, token):
+    def _make_chip_frame(self, parent_frame, index, token):
         style, padx, pady = self._chip_style(token)
         bg = style["bg"]
-        outer = tk.Frame(self._chip_inner, bg=bg, relief=tk.RAISED, bd=2, cursor="hand2")
+        outer = tk.Frame(parent_frame, bg=bg, relief=tk.RAISED, bd=2, cursor="hand2")
         outer.pack(side=tk.LEFT, padx=2, pady=4)
 
         chip = tk.Label(
@@ -640,11 +658,19 @@ class FormulaBuilder(ttk.Frame):
         self._bind_chip_drag(chip, index)
         return outer
 
+    def _measure_chip_width(self, token):
+        text = token["display"]
+        w = self._palette_font.measure(" %s " % text) + 26
+        w += 14  # space for "×" button
+        return w
+
     def _redraw_chips(self):
-        self._finish_drag_silent()
         self._chip_frames = []
         for w in self._chip_inner.winfo_children():
+            if w is getattr(self, "_drop_indicator", None):
+                continue
             w.destroy()
+
         if not self._tokens:
             hint = tk.Label(
                 self._chip_inner,
@@ -659,8 +685,26 @@ class FormulaBuilder(ttk.Frame):
             self._bind_formula_wheel_tree(hint)
             return
 
+        width = self._chip_canvas.winfo_width()
+        if width <= 1:
+            width = self.winfo_width()
+        if width <= 1:
+            width = 400
+
+        max_w = max(100, width - 24)
+        row = None
+        row_w = 0
+        gap = 4
+
         for i, t in enumerate(self._tokens):
-            self._make_chip_frame(i, t)
+            bw = self._measure_chip_width(t)
+            if row is None or (row_w > 0 and row_w + gap + bw > max_w):
+                row = tk.Frame(self._chip_inner, bg=_BAR_BG)
+                row.pack(fill=tk.X, anchor=tk.W)
+                row_w = 0
+            self._make_chip_frame(row, i, t)
+            row_w += (gap if row_w > 0 else 0) + bw
+
         self._bind_formula_wheel_tree(self._chip_inner)
 
     def _finish_drag_silent(self):

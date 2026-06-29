@@ -167,7 +167,7 @@ ELEMENT_WEIGHT_KEY = {
 THRESHOLD_LABELS = {
     "MAX_ROTATE_STREAK": "Ngưỡng xoay liên tiếp",
     "MAX_NODE_REVISITS": "Ngưỡng lặp ô",
-    "MAX_PING_PONG_CYCLES": "Ngưỡng ping-pong",
+    "MAX_PING_PONG_CYCLES": "Ngưỡng lặp",
 }
 
 FORMULA_HELP = "Ghép reward + phép + − × ÷ ^ ( ). Ví dụ: 2 ^ Mỗi bước đi + Va chạm tường × 2"
