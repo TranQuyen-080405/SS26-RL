@@ -1,3 +1,5 @@
-.cursor
-.venv
-__pycache__
+.cursor/
+.venv/
+__pycache__/
+*.py[cod]
+*$py.class
