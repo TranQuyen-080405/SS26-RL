@@ -316,7 +316,7 @@ class LabScenarioMap5:
 
     def redraw(self):
         c = self.canvas
-        c.delete("all")
+        c.addtag_all("old")
         sim = self.world.sim_map
         w, h, cw, ch = self._size()
         vis_w = min(cw, _MAX_CANVAS_W)
@@ -356,3 +356,4 @@ class LabScenarioMap5:
         dir_arrow = {"N": (0, -arrow_len), "E": (arrow_len, 0), "S": (0, arrow_len), "W": (-arrow_len, 0)}
         dx, dy = dir_arrow.get(rd, (0, -arrow_len))
         c.create_line(rcx, rcy, rcx + dx, rcy + dy, fill="#1e1e2e", width=2, arrow=tk.LAST)
+        c.delete("old")

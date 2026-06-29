@@ -532,7 +532,7 @@ class MapEditorApp:
 
     def redraw(self):
         c = self.canvas
-        c.delete("all")
+        c.addtag_all("old")
         cw, ch = self._update_layout()
         cell = self._cell
         font_sz = max(8, min(12, cell // 5))
@@ -587,7 +587,7 @@ class MapEditorApp:
             c.create_text(
                 cw // 2,
                 max(16, self._offset_y // 2),
-                text="← Bấm ô để đặt checkpoint mới",
+                text="Bấm ô để đặt checkpoint mới",
                 fill="#89b4fa",
                 font=("", 10, "bold"),
             )
@@ -609,6 +609,7 @@ class MapEditorApp:
                         self._draw_edge_wall(c, d, px, py, cell, blocked_thick, blocked=True)
                     else:
                         c.create_line(x1, y1, x2, y2, fill="#56586e", width=open_w)
+        c.delete("old")
 
     def run(self):
         if self._standalone:
