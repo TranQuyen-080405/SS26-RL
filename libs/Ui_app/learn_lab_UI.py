@@ -118,13 +118,13 @@ class LearnLabApp:
         bar.pack(fill=tk.X)
         ttk.Button(bar, text="Copy", command=self._copy_export).pack(side=tk.LEFT, padx=2)
         ttk.Button(bar, text="Reset mặc định", command=self._reset_defaults).pack(side=tk.LEFT, padx=2)
-        self.apply_status = tk.StringVar(value="Sửa công thức / điểm → tự lưu cho Train")
+        self.apply_status = tk.StringVar(value="Bấm nút 'Lưu công thức' để lưu cấu hình và áp dụng cho Train")
         ttk.Label(bar, textvariable=self.apply_status).pack(side=tk.LEFT, padx=8)
         self.export_text = scrolledtext.ScrolledText(exp, height=3, font=("Consolas", 8))
         self.export_text.pack(fill=tk.X)
 
     def _build_reward_config(self, parent):
-        top = ttk.LabelFrame(parent, text="State dùng:", padding=8)
+        top = ttk.LabelFrame(parent, text="State dùng", padding=8)
         top.pack(fill=tk.X)
         grid = ttk.Frame(top)
         grid.pack(fill=tk.X)
@@ -161,6 +161,10 @@ class LearnLabApp:
 
         self.formula_builder = FormulaBuilder(bottom, on_change=self._on_formula_changed)
         self.formula_builder.pack(fill=tk.X, pady=(0, 6))
+
+        # Nút Lưu công thức
+        self.btn_save_formula = ttk.Button(bottom, text="Lưu công thức", command=self._save_to_project)
+        self.btn_save_formula.pack(anchor=tk.W, pady=(0, 4))
 
         canvas = tk.Canvas(bottom, highlightthickness=0)
         scroll = ttk.Scrollbar(bottom, orient=tk.VERTICAL, command=canvas.yview)
@@ -320,7 +324,6 @@ class LearnLabApp:
         self._refresh_reward_panel()
         self._update_state_display()
         self._refresh_export()
-        self._schedule_save_to_project()
 
     def _refresh_reward_panel(self):
         labels = self._enabled_labels()
@@ -359,13 +362,11 @@ class LearnLabApp:
     def _on_weight_edited(self):
         self._sync_config_from_ui()
         self._refresh_export()
-        self._schedule_save_to_project()
 
     def _on_formula_changed(self):
         self._sync_config_from_ui()
         self._refresh_weight_panel()
         self._refresh_export()
-        self._schedule_save_to_project()
 
     def _on_scenario_event(self, action_name):
         self._sync_config_from_ui()

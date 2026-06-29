@@ -58,7 +58,7 @@ class FormulaBuilder(ttk.Frame):
 
         ttk.Label(
             self,
-            text="Reward — kéo nút xuống công thức (tự xuống dòng khi hết chỗ):",
+            text="Reward list:",
             font=("", 9, "bold"),
         ).pack(anchor=tk.W)
 

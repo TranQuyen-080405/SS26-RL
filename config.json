@@ -1,0 +1,74 @@
+{
+  "project": {
+    "name": "SS26-RL",
+    "version": "1.0.0",
+    "author": "Tran Quyen",
+    "description": "Giao diện và hệ thống huấn luyện, giám sát robot tự hành sử dụng thuật toán Q-Learning kết hợp truyền thông BLE (Bluetooth Low Energy) thời gian thực."
+  },
+  "environment": {
+    "os": "Windows 11",
+    "python": "3.10.11",
+    "ide": "Cursor"
+  },
+  "libraries": [
+    {
+      "package": "numpy",
+      "version": "2.2.6",
+      "purpose": "Hỗ trợ tính toán ma trận số học và quản lý mảng Q-table phục vụ thuật toán Q-Learning."
+    },
+    {
+      "package": "bleak",
+      "version": "3.0.2",
+      "purpose": "Thư viện kết nối và giao tiếp Bluetooth Low Energy (BLE) Client trên PC."
+    }
+  ],
+  "hardware": {
+    "board": "xController (ESP32)",
+    "firmware": "MicroPython",
+    "bluetooth": "BLE (Bluetooth Low Energy) + GATT Notify"
+  },
+  "protocol": {
+    "service_uuid": "6e400001-b5a3-f393-e0a9-e50e24dcca9e",
+    "characteristic_uuid": {
+      "tx": "6e400003-b5a3-f393-e0a9-e50e24dcca9e",
+      "rx": "6e400002-b5a3-f393-e0a9-e50e24dcca9e"
+    },
+    "packet_format": {
+      "log": "L:<tin_nhan>",
+      "state_json": "S:{\"x\":X,\"y\":Y,\"d\":D,\"p\":PHASE,\"n\":STEP,\"a\":ACTION}",
+      "map_spec_json": "M:{\"w\":MAP_W,\"h\":MAP_H,\"s\":START,\"g\":GOAL,\"c\":CHECKPOINTS}",
+      "pc_to_robot_control": "S hoặc START"
+    }
+  },
+  "directory_structure": {
+    "checkpoints": "checkpoints/",
+    "libs": "libs/",
+    "rl_lib": "libs/RL_lib/",
+    "robot_embedded": "libs/Robot_embbed/",
+    "simulation": "libs/Simulation/",
+    "ui_app": "libs/Ui_app/",
+    "app_tabs": "libs/app_tabs/",
+    "map": "libs/map/"
+  },
+  "build": {
+    "compile_check": "python -m py_compile main.py",
+    "flash_tool": "rshell / ampy / Thonny IDE"
+  },
+  "installation": {
+    "venv_setup": "python -m venv .venv",
+    "venv_activate": ".venv\\Scripts\\activate",
+    "pip_install": "pip install -r requirements.txt",
+    "run_app": "python main.py"
+  },
+  "changelog": [
+    "Thiết kế lại RobotMapCanvas: Căn giữa tự động, co giãn theo khung nhìn.",
+    "Cập nhật hiển thị ô lưới: Chuyển sang nền trắng với dấu cộng màu đen chạm cạnh ô.",
+    "Đưa các nhãn chỉ số cột/hàng (Trục XY) ra rìa ngoài bản đồ.",
+    "Tối giản hóa cơ chế quét BLE: Hỗ trợ tự động lọc theo tên thiết bị (mặc định \"Robot\") trực tiếp tại luồng kết nối mà không cần thao tác combobox chọn thủ công."
+  ],
+  "license": "Proprietary",
+  "contact": {
+    "name": "TranQuyen",
+    "repository": "TranQuyen-080405/SS26-RL"
+  }
+}

@@ -36,10 +36,8 @@ def safe_eval_formula(expr, variables):
 
 
 def _eval_node(node, variables):
-    if isinstance(node, ast.Constant):
+    if isinstance(node, ast.Constant):  # For Python 3.8+
         return node.value
-    if isinstance(node, ast.Num):  # py3.8
-        return node.n
     if isinstance(node, ast.Name):
         if node.id not in variables:
             raise ValueError("Biến không hợp lệ: %s" % node.id)

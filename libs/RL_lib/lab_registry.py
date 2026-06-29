@@ -44,7 +44,7 @@ STATE_MODULES = (
     },
     {
         "id": "rotation",
-        "label": "Xoay (hành vi)",
+        "label": "Xoay",
         "in_encode": False,
         "encode_fields": [],
         "desc": "Action rotate — sinh reward xoay / xoay lãng / facing clear.",

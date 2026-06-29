@@ -1,6 +1,7 @@
 """Parse / serialize công thức dạng token (cục reward + phép toán)."""
 
 import re
+import ast
 
 from RL_lib.lab_registry import REWARD_ELEMENTS
 from RL_lib.reward_formula import safe_eval_formula
@@ -78,7 +79,7 @@ def parse_expr_to_tokens(expr, known_labels):
             m = re.match(r"\d+(?:\.\d+)?", s[i:])
             if m:
                 num = m.group()
-                tokens.append({"kind": "num", "value": num, "display": num})
+                tokens.append({"kind": "num", "value": str(float(num)), "display": num})
                 i += len(num)
                 continue
             i += 1
@@ -91,8 +92,16 @@ def compile_student_formula(expr, enabled_eids):
     s = str(expr).strip()
     for lbl, eid in labels_sorted():
         if eid not in enabled_eids:
-            continue
-        s = s.replace(lbl, "%s%s" % (_PART_PREFIX, eid))
+            # Replace with 0.0 if the module for this label is disabled
+            s = re.sub(r'\b' + re.escape(lbl) + r'\b', '0.0', s)
+        else:
+            s = re.sub(r'\b' + re.escape(lbl) + r'\b', f"{_PART_PREFIX}{eid}", s)
+
+    # Validate expression to prevent arbitrary code execution
+    tree = ast.parse(s, mode='eval')
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.Expression, ast.BinOp, ast.UnaryOp, ast.Call, ast.Name, ast.Constant, ast.Load, ast.Add, ast.Sub, ast.Mult, ast.Div, ast.Pow, ast.USub, ast.UAdd)):
+            raise ValueError(f"Unsupported operation in formula: {type(node).__name__}")
     return s
 
 

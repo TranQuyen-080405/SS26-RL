@@ -150,10 +150,10 @@ class RlApp:
         )
         self.combo_export_policy.pack(side=tk.LEFT, padx=(0, 4))
         ttk.Label(row2, text=".bin").pack(side=tk.LEFT, padx=(0, 8))
-        ttk.Label(
-            row2,
-            text="Train mới → đặt tên file; train tiếp → có thể giữ hoặc đổi tên",
-        ).pack(side=tk.LEFT, padx=8)
+        # ttk.Label(
+        #     row2,
+        #     text="Train mới → đặt tên file; train tiếp → có thể giữ hoặc đổi tên",
+        # ).pack(side=tk.LEFT, padx=8)
         self.refresh_checkpoints()
 
     def _build_infer_policy_bar(self):

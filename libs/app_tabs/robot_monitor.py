@@ -257,19 +257,49 @@ class RobotMapCanvas:
             % (w, h, self.model.start, self.model.goal)
         )
         ttk.Label(self.frame, textvariable=self.info_var, anchor=tk.W).pack(fill=tk.X, pady=(4, 0))
+        
+        self._cell = 44
+        self._offset_x = 24
+        self._offset_y = 24
+        
+        self.canvas.bind("<Configure>", lambda e: self.redraw())
         self.redraw()
 
     def pack(self, **kwargs):
         self.frame.pack(**kwargs)
 
+    def _update_layout(self):
+        c = self.canvas
+        w, h = self.model.w, self.model.h
+        cw = max(c.winfo_width(), 320)
+        ch = max(c.winfo_height(), 280)
+        if cw <= 1 or ch <= 1:
+            c.update_idletasks()
+            cw = max(c.winfo_width(), 320)
+            ch = max(c.winfo_height(), 280)
+
+        canvas_pad = 28
+        cell_min = 36
+        cell_max = 80
+
+        avail_w = max(cw - 2 * canvas_pad, w * cell_min)
+        avail_h = max(ch - 2 * canvas_pad, h * cell_min)
+        cell = int(min(avail_w / w, avail_h / h, cell_max))
+        self._cell = max(cell, cell_min)
+        map_w = w * self._cell
+        map_h = h * self._cell
+        self._offset_x = max(canvas_pad, (cw - map_w) // 2)
+        self._offset_y = max(canvas_pad, (ch - map_h) // 2)
+        c.config(scrollregion=(0, 0, cw, ch))
+
     def cell_px(self, x, y, h):
-        px = MARGIN + x * CELL
-        py = MARGIN + (h - 1 - y) * CELL
+        px = self._offset_x + x * self._cell
+        py = self._offset_y + (h - 1 - y) * self._cell
         return px, py
 
     def cell_center(self, x, y, h):
         px, py = self.cell_px(x, y, h)
-        return px + CELL // 2, py + CELL // 2
+        return px + self._cell // 2, py + self._cell // 2
 
     def apply_map_spec(self, spec):
         self.model.apply_map_spec(spec)
@@ -329,36 +359,59 @@ class RobotMapCanvas:
     def redraw(self):
         c = self.canvas
         c.delete("all")
+        self._update_layout()
         m = self.model
         w, h = m.w, m.h
         start, goal = m.start, m.goal
         cps = {tuple(cp) for cp in m.checkpoints}
 
-        cw = max(w * CELL + 2 * MARGIN, 200)
-        ch = max(h * CELL + 2 * MARGIN, 200)
-        c.config(scrollregion=(0, 0, cw, ch))
-
+        # Draw grid cells
         for y in range(h):
             for x in range(w):
                 px, py = self.cell_px(x, y, h)
-                fill = "#313244"
+                fill = "#ffffff"
                 if (x, y) == start:
                     fill = "#a6e3a1"
                 elif (x, y) == goal:
                     fill = "#f38ba8"
                 elif (x, y) in cps:
                     fill = "#f9e2af"
-                c.create_rectangle(px, py, px + CELL, py + CELL, fill=fill, outline="#45475a")
-                c.create_text(px + CELL // 2, py + CELL // 2, text="%d,%d" % (x, y), fill="#6c7086", font=("", 7))
+                c.create_rectangle(px, py, px + self._cell, py + self._cell, fill=fill, outline="#45475a")
+                
+                # Draw black plus sign touching the square edges
+                mx = px + self._cell // 2
+                my = py + self._cell // 2
+                c.create_line(px, my, px + self._cell, my, fill="#000000", width=3)
+                c.create_line(mx, py, mx, py + self._cell, fill="#000000", width=3)
 
+        # Draw coordinate labels on the outer axes
+        for x in range(w):
+            cx = self._offset_x + x * self._cell + self._cell // 2
+            # Bottom label
+            cy_bot = self._offset_y + h * self._cell + 12
+            c.create_text(cx, cy_bot, text=str(x), fill="#cdd6f4", font=("Segoe UI", 8, "bold"))
+            # Top label
+            cy_top = self._offset_y - 12
+            c.create_text(cx, cy_top, text=str(x), fill="#cdd6f4", font=("Segoe UI", 8, "bold"))
+
+        for y in range(h):
+            cy = self._offset_y + (h - 1 - y) * self._cell + self._cell // 2
+            # Left label
+            cx_left = self._offset_x - 12
+            c.create_text(cx_left, cy, text=str(y), fill="#cdd6f4", font=("Segoe UI", 8, "bold"))
+            # Right label
+            cx_right = self._offset_x + w * self._cell + 12
+            c.create_text(cx_right, cy, text=str(y), fill="#cdd6f4", font=("Segoe UI", 8, "bold"))
+
+        # Draw walls
         for y in range(h):
             for x in range(w):
                 px, py = self.cell_px(x, y, h)
                 for d, x1, y1, x2, y2 in [
-                    ("N", px, py, px + CELL, py),
-                    ("E", px + CELL, py, px + CELL, py + CELL),
-                    ("S", px, py + CELL, px + CELL, py + CELL),
-                    ("W", px, py, px, py + CELL),
+                    ("N", px, py, px + self._cell, py),
+                    ("E", px + self._cell, py, px + self._cell, py + self._cell),
+                    ("S", px, py + self._cell, px + self._cell, py + self._cell),
+                    ("W", px, py, px, py + self._cell),
                 ]:
                     is_wall = (x, y, d) in m.walls
                     color = "#f38ba8" if is_wall else "#585b70"
@@ -373,9 +426,16 @@ class RobotMapCanvas:
                 c.create_line(pts[i][0], pts[i][1], pts[i + 1][0], pts[i + 1][1], fill="#89b4fa", width=3)
 
         cx, cy = self.cell_center(m.x, m.y, h)
-        r = CELL // 4
+        r = self._cell // 4
         c.create_oval(cx - r, cy - r, cx + r, cy + r, fill="#cba6f7", outline="#cdd6f4", width=2)
-        dx, dy = _DIR_ARROW.get(m.d, (0, -10))
+        arrow_len = max(8, self._cell // 4)
+        dir_offsets = {
+            "N": (0, -arrow_len),
+            "E": (arrow_len, 0),
+            "S": (0, arrow_len),
+            "W": (-arrow_len, 0)
+        }
+        dx, dy = dir_offsets.get(m.d, (0, -arrow_len))
         c.create_line(cx, cy, cx + dx, cy + dy, fill="#1e1e2e", width=3, arrow=tk.LAST, arrowshape=(8, 10, 4))
 
 
@@ -415,12 +475,11 @@ class RobotMonitorApp:
         bar = ttk.Frame(self.container, padding=8)
         bar.pack(fill=tk.X)
 
-        ttk.Label(bar, text="Device").pack(side=tk.LEFT, padx=(0, 4))
-        self.device_var = tk.StringVar(value="(chưa quét)")
-        self.combo_device = ttk.Combobox(bar, textvariable=self.device_var, width=36, state="readonly")
-        self.combo_device.pack(side=tk.LEFT, padx=(0, 8))
+        ttk.Label(bar, text="Tên BLE:").pack(side=tk.LEFT, padx=(0, 4))
+        self.ble_name_var = tk.StringVar(value="Robot")
+        self.entry_ble_name = ttk.Entry(bar, textvariable=self.ble_name_var, width=15)
+        self.entry_ble_name.pack(side=tk.LEFT, padx=(0, 8))
 
-        ttk.Button(bar, text="Quét BLE", command=self.scan_devices).pack(side=tk.LEFT, padx=2)
         self.btn_connect = ttk.Button(bar, text="Kết nối", command=self.toggle_connect)
         self.btn_connect.pack(side=tk.LEFT, padx=2)
         self.btn_start = ttk.Button(bar, text="Start infer", command=self.request_start_infer, state=tk.DISABLED)
@@ -432,7 +491,7 @@ class RobotMonitorApp:
         ttk.Label(bar, textvariable=self.infer_var, width=28).pack(side=tk.LEFT, padx=(8, 0))
 
         self.status_var = tk.StringVar(
-            value="Quét BLE → chọn thiết bị → Kết nối → Start infer (tương đương libs/Robot_embbed/main.py)."
+            value="Nhập tên BLE → Kết nối → Start infer."
         )
         ttk.Label(bar, textvariable=self.status_var).pack(side=tk.LEFT, padx=12)
 
@@ -483,70 +542,21 @@ class RobotMonitorApp:
     def reset_path(self):
         self.map_view.reset_path()
 
-    def _selected_address(self):
-        sel = self.combo_device.current()
-        if sel < 0 or sel >= len(self._devices):
-            return None
-        return self._devices[sel][0]
-
-    def scan_devices(self):
-        if self._connected:
-            messagebox.showinfo("BLE", "Ngắt kết nối trước khi quét lại.")
-            return
-        self.status_var.set("Đang quét BLE...")
-        threading.Thread(target=self._scan_thread, daemon=True).start()
-
-    def _scan_thread(self):
-        async def _scan():
-            found = []
-            results = await BleakScanner.discover(timeout=10.0, return_adv=True)
-            for _addr, (d, ad) in results.items():
-                name = _ble_display_name(d, ad)
-                found.append((d.address, name))
-            found.sort(key=lambda x: (x[1].lower(), x[0]))
-            return found
-
-        try:
-            found = asyncio.run(_scan())
-        except Exception as exc:
-            err = exc
-            self.root.after(0, lambda e=err: self.status_var.set("Lỗi quét: %s" % e))
-            return
-
-        def _update():
-            self._devices = found
-            labels = ["%s  [%s]" % (name, addr) for addr, name in found]
-            self.combo_device["values"] = labels
-            if labels:
-                self.combo_device.current(0)
-                self._address = found[0][0]
-                self.status_var.set("Tìm thấy %d thiết bị — bấm Kết nối." % len(labels))
-            else:
-                self._address = None
-                self.status_var.set("Khong thay thiet bi BLE nao — bat Bluetooth / bat robot.")
-
-        self.root.after(0, _update)
-
     def toggle_connect(self):
         if self._connected:
             self.disconnect()
         else:
-            addr = self._selected_address()
-            if not addr:
-                messagebox.showwarning("BLE", "Quét và chọn thiết bị trước.")
-                return
-            self._address = addr
             self.connect()
 
     def connect(self):
-        if not self._address or self._ble_thread:
+        if self._ble_thread:
             return
         self._stop_ble.clear()
         self._start_infer_event.clear()
         self._ble_thread = threading.Thread(target=self._ble_loop, daemon=True)
         self._ble_thread.start()
         self.btn_connect.configure(text="Ngắt")
-        self.status_var.set("Đang kết nối %s..." % self._address)
+        self.status_var.set("Đang quét tìm và kết nối thiết bị BLE...")
 
     def disconnect(self):
         self._stop_ble.set()
@@ -700,10 +710,35 @@ class RobotMonitorApp:
         async def _run():
             client = None
             try:
-                device = await BleakScanner.find_device_by_address(self._address, timeout=15.0, adv=True)
-                if device is None:
-                    raise BleakError("Khong tim thay %s — quet lai roi ket noi ngay." % self._address)
+                target_name = self.ble_name_var.get().strip()
+                if not target_name:
+                    raise BleakError("Nhập tên thiết bị BLE cần kết nối.")
 
+                self.root.after(0, lambda: self.status_var.set("Đang quét tìm thiết bị '%s'..." % target_name))
+
+                device = None
+                scan_event = asyncio.Event()
+
+                def detection_callback(d, ad):
+                    nonlocal device
+                    name = _ble_display_name(d, ad)
+                    if target_name.lower() in name.lower():
+                        device = d
+                        scan_event.set()
+
+                scanner = BleakScanner(detection_callback=detection_callback)
+                await scanner.start()
+                try:
+                    await asyncio.wait_for(scan_event.wait(), timeout=5.0)
+                except asyncio.TimeoutError:
+                    pass
+                finally:
+                    await scanner.stop()
+
+                if device is None:
+                    raise BleakError("Không tìm thấy thiết bị BLE '%s' trong 5 giây." % target_name)
+
+                self._address = device.address
                 self._tx_buf = ""
                 client = await self._connect_with_gatt(device)
                 self.root.after(0, lambda a=device.address: self.append_log("Ket noi MAC: %s\n" % a))
