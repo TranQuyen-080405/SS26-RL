@@ -1,16 +1,6 @@
-# SS26-RL — Python dependencies
-#
-# Train / infer (Simulation/): chỉ dùng thư viện chuẩn (json, struct, random, …).
-# Không cần pip install gì để chạy run_demo.py / run_infer.py.
-#
-# Map editor (create_map.py): cần tkinter — KHÔNG cài được bằng pip.
-# Cài gói hệ thống:
-#   Fedora:  sudo dnf install python3-tkinter
-#   Ubuntu:  sudo apt install python3-tk
-#
-# Nếu dùng venv và đã cài python3-tkinter trên hệ thống:
-#   python3 -m venv .venv --system-site-packages
-#   source .venv/bin/activate
-#
-# Robot monitor (PC): pip install bleak && python robot_monitor.py
-bleak>=0.21.0
+# SS26-RL — pip install -r requirements.txt
+numpy
+bleak
+
+# Map editor (create_map tab): cần tkinter
+# Robot monitor (PC): pip install bleak

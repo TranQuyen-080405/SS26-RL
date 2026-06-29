@@ -2,8 +2,8 @@
 name: ss26-rl-architecture
 description: >-
   SS26 RL robot/sim codebase — locked architecture, pure-function logic, RL_lib,
-  Simulation vs Robot_embbed split. Use when editing Simulation/, Robot_embbed/,
-  RL_lib/, policy train/deploy, encode_state, or get_policy. Do not refactor
+  Simulation vs Robot_embbed split. Use when editing libs/Simulation/, libs/Robot_embbed/,
+  libs/RL_lib/, policy train/deploy, encode_state, or get_policy. Do not refactor
   core logic unless the user explicitly asks to debug or change architecture.
 ---
 
@@ -14,32 +14,47 @@ description: >-
 1. **Không đổi logic lõi** (encode, policy, map memory, luồng infer/train) trừ khi user nói rõ *debug*, *đổi spec*, hoặc *refactor architecture*.
 2. **Không thêm OOP** cho phần robot/sim logic — chỉ **hàm thuần + dict**.
 3. **Không gộp** `Simulation/` và `Robot_embbed/` thành một runtime; **không** bỏ `Robot_embbed/` (cần cho ESP32).
-4. Sửa `RL_lib/` → **sync** bản copy sang `Robot_embbed/modules/logics/` (`grid.py`, `rl_core.py`).
-5. Chi tiết reward/train/map: đọc `docs/ss26-strategy-RLtraining.md`, `docs/s26-strategy-Robot.md`, `docs/s26-strategy-simMap.md` — không đổi quyết định §8 trừ khi user yêu cầu.
-6. Deploy BLE + infer firmware + PC monitor: đọc `docs/ss26-robot-runtime.md`, `docs/ss26-ble-pipeline.md`, `docs/ss26-pc-app.md` — **logic đã chốt theo code hiện tại** (memoryview policy, compact BLE state, wait_for_start).
+4. Sửa `libs/RL_lib/` → **sync** bản copy sang `libs/Robot_embbed/modules/logics/` (`grid.py`, `rl_core.py`).
+5. Chi tiết reward/train/map: đọc `libs/docs/ss26-strategy-RLtraining.md`, `libs/docs/s26-strategy-Robot.md`, `libs/docs/s26-strategy-simMap.md` — không đổi quyết định §8 trừ khi user yêu cầu.
+6. Deploy BLE + infer firmware + PC monitor: đọc `libs/docs/ss26-robot-runtime.md`, `libs/docs/ss26-ble-pipeline.md`, `libs/docs/ss26-pc-app.md` — **logic đã chốt theo code hiện tại** (memoryview policy, compact BLE state, wait_for_start).
 
 ---
 
 ## Hai môi trường
 
-| | PC (`Simulation/` + `RL_lib/`) | Mạch (`Robot_embbed/`) |
+| | PC (`libs/Simulation/` + `libs/RL_lib/`) | Mạch (`libs/Robot_embbed/`) |
 |---|---|---|
 | Vai trò | Train backward, sim, export policy | Infer forward, sensor, motor |
 | Học Q | Có (`trainer.py`) | **Không** |
 | SimMap GT | Có (`map/sim_map.py`) | **Không** |
-| Policy | Tạo `Q_table/policy.json` + `Q_table/policy.bin` | Chỉ **đọc** `Q_table/policy.bin` (ưu tiên) |
+| Policy | Tạo `checkpoints/policy.bin` | Chỉ **đọc** `modules/logics/Q_table/policy.bin` trên ESP32 |
 
 ```
-PC: State → encode → Q-update → export Q_table/policy.bin
+PC: State → encode → Q-update → export checkpoints/policy.bin
 ESP32: sensor → State → encode → get_policy → action (motor)
 ```
 
 ---
 
-## Cây thư mục logic (đã chốt)
+## Cây thư mục (repo gọn)
 
 ```
-RL_lib/                          # Nguồn chuẩn thuật toán trên PC
+main.py                          # Entry — gọi libs/bootstrap.py + app_tabs/shell.py
+requirements.txt
+libs/
+  bootstrap.py                   # sys.path: libs/, Simulation/, Robot_embbed/
+  app_tabs/                      # Tab launchers + shell + robot_monitor BLE
+  RL_lib/                        # Nguồn chuẩn thuật toán PC
+  Simulation/
+  Robot_embbed/
+  Ui_app/
+  map/
+  docs/
+checkpoints/                     # Policy .bin train/export (cùng cấp main.py)
+```
+
+```
+libs/RL_lib/
   grid.py                        # N/W/E/S, neighbor_xy, turn_left/right
   rl_core.py                     # dist_trend, encode_state, get_policy, N_ROWS
 
@@ -101,7 +116,7 @@ s = obstacle_bits × 324 + trend_packed × 4 + heading_idx
 - CP: **1–3** tùy layout.
 - **Không** bắt buộc thứ tự; **+điểm 1 lần**/CP/episode (`cp_visited`).
 - Train: **phase 1** một map cố định → **phase 2** curriculum + multi-map (config sau).
-- Export: **đồng thời** `Q_table/policy.json` + `Q_table/policy.bin`.
+- Export: `checkpoints/policy.bin` (copy sang ESP32: `libs/Robot_embbed/modules/logics/Q_table/policy.bin`).
 
 ---
 
@@ -171,8 +186,8 @@ Chỉ `update_direction`; không đổi (x,y). ESP32: TODO `turn_*_angle(90)`.
 ## Test nhanh sau thay đổi RL_lib
 
 ```bash
-python Simulation/tests/test_rl_core.py
-python Simulation/run_demo.py   # tạo Q_table/policy.json + Q_table/policy.bin
+python libs/Simulation/tests/test_rl_core.py
+python libs/Simulation/run_demo.py   # tạo checkpoints/policy.bin
 ```
 
 ---
