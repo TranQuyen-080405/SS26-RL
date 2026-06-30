@@ -3,11 +3,12 @@ Tab Learn Lab — map 12×5 + cấu hình state/reward (UX học sinh).
 """
 
 import importlib
+import json
 import os
 import re
 import sys
 import tkinter as tk
-from tkinter import ttk, scrolledtext
+from tkinter import ttk, scrolledtext, simpledialog, messagebox
 
 _ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 _SIM = os.path.join(_ROOT, "Simulation")
@@ -27,6 +28,14 @@ from RL_lib.lab_registry import (
 )
 from RL_lib.student_formula import default_total_formula
 from RL_lib.lab_export import export_reward_config_py
+from RL_lib.formula_store import (
+    build_snapshot,
+    ensure_formula_dir,
+    list_saved_formulas,
+    load_formula_file,
+    normalize_formula_basename,
+    save_formula_file,
+)
 from RL_lib.rl_core import N_ROWS
 from Ui_app.lab_scenario_map import LabScenarioMap5
 from Ui_app.formula_builder import FormulaBuilder, module_chip_style, reward_eids_in_formula
@@ -93,6 +102,7 @@ class LearnLabApp:
         self._threshold_rows = {}
         self._save_after_id = None
         self._loading = False
+        self._loaded_formula_name = None
 
         self._build_ui()
         self._loading = True
@@ -166,9 +176,26 @@ class LearnLabApp:
         self.formula_builder = FormulaBuilder(bottom, on_change=self._on_formula_changed)
         self.formula_builder.pack(fill=tk.X, pady=(0, 6))
 
-        # Nút Lưu công thức
-        self.btn_save_formula = ttk.Button(bottom, text="Lưu công thức", command=self._save_to_project)
-        self.btn_save_formula.pack(anchor=tk.W, pady=(0, 4))
+        formula_bar = ttk.Frame(bottom)
+        formula_bar.pack(fill=tk.X, pady=(0, 4))
+
+        ttk.Label(formula_bar, text="Đã lưu:").pack(side=tk.LEFT, padx=(0, 4))
+        self.formula_pick_var = tk.StringVar()
+        self.formula_combo = ttk.Combobox(
+            formula_bar,
+            textvariable=self.formula_pick_var,
+            width=28,
+            state="readonly",
+        )
+        self.formula_combo.pack(side=tk.LEFT, padx=(0, 6))
+        self.formula_combo.bind("<<ComboboxSelected>>", self._on_formula_pick_selected)
+        ttk.Button(formula_bar, text="Nạp", command=self._load_selected_formula).pack(side=tk.LEFT, padx=(0, 8))
+        ttk.Button(formula_bar, text="Làm mới danh sách", command=self._refresh_formula_combo).pack(side=tk.LEFT, padx=(0, 8))
+        self.btn_save_formula = ttk.Button(formula_bar, text="Lưu công thức", command=self._save_to_project)
+        self.btn_save_formula.pack(side=tk.LEFT)
+
+        ensure_formula_dir()
+        self._refresh_formula_combo()
 
         canvas = tk.Canvas(bottom, highlightthickness=0)
         scroll = ttk.Scrollbar(bottom, orient=tk.VERTICAL, command=canvas.yview)
@@ -445,6 +472,84 @@ class LearnLabApp:
         self.export_text.delete("1.0", tk.END)
         self.export_text.insert(tk.END, text)
 
+    def _collect_formula_snapshot(self):
+        weights = self._collect_element_weights()
+        thresholds = self._collect_thresholds()
+        return build_snapshot(
+            self._enabled_modules(),
+            self.formula_builder.get_expr(),
+            weights,
+            thresholds,
+        )
+
+    def _refresh_formula_combo(self, select_name=None):
+        names = list_saved_formulas()
+        self.formula_combo["values"] = names
+        pick = select_name or self._loaded_formula_name or self.formula_pick_var.get()
+        if pick and pick in names:
+            self.formula_pick_var.set(pick)
+        elif names:
+            self.formula_pick_var.set(names[0])
+        else:
+            self.formula_pick_var.set("")
+
+    def _on_formula_pick_selected(self, _event=None):
+        pass
+
+    def _load_selected_formula(self):
+        name = self.formula_pick_var.get().strip()
+        if not name:
+            messagebox.showinfo("Nạp công thức", "Chưa có file trong thư mục reward_formula/.")
+            return
+        try:
+            self._apply_formula_snapshot(load_formula_file(name))
+            self._loaded_formula_name = normalize_formula_basename(name)
+            self.apply_status.set("Đã nạp: %s — chỉnh rồi bấm Lưu công thức" % self._loaded_formula_name)
+        except (OSError, ValueError, json.JSONDecodeError) as exc:
+            messagebox.showerror("Nạp công thức", str(exc))
+
+    def _apply_formula_snapshot(self, data):
+        self._loading = True
+        try:
+            modules = set(data.get("enabled_modules") or [])
+            if not modules:
+                modules = set(self._module_vars.keys())
+            for mid, var in self._module_vars.items():
+                var.set(mid in modules)
+
+            weights = data.get("element_weights") or {}
+            for eid, var in self._weight_vars.items():
+                if eid in weights:
+                    var.set(str(weights[eid]))
+
+            thresholds = data.get("thresholds") or {}
+            for k, var in self._threshold_vars.items():
+                if k in thresholds:
+                    var.set(str(thresholds[k]))
+
+            expr = data.get("total_formula") or ""
+            self.formula_builder.set_labels(self._enabled_labels())
+            self.formula_builder.set_expr(expr)
+            self._on_modules_changed()
+        finally:
+            self._loading = False
+
+    def _ask_formula_save_name(self):
+        default = self._loaded_formula_name or self.formula_pick_var.get().strip() or "cong_thuc_moi"
+        name = simpledialog.askstring(
+            "Lưu công thức",
+            "Tên file (không cần .json):",
+            initialvalue=default,
+            parent=self.root,
+        )
+        if name is None:
+            return None
+        try:
+            return normalize_formula_basename(name)
+        except ValueError as exc:
+            messagebox.showerror("Lưu công thức", str(exc), parent=self.root)
+            return None
+
     def _copy_export(self):
         self.root.clipboard_clear()
         self.root.clipboard_append(self.export_text.get("1.0", tk.END))
@@ -459,8 +564,23 @@ class LearnLabApp:
 
     def _save_to_project(self):
         self._save_after_id = None
+        if not self.formula_builder.is_valid():
+            messagebox.showwarning(
+                "Lưu công thức",
+                "Công thức chưa hợp lệ — sửa khung đỏ trước khi lưu.",
+                parent=self.root,
+            )
+            return
+        save_name = self._ask_formula_save_name()
+        if not save_name:
+            return
         try:
             self._sync_config_from_ui()
+            snapshot = self._collect_formula_snapshot()
+            json_path = save_formula_file(save_name, snapshot)
+            self._loaded_formula_name = save_name
+            self._refresh_formula_combo(select_name=save_name)
+
             vals = reward_config.get_reward_dict()
             enabled = self._enabled_modules()
 
@@ -480,9 +600,13 @@ class LearnLabApp:
                 importlib.reload(trainer)
             except Exception:
                 pass
-            self.apply_status.set("Đã lưu — Train tab dùng ngay")
+            self.apply_status.set(
+                "Đã lưu %s + áp dụng Train — %s"
+                % (os.path.basename(json_path), save_name)
+            )
         except Exception as exc:
             self.apply_status.set("Lỗi lưu: %s" % exc)
+            messagebox.showerror("Lưu công thức", str(exc), parent=self.root)
 
     def _reset_defaults(self):
         for mid, var in self._module_vars.items():

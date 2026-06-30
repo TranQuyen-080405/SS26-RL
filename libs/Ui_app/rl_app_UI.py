@@ -72,6 +72,8 @@ class RlApp:
         self._current_sync_evt = None
         self._sync_after_id = None
         self._sync_after_evt = None
+        self._locked_view = None
+        self._locked_mode = None
         self.train_map_mode = tk.StringVar(value="random")
         self._drag_src_iid = None
         self._eps_entry = None
@@ -272,8 +274,12 @@ class RlApp:
         self.map_hint.pack(anchor=tk.W, pady=(0, 4))
 
         self.train_cfg_frame = ttk.LabelFrame(frame, text="Danh sách map train", padding=6)
+        self.train_cfg_frame.columnconfigure(0, weight=1)
+        self.train_cfg_frame.rowconfigure(1, weight=1, minsize=72)
+        self.train_cfg_frame.rowconfigure(2, weight=0, minsize=48)
+
         mode_row = ttk.Frame(self.train_cfg_frame)
-        mode_row.pack(fill=tk.X, pady=(0, 6))
+        mode_row.grid(row=0, column=0, sticky="ew", pady=(0, 6))
         ttk.Label(mode_row, text="Chế độ train:").pack(side=tk.LEFT, padx=(0, 8))
         self.train_mode_group = SegmentGroup(
             mode_row,
@@ -284,13 +290,15 @@ class RlApp:
         self.train_mode_group.pack(side=tk.LEFT)
 
         tree_wrap = ttk.Frame(self.train_cfg_frame)
-        tree_wrap.pack(fill=tk.BOTH, expand=True)
+        tree_wrap.grid(row=1, column=0, sticky="nsew")
+        tree_wrap.columnconfigure(0, weight=1)
+        tree_wrap.rowconfigure(0, weight=1)
         scroll_t = ttk.Scrollbar(tree_wrap, orient=tk.VERTICAL)
         self.train_tree = ttk.Treeview(
             tree_wrap,
             columns=("on", "ord", "name", "eps"),
             show="headings",
-            height=14,
+            height=8,
             yscrollcommand=scroll_t.set,
             selectmode="browse",
         )
@@ -302,17 +310,22 @@ class RlApp:
         self.train_tree.column("ord", width=32, anchor=tk.CENTER, stretch=False)
         self.train_tree.column("name", width=200, anchor=tk.W, stretch=True)
         self.train_tree.column("eps", width=80, anchor=tk.CENTER, stretch=False)
-        self.train_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        scroll_t.pack(side=tk.RIGHT, fill=tk.Y)
+        self.train_tree.grid(row=0, column=0, sticky="nsew")
+        scroll_t.grid(row=0, column=1, sticky="ns")
         self.train_tree.bind("<<TreeviewSelect>>", self._on_train_tree_select)
         self.train_tree.bind("<Button-1>", self._on_train_tree_click, add=True)
         self.train_tree.bind("<ButtonRelease-1>", self._on_train_drag_release, add=True)
         self.train_tree.bind("<B1-Motion>", self._on_train_drag_motion, add=True)
 
-        btn_row = ttk.Frame(self.train_cfg_frame)
-        btn_row.pack(fill=tk.X, pady=(6, 0))
-        box_button(btn_row, text="Tất cả", command=self._train_select_all, role="accent").pack(side=tk.LEFT, padx=(0, 4))
-        box_button(btn_row, text="Bỏ chọn", command=self._train_select_none, role="secondary").pack(side=tk.LEFT, padx=4)
+        btn_row = tk.Frame(self.train_cfg_frame, height=44)
+        btn_row.grid(row=2, column=0, sticky="ew", pady=(6, 0))
+        btn_row.grid_propagate(False)
+        box_button(btn_row, text="Tất cả", command=self._train_select_all, role="accent").pack(
+            side=tk.LEFT, padx=(0, 4), pady=4
+        )
+        box_button(btn_row, text="Bỏ chọn", command=self._train_select_none, role="secondary").pack(
+            side=tk.LEFT, padx=4, pady=4
+        )
 
         self.infer_list_frame = ttk.LabelFrame(frame, text="Chọn map infer", padding=6)
         list_frame = ttk.Frame(self.infer_list_frame)
@@ -628,6 +641,9 @@ class RlApp:
             return 200
 
     def _on_mode_change(self):
+        if self._running and self._locked_mode and self.mode.get() != self._locked_mode:
+            self.mode.set(self._locked_mode)
+            return
         self.refresh_maps()
         if self.mode.get() == "train":
             self.infer_policy_frame.pack_forget()
@@ -645,7 +661,35 @@ class RlApp:
             self.spin_ep.configure(state=tk.DISABLED)
         self._update_view_widgets()
 
+    def _clear_log(self):
+        self.log.configure(state=tk.NORMAL)
+        self.log.delete("1.0", tk.END)
+        self.log.configure(state=tk.DISABLED)
+
+    def _begin_run(self):
+        self._running = True
+        self._stop_requested = False
+        self._locked_view = self.view.get()
+        self._locked_mode = self.mode.get()
+        self.btn_run.configure(state=tk.DISABLED)
+        self.btn_stop.configure(state=tk.NORMAL)
+        self.view_group.set_enabled(False)
+        self.mode_group.set_enabled(False)
+
+    def _end_run(self):
+        self._running = False
+        self._stop_requested = False
+        self._locked_view = None
+        self._locked_mode = None
+        self.btn_run.configure(state=tk.NORMAL)
+        self.btn_stop.configure(state=tk.DISABLED)
+        self.view_group.set_enabled(True)
+        self.mode_group.set_enabled(True)
+
     def _on_view_change(self):
+        if self._running and self._locked_view and self.view.get() != self._locked_view:
+            self.view.set(self._locked_view)
+            return
         self._update_view_widgets()
 
     def _on_map_select(self, _event=None):
@@ -894,23 +938,16 @@ class RlApp:
             if self._anim_after_id:
                 self.root.after_cancel(self._anim_after_id)
                 self._anim_after_id = None
-            self._running = False
-            self.btn_run.configure(state=tk.NORMAL)
+            self._end_run()
             self.status.set("Stopped")
             self.map_view.set_status("Đã dừng infer")
 
 
     def _begin_train(self):
-        self._running = True
-        self._stop_requested = False
-        self.btn_run.configure(state=tk.DISABLED)
-        self.btn_stop.configure(state=tk.NORMAL)
+        self._begin_run()
 
     def _end_train(self, stopped=False, episodes_done=0, export_path=None):
-        self._running = False
-        self._stop_requested = False
-        self.btn_run.configure(state=tk.NORMAL)
-        self.btn_stop.configure(state=tk.DISABLED)
+        self._end_run()
         export_name = os.path.basename(export_path) if export_path else ""
         if stopped:
             self.status.set("Stopped — đã lưu %s (%d episodes)" % (export_name or "policy", episodes_done))
@@ -958,10 +995,8 @@ class RlApp:
 
     def _run_train_log(self, export_path):
         self._begin_train()
+        self._clear_log()
         self.status.set("Running...")
-        self.log.configure(state=tk.NORMAL)
-        self.log.delete("1.0", tk.END)
-        self.log.configure(state=tk.DISABLED)
 
         try:
             mode, sims, plan, n_ep = self._build_train_run_config()
@@ -999,6 +1034,7 @@ class RlApp:
 
     def _run_train_map(self, export_path):
         self._begin_train()
+        self._clear_log()
         self.status.set("Training...")
         if self._anim_after_id:
             self.root.after_cancel(self._anim_after_id)
@@ -1016,6 +1052,8 @@ class RlApp:
         def work():
             import rl_runner
 
+            old_stdout = sys.stdout
+            sys.stdout = TextRedirector(self.log, self.root)
             try:
                 result = rl_runner.run_train(
                     n_episodes=n_ep,
@@ -1029,26 +1067,24 @@ class RlApp:
                     sequential_plan=plan,
                     export_policy_path=export_path,
                 )
+            except Exception as exc:
+                print("ERROR:", exc)
+                result = {"stopped": False}
+            finally:
+                sys.stdout = old_stdout
                 stopped = result.get("stopped", False)
                 ep_done = result.get("episodes_done", 0)
                 out = result.get("export_path", export_path)
                 self._ui_async(lambda s=stopped, e=ep_done, p=out: self._end_train(s, e, p))
-            except Exception as exc:
-                self._ui_async(lambda err=exc: self._infer_error(err))
 
         threading.Thread(target=work, daemon=True).start()
 
     def _run_infer_log(self, idx):
         map_path = self._map_paths[idx]
         policy_bin = self._infer_policy_bin()
-        self._running = True
-        self._stop_requested = False
-        self.btn_run.configure(state=tk.DISABLED)
-        self.btn_stop.configure(state=tk.NORMAL)
+        self._begin_run()
+        self._clear_log()
         self.status.set("Running...")
-        self.log.configure(state=tk.NORMAL)
-        self.log.delete("1.0", tk.END)
-        self.log.configure(state=tk.DISABLED)
 
         def work():
             import rl_runner
@@ -1070,10 +1106,8 @@ class RlApp:
     def _run_infer_map(self, idx):
         map_path = self._map_paths[idx]
         policy_bin = self._infer_policy_bin()
-        self._running = True
-        self._stop_requested = False
-        self.btn_run.configure(state=tk.DISABLED)
-        self.btn_stop.configure(state=tk.NORMAL)
+        self._begin_run()
+        self._clear_log()
         self.status.set("Computing path...")
         if self._anim_after_id:
             self.root.after_cancel(self._anim_after_id)
@@ -1082,21 +1116,23 @@ class RlApp:
         def work():
             import rl_runner
 
+            old_stdout = sys.stdout
+            sys.stdout = TextRedirector(self.log, self.root)
             try:
                 sim, outcome = rl_runner.run_infer_episode_for_map(
-                    map_path, verbose=False, policy_bin=policy_bin
+                    map_path, verbose=True, policy_bin=policy_bin
                 )
                 self._ui_async(lambda s=sim, o=outcome: self._start_animation(s, o))
             except Exception as exc:
+                print("ERROR:", exc)
                 self._ui_async(lambda err=exc: self._infer_error(err))
+            finally:
+                sys.stdout = old_stdout
 
         threading.Thread(target=work, daemon=True).start()
 
     def _infer_error(self, exc):
-        self._running = False
-        self._stop_requested = False
-        self.btn_run.configure(state=tk.NORMAL)
-        self.btn_stop.configure(state=tk.DISABLED)
+        self._end_run()
         self.status.set("Error")
         messagebox.showerror("Error", str(exc))
 
@@ -1113,9 +1149,7 @@ class RlApp:
         if self._stop_requested:
             self.map_view.set_status("Đã dừng infer")
             self.status.set("Stopped")
-            self._running = False
-            self.btn_run.configure(state=tk.NORMAL)
-            self.btn_stop.configure(state=tk.DISABLED)
+            self._end_run()
             return
         if index >= len(log):
             status = outcome.get("status", "?")
@@ -1128,8 +1162,7 @@ class RlApp:
                 msg = "Kết thúc: %s (%d bước)" % (status, steps)
             self.map_view.set_status(msg)
             self.status.set("Done — " + msg)
-            self._running = False
-            self.btn_run.configure(state=tk.NORMAL)
+            self._end_run()
             return
 
         entry = log[index]
@@ -1137,10 +1170,7 @@ class RlApp:
         self._anim_after_id = self.root.after(delay, lambda: self._play_steps(log, index + 1, outcome, delay))
 
     def _run_done(self):
-        self._running = False
-        self._stop_requested = False
-        self.btn_run.configure(state=tk.NORMAL)
-        self.btn_stop.configure(state=tk.DISABLED)
+        self._end_run()
         self.status.set("Done")
 
     def run(self):

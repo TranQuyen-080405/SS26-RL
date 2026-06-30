@@ -30,7 +30,7 @@ MAX_STEPS_PER_EPISODE = 600
 # --- Learn Lab: module bật + công thức từng element ---
 ENABLED_MODULES = set(['explore_penalty', 'rotation'])
 ELEMENT_FORMULAS = dict(DEFAULT_ELEMENT_FORMULAS)
-TOTAL_FORMULA_STUDENT = 'Xoay lãng phí +  Xoay tại chỗ liên tục +  Đi qua đi lại'
+TOTAL_FORMULA_STUDENT = 'Xoay tại chỗ +  Xoay hướng thông thoáng +  Xoay lãng phí'
 
 REWARD_KEYS = (
     "R_STEP",
