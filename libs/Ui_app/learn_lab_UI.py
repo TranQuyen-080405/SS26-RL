@@ -100,6 +100,10 @@ class LearnLabApp:
         self._loading = False
         self._refresh_reward_panel()
         self._update_state_display()
+        self._refresh_move_gate()
+
+    def _refresh_move_gate(self):
+        self.scenario_map.set_move_enabled(self.formula_builder.is_valid())
 
     def _build_ui(self):
         main_layout = ttk.Frame(self.container)
@@ -324,6 +328,7 @@ class LearnLabApp:
         self._refresh_reward_panel()
         self._update_state_display()
         self._refresh_export()
+        self._refresh_move_gate()
 
     def _refresh_reward_panel(self):
         labels = self._enabled_labels()
@@ -367,8 +372,11 @@ class LearnLabApp:
         self._sync_config_from_ui()
         self._refresh_weight_panel()
         self._refresh_export()
+        self._refresh_move_gate()
 
     def _on_scenario_event(self, action_name):
+        if action_name and not self.formula_builder.is_valid():
+            return
         self._sync_config_from_ui()
         if action_name:
             self.world.do_action(action_name)

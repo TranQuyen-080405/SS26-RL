@@ -58,9 +58,16 @@ class LabScenarioMap5:
         act_row = ttk.Frame(self.frame)
         act_row.pack(fill=tk.X, pady=(4, 4))
         ttk.Label(act_row, text="Move:").pack(side=tk.LEFT, padx=(0, 8))
-        ttk.Button(act_row, text="Rotate Left", command=lambda: self._action("rotate left")).pack(side=tk.LEFT, padx=3)
-        ttk.Button(act_row, text="Forward", command=lambda: self._action("forward")).pack(side=tk.LEFT, padx=3)
-        ttk.Button(act_row, text="Rotate Right", command=lambda: self._action("rotate right")).pack(side=tk.LEFT, padx=3)
+        self._move_btns = []
+        for label, cmd in (
+            ("Rotate Left", lambda: self._action("rotate left")),
+            ("Forward", lambda: self._action("forward")),
+            ("Rotate Right", lambda: self._action("rotate right")),
+        ):
+            btn = ttk.Button(act_row, text=label, command=cmd)
+            btn.pack(side=tk.LEFT, padx=3)
+            self._move_btns.append(btn)
+        self._move_enabled = True
 
         self._build_result_panel()
         self.set_result_display(state_rows=[], has_action=False)
@@ -116,7 +123,7 @@ class LabScenarioMap5:
     def _format_formula(formula):
         if not formula or not str(formula).strip():
             return "(trống — chưa cộng điểm)"
-        return formula.replace(" + ", "\n  + ").replace(" - ", "\n  − ")
+        return formula.replace(" + ", "\n  + ").replace(" - ", "\n  − ").replace(" * ", "\n  × ").replace(" / ", "\n  ÷ ").replace(" ^ ", "\n  ^ ")
 
     def _clear_frame(self, frame):
         for w in frame.winfo_children():
@@ -181,7 +188,7 @@ class LabScenarioMap5:
             elif parts:
                 tk.Label(
                     self._parts_frame,
-                    text="Chi tiết cộng / trừ:",
+                    text="Chi tiết thành phần:",
                     bg=_REWARD_BG,
                     fg="#a6adc8",
                     font=("", 8, "bold"),
@@ -226,12 +233,23 @@ class LabScenarioMap5:
         """Tương thích cũ — parse tối thiểu."""
         self.set_result_display(state_rows=text.splitlines(), has_action=False)
 
+    def set_move_enabled(self, enabled):
+        self._move_enabled = bool(enabled)
+        state = tk.NORMAL if self._move_enabled else tk.DISABLED
+        for btn in self._move_btns:
+            try:
+                btn.configure(state=state)
+            except tk.TclError:
+                pass
+
     def _reset(self):
         self.world.reset_scenario()
         self.redraw()
         self._notify()
 
     def _action(self, name):
+        if not self._move_enabled:
+            return
         if self.on_change:
             self.on_change(name)
 

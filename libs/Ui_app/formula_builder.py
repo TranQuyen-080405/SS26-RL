@@ -5,7 +5,7 @@ import tkinter.font as tkfont
 from tkinter import ttk
 
 from RL_lib.lab_registry import REWARD_ELEMENTS
-from RL_lib.student_formula import parse_expr_to_tokens, tokens_to_expr
+from RL_lib.student_formula import parse_expr_to_tokens, tokens_to_expr, validate_formula_tokens
 
 # Màu chip reward theo state module
 _MODULE_CHIP = {
@@ -24,6 +24,8 @@ _OP_CHIP = {
     "*": {"bg": "#89dceb", "fg": "#1e1e2e"},
     "/": {"bg": "#f5c2e7", "fg": "#1e1e2e"},
     "^": {"bg": "#ffd166", "fg": "#1e1e2e"},
+}
+_PAREN_CHIP = {
     "(": {"bg": "#9399b2", "fg": "#eff1f5"},
     ")": {"bg": "#9399b2", "fg": "#eff1f5"},
 }
@@ -31,6 +33,8 @@ _DEFAULT_OP = {"bg": "#585b70", "fg": "#cdd6f4"}
 
 _CHIP_NUM = {"bg": "#74c7ec", "fg": "#11111b"}
 _BAR_BG = "#313244"
+_BAR_BORDER_OK = "#45475a"
+_BAR_BORDER_ERR = "#f38ba8"
 _DROP_LINE_CORE = "#ffffff"
 _DROP_LINE_GLOW = "#89b4fa"
 _GHOST_ALPHA = 0.88
@@ -55,6 +59,8 @@ class FormulaBuilder(ttk.Frame):
         self._palette_btns = []
         self._palette_built_w = -1
         self._palette_font = tkfont.Font(family="TkDefaultFont", size=8, weight="bold")
+        self._valid = True
+        self._error_msg = ""
 
         ttk.Label(
             self,
@@ -80,7 +86,7 @@ class FormulaBuilder(ttk.Frame):
         chip_wrap.pack(side=tk.LEFT, fill=tk.X, expand=True)
 
         self._chip_canvas = tk.Canvas(
-            chip_wrap, height=44, bg=_BAR_BG, highlightthickness=1, highlightbackground="#45475a"
+            chip_wrap, height=44, bg=_BAR_BG, highlightthickness=2, highlightbackground=_BAR_BORDER_OK
         )
         self._chip_canvas.configure(takefocus=True)
         self._chip_canvas.pack(side=tk.TOP, fill=tk.X, expand=True)
@@ -114,10 +120,18 @@ class FormulaBuilder(ttk.Frame):
         tk.Button(btn_col, text="⌫", width=3, command=self.pop_token, **btn_style).pack(pady=2)
         tk.Button(btn_col, text="Xóa hết", width=7, command=self.clear, **btn_style).pack(pady=2)
 
+        self._err_lbl = tk.Label(
+            self,
+            text="",
+            fg=_BAR_BORDER_ERR,
+            font=("", 9, "bold"),
+            anchor=tk.W,
+        )
+
         op = ttk.Frame(self)
         op.pack(fill=tk.X, pady=2)
         ttk.Label(op, text="Phép toán:", font=("", 8)).pack(side=tk.LEFT, padx=(0, 4))
-        for sym, disp in (("+", "+"), ("-", "−"), ("*", "×"), ("/", "÷"), ("^", "^"), ("(", "("), (")", ")")):
+        for sym, disp in (("+", "+"), ("-", "−"), ("*", "×"), ("/", "÷"), ("^", "^")):
             style = _OP_CHIP.get(sym, _DEFAULT_OP)
             btn = tk.Button(
                 op,
@@ -133,6 +147,27 @@ class FormulaBuilder(ttk.Frame):
             )
             btn.pack(side=tk.LEFT, padx=1)
             btn.bind("<ButtonPress-1>", lambda e, s=sym: self._op_press(e, s))
+            btn.bind("<B1-Motion>", self._palette_motion)
+
+        paren_row = ttk.Frame(self)
+        paren_row.pack(fill=tk.X, pady=2)
+        ttk.Label(paren_row, text="Ngoặc:", font=("", 8)).pack(side=tk.LEFT, padx=(0, 4))
+        for sym in ("(", ")"):
+            style = _PAREN_CHIP[sym]
+            btn = tk.Button(
+                paren_row,
+                text=sym,
+                width=3,
+                bg=style["bg"],
+                fg=style["fg"],
+                activebackground=style["bg"],
+                relief=tk.RAISED,
+                bd=1,
+                font=("", 9, "bold"),
+                cursor="hand2",
+            )
+            btn.pack(side=tk.LEFT, padx=1)
+            btn.bind("<ButtonPress-1>", lambda e, s=sym: self._paren_press(e, s))
             btn.bind("<B1-Motion>", self._palette_motion)
 
         num_row = ttk.Frame(self)
@@ -157,6 +192,9 @@ class FormulaBuilder(ttk.Frame):
             return {"bg": s["bg"], "fg": s["fg"], "font": ("", 9, "bold")}, 8, 4
         if kind == "num":
             return {**_CHIP_NUM, "font": ("", 9, "bold")}, 6, 4
+        if kind == "paren":
+            s = _PAREN_CHIP.get(token["value"], _DEFAULT_OP)
+            return {"bg": s["bg"], "fg": s["fg"], "font": ("", 10, "bold")}, 5, 4
         sym = token["value"]
         s = _OP_CHIP.get(sym, _DEFAULT_OP)
         return {"bg": s["bg"], "fg": s["fg"], "font": ("", 10, "bold")}, 5, 4
@@ -170,6 +208,9 @@ class FormulaBuilder(ttk.Frame):
             "value": sym,
             "display": {"+": "+", "-": "−", "*": "×", "/": "÷", "^": "^"}.get(sym, sym),
         }
+
+    def _token_for_paren(self, sym):
+        return {"kind": "paren", "value": sym, "display": sym}
 
     def _on_palette_frame_configure(self, event):
         w = event.width
@@ -268,6 +309,27 @@ class FormulaBuilder(ttk.Frame):
         self.pop_token()
         return "break"
 
+    def is_valid(self):
+        return self._valid
+
+    def get_error(self):
+        return self._error_msg
+
+    def _validate_and_update(self):
+        ok, msg = validate_formula_tokens(self._tokens)
+        self._valid = ok
+        self._error_msg = msg
+        border = _BAR_BORDER_OK if ok else _BAR_BORDER_ERR
+        try:
+            self._chip_canvas.configure(highlightbackground=border, highlightthickness=2)
+        except tk.TclError:
+            pass
+        if ok:
+            self._err_lbl.pack_forget()
+        else:
+            self._err_lbl.config(text=msg or "Công thức không hợp lệ")
+            self._err_lbl.pack(fill=tk.X, pady=(0, 2))
+
     def set_labels(self, labels):
         self._known_labels = list(labels)
         self._palette_built_w = -1
@@ -306,6 +368,9 @@ class FormulaBuilder(ttk.Frame):
 
     def append_op(self, sym):
         self.insert_token(self._token_for_op(sym))
+
+    def append_paren(self, sym):
+        self.insert_token(self._token_for_paren(sym))
 
     def append_num(self, num):
         self.insert_token({"kind": "num", "value": str(num), "display": str(num)})
@@ -478,7 +543,7 @@ class FormulaBuilder(ttk.Frame):
                 for child in fr.winfo_children():
                     if not getattr(child, "_is_del_btn", False):
                         child.configure(fg="#6c7086", bg="#45475a")
-        elif mode in ("new", "new_op") and self._drag.get("source_btn"):
+        elif mode in ("new", "new_op", "new_paren") and self._drag.get("source_btn"):
             try:
                 self._drag["source_btn"].configure(relief=tk.SUNKEN)
             except tk.TclError:
@@ -513,7 +578,6 @@ class FormulaBuilder(ttk.Frame):
         self._drag = None
         self._hide_ghost()
         self._hide_drop_visual()
-        self._chip_canvas.configure(highlightbackground="#45475a")
         source_btn = drag.get("source_btn")
         if source_btn and source_btn.winfo_exists():
             try:
@@ -529,6 +593,9 @@ class FormulaBuilder(ttk.Frame):
             elif drag.get("mode") == "new_op" and drag.get("op_sym"):
                 if src is None or event.widget is src:
                     self.append_op(drag["op_sym"])
+            elif drag.get("mode") == "new_paren" and drag.get("paren_sym"):
+                if src is None or event.widget is src:
+                    self.append_paren(drag["paren_sym"])
             elif drag.get("mode") == "reorder":
                 self._chip_canvas.focus_set()
             return
@@ -538,7 +605,7 @@ class FormulaBuilder(ttk.Frame):
             return
 
         to_idx = self._drop_index(event.x_root, event.y_root)
-        if drag["mode"] in ("new", "new_op"):
+        if drag["mode"] in ("new", "new_op", "new_paren"):
             self.insert_token(drag["token"], to_idx)
         elif drag["mode"] == "reorder":
             self._move_token(drag["from"], to_idx)
@@ -565,7 +632,23 @@ class FormulaBuilder(ttk.Frame):
             "from": None,
             "label": None,
             "op_sym": sym,
+            "paren_sym": None,
             "token": self._token_for_op(sym),
+            "source_btn": event.widget,
+            "x0": event.x_root,
+            "y0": event.y_root,
+            "active": False,
+            "insert_idx": None,
+        }
+
+    def _paren_press(self, event, sym):
+        self._drag = {
+            "mode": "new_paren",
+            "from": None,
+            "label": None,
+            "op_sym": None,
+            "paren_sym": sym,
+            "token": self._token_for_paren(sym),
             "source_btn": event.widget,
             "x0": event.x_root,
             "y0": event.y_root,
@@ -601,7 +684,7 @@ class FormulaBuilder(ttk.Frame):
         if not self._drag:
             return
         drag = self._drag
-        if not drag.get("active") and drag.get("mode") in ("new", "new_op"):
+        if not drag.get("active") and drag.get("mode") in ("new", "new_op", "new_paren"):
             src = drag.get("source_btn")
             if src is not None and event.widget is not src:
                 self._finish_drag_silent()
@@ -683,6 +766,7 @@ class FormulaBuilder(ttk.Frame):
             hint.bind("<BackSpace>", self._on_backspace)
             hint.bind("<Button-1>", self._focus_bar)
             self._bind_formula_wheel_tree(hint)
+            self._validate_and_update()
             return
 
         width = self._chip_canvas.winfo_width()
@@ -706,6 +790,7 @@ class FormulaBuilder(ttk.Frame):
             row_w += (gap if row_w > 0 else 0) + bw
 
         self._bind_formula_wheel_tree(self._chip_inner)
+        self._validate_and_update()
 
     def _finish_drag_silent(self):
         if self._drag and self._drag.get("source_btn"):
@@ -723,6 +808,7 @@ class FormulaBuilder(ttk.Frame):
         return self._drag is not None
 
     def _notify(self):
+        self._validate_and_update()
         if self.on_change:
             self.on_change()
 

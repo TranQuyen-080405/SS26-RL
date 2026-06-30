@@ -22,15 +22,19 @@ _CMP = {
 _BOOL = {ast.And: all, ast.Or: any}
 
 
-def _normalize_power(expr):
-    """Học sinh dùng ^ ; Python AST dùng **."""
-    return re.sub(r"\s*\^\s*", " ** ", str(expr))
+def normalize_student_ops(expr):
+    """Chuẩn hóa phép học sinh (+ − × ÷ ^) sang cú pháp Python eval."""
+    s = str(expr).strip()
+    s = s.replace("\u2212", "-").replace("\u2013", "-").replace("\u2014", "-")
+    s = s.replace("\u00d7", "*").replace("\u00f7", "/")
+    s = re.sub(r"\s*\^\s*", " ** ", s)
+    return s
 
 
 def safe_eval_formula(expr, variables):
     if not expr or not str(expr).strip():
         return 0.0
-    normalized = _normalize_power(expr)
+    normalized = normalize_student_ops(expr)
     tree = ast.parse(normalized.strip(), mode="eval")
     return float(_eval_node(tree.body, variables))
 

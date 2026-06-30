@@ -69,7 +69,9 @@ class RlApp:
         self._map_paths = []
         self._train_rows = []
         self._anim_after_id = None
-        self._ui_done = threading.Event()
+        self._current_sync_evt = None
+        self._sync_after_id = None
+        self._sync_after_evt = None
         self.train_map_mode = tk.StringVar(value="random")
         self._drag_src_iid = None
         self._eps_entry = None
@@ -121,9 +123,9 @@ class RlApp:
         )
         self.delay_group.grid(row=0, column=10, padx=(0, 8))
 
-        box_button(bar, text="Refresh maps", command=self.refresh_maps, role="secondary").grid(
-            row=0, column=11, padx=(4, 0)
-        )
+        # box_button(bar, text="Refresh maps", command=self.refresh_maps, role="secondary").grid(
+        #     row=0, column=11, padx=(4, 0)
+        # )
 
     def _build_checkpoint_bar(self):
         self.ck_frame = ttk.LabelFrame(self.container, text="Policy train", padding=(8, 6))
@@ -595,7 +597,7 @@ class RlApp:
         self.root.after(0, lambda: self._handle_map_saved(kind, path))
 
     def _handle_map_saved(self, kind, path):
-        if self._running:
+        if self._is_busy():
             return
         basename = os.path.basename(path)
         if kind == "train" or (kind == "infer" and self.mode.get() == "infer"):
@@ -725,9 +727,13 @@ class RlApp:
         if self.view.get() == "map":
             self.root.after_idle(self._preview_map_from_selection)
 
+    def _is_busy(self):
+        """Đang chạy train/infer và chưa bấm Stop."""
+        return self._running and not self._stop_requested
+
     def refresh_map_view(self):
         """Đọc lại map từ map/train|infer/ và vẽ lại bản đồ đang chọn."""
-        if self._running:
+        if self._is_busy():
             messagebox.showinfo("Refresh map", "Đang chạy train/infer — bấm Stop hoặc đợi xong.")
             return
         kind = "train" if self.mode.get() == "train" else "infer"
@@ -793,26 +799,55 @@ class RlApp:
         self._ui_queue = queue.Queue()
         self._poll_after_id = self.root.after(20, self._process_ui_queue)
 
+    def _cancel_pending_ui_sync(self):
+        """Thoát các lệnh chờ UI (train map) khi bấm Stop."""
+        while not self._ui_queue.empty():
+            try:
+                _fn, evt, _delay_ms = self._ui_queue.get_nowait()
+                evt.set()
+            except queue.Empty:
+                break
+            except Exception:
+                break
+        if self._sync_after_id is not None:
+            try:
+                self.root.after_cancel(self._sync_after_id)
+            except tk.TclError:
+                pass
+            self._sync_after_id = None
+        if self._sync_after_evt is not None:
+            self._sync_after_evt.set()
+            self._sync_after_evt = None
+        if self._current_sync_evt is not None:
+            self._current_sync_evt.set()
+
     def _process_ui_queue(self):
         while not self._ui_queue.empty():
             try:
                 fn, evt, delay_ms = self._ui_queue.get_nowait()
             except queue.Empty:
                 break
-            
+
             try:
                 if not self._stop_requested:
                     fn()
             except Exception as e:
                 print("UI sync error:", e)
-            
-            if delay_ms > 0:
-                self.root.after(delay_ms, evt.set)
+
+            if delay_ms > 0 and not self._stop_requested:
+                self._sync_after_evt = evt
+
+                def _release_delayed():
+                    self._sync_after_id = None
+                    self._sync_after_evt = None
+                    evt.set()
+
+                self._sync_after_id = self.root.after(delay_ms, _release_delayed)
             else:
                 evt.set()
-                
+
             self._ui_queue.task_done()
-            
+
         self._poll_after_id = self.root.after(20, self._process_ui_queue)
 
     def _ui_sync(self, fn):
@@ -820,19 +855,27 @@ class RlApp:
         if self._stop_requested:
             return
         evt = threading.Event()
-        self._ui_queue.put((fn, evt, 0))
-        evt.wait()
+        self._current_sync_evt = evt
+        try:
+            self._ui_queue.put((fn, evt, 0))
+            evt.wait()
+        finally:
+            self._current_sync_evt = None
 
     def _ui_sync_after_delay(self, fn, delay_ms):
         if self._stop_requested:
             return
         evt = threading.Event()
-        self._ui_queue.put((fn, evt, delay_ms))
-        evt.wait()
+        self._current_sync_evt = evt
+        try:
+            self._ui_queue.put((fn, evt, delay_ms))
+            evt.wait()
+        finally:
+            self._current_sync_evt = None
 
     def _ui_async(self, fn):
-        """Chạy fn trên main thread bất đồng bộ (không block thread gọi)."""
-        self._ui_queue.put((fn, threading.Event(), 0))
+        """Chạy fn trên main thread — luôn thực thi (kể cả sau Stop, để gọi _end_train)."""
+        self.root.after(0, fn)
 
     def _should_stop_train(self):
         return self._stop_requested
@@ -841,23 +884,18 @@ class RlApp:
         if not self._running:
             return
         self._stop_requested = True
-        # Unblock any waiting sync threads in the queue
-        while not self._ui_queue.empty():
-            try:
-                fn, evt, delay_ms = self._ui_queue.get_nowait()
-                evt.set()
-            except Exception:
-                break
+        self._cancel_pending_ui_sync()
+        self.btn_stop.configure(state=tk.DISABLED)
         if self.mode.get() == "train":
-            self._ui_done.set()
             self.status.set("Stopping...")
+            if self.view.get() == "map":
+                self.map_view.set_status("Đang dừng train…")
         else:
             if self._anim_after_id:
                 self.root.after_cancel(self._anim_after_id)
                 self._anim_after_id = None
             self._running = False
             self.btn_run.configure(state=tk.NORMAL)
-            self.btn_stop.configure(state=tk.DISABLED)
             self.status.set("Stopped")
             self.map_view.set_status("Đã dừng infer")
 
@@ -1072,6 +1110,13 @@ class RlApp:
         self._play_steps(log, 0, outcome, delay)
 
     def _play_steps(self, log, index, outcome, delay):
+        if self._stop_requested:
+            self.map_view.set_status("Đã dừng infer")
+            self.status.set("Stopped")
+            self._running = False
+            self.btn_run.configure(state=tk.NORMAL)
+            self.btn_stop.configure(state=tk.DISABLED)
+            return
         if index >= len(log):
             status = outcome.get("status", "?")
             steps = outcome.get("steps", 0)

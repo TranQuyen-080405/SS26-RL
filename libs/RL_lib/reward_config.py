@@ -9,17 +9,17 @@ from RL_lib.student_formula import default_total_formula, tokens_to_expr, eval_s
 
 # --- Hằng reward (đặt 0 nếu module tắt / không dùng) ---
 R_STEP = -1.0
-R_COLLISION = -20.0
+R_COLLISION = 20.0
 R_GOAL_CLOSER = 5.0
 R_GOAL_FARTHER = 0.0
 R_CP_CLOSER = 8.0
 R_CP_FARTHER = 0.0
 R_CHECKPOINT_FIRST = 30.0
 R_GOAL_REACHED = 100.0
-R_ROTATE_IN_PLACE = -3.0
+R_ROTATE_IN_PLACE = 30
 R_FACING_CLEAR = 5.0
 R_FORWARD_CLEAR = 4.0
-R_WASTED_ROTATE = -12.0
+R_WASTED_ROTATE = 12.0
 
 MAX_ROTATE_STREAK = 4
 MAX_NODE_REVISITS = 5
@@ -28,9 +28,9 @@ COLLISION_RESET = False
 MAX_STEPS_PER_EPISODE = 600
 
 # --- Learn Lab: module bật + công thức từng element ---
-ENABLED_MODULES = set(['checkpoint', 'explore_penalty', 'goal', 'heading', 'obstacle', 'rotation', 'step'])
+ENABLED_MODULES = set(['explore_penalty', 'rotation'])
 ELEMENT_FORMULAS = dict(DEFAULT_ELEMENT_FORMULAS)
-TOTAL_FORMULA_STUDENT = 'Mỗi bước đi +  Va chạm tường +  Tiến lên thành công +  Lại gần đích +  Đến đích +  Lại gần checkpoint +  Chạm checkpoint +  Xoay tại chỗ +  Xoay hướng thông thoáng +  Xoay lãng phí Lại gần đích Lại gần đích Va chạm tường Đến đích +  Xoay tại chỗ liên tục +  Lại gần checkpoint Vào lại ô cũ nhiều lần +  Đi qua đi lại Lại gần checkpoint Lại gần checkpoint Tiến lên thành công Tiến lên thành công Tiến lên thành công Tiến lên thành công Tiến lên thành công Tiến lên thành công Tiến lên thành công Tiến lên thành công Tiến lên thành công Tiến lên thành công Tiến lên thành công Tiến lên thành công Tiến lên thành công Tiến lên thành công Tiến lên thành công Tiến lên thành công Tiến lên thành công Tiến lên thành công Tiến lên thành công Tiến lên thành công Tiến lên thành công Tiến lên thành công Tiến lên thành công Tiến lên thành công Tiến lên thành công Tiến lên thành công Tiến lên thành công Tiến lên thành công Tiến lên thành công Tiến lên thành công Tiến lên thành công Tiến lên thành công Tiến lên thành công Tiến lên thành công Tiến lên thành công Tiến lên thành công Tiến lên thành công Tiến lên thành công Tiến lên thành công Tiến lên thành công Tiến lên thành công'
+TOTAL_FORMULA_STUDENT = 'Xoay lãng phí +  Xoay tại chỗ liên tục +  Đi qua đi lại'
 
 REWARD_KEYS = (
     "R_STEP",
@@ -102,7 +102,6 @@ def sync_weights_from_elements(element_weights):
 
 def _build_reward_context(robot, sim_map, result, could_forward_before=False):
     from map import sim_map as sm
-    from RL_lib.grid import neighbor_xy
 
     collision = bool(result.get("collision"))
     moved = bool(result.get("moved"))
@@ -148,20 +147,7 @@ def _build_reward_context(robot, sim_map, result, could_forward_before=False):
     facing_clear_on = False
     if rotated and sim_map:
         x, y, d = robot["x"], robot["y"], robot["direct"]
-        if sm.can_move(sim_map, x, y, d):
-            nx, ny = neighbor_xy(x, y, d)
-            visited_cp = robot.get("cp_visited") or []
-            cps = sm.n_checkpoints(sim_map)
-            for i in range(cps):
-                if i < len(visited_cp) and not visited_cp[i]:
-                    cur = sm.dist_to_checkpoints(sim_map, x, y)[i]
-                    nxt = sm.dist_to_checkpoints(sim_map, nx, ny)[i]
-                    if nxt < cur:
-                        facing_clear_on = True
-                    break
-            else:
-                if sm.dist_to_goal(sim_map, nx, ny) < sm.dist_to_goal(sim_map, x, y):
-                    facing_clear_on = True
+        facing_clear_on = sm.can_move(sim_map, x, y, d)
 
     at_goal = bool(sim_map and sm.is_at_goal(sim_map, robot["x"], robot["y"]))
 
