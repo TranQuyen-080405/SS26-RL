@@ -50,12 +50,14 @@ class LabScenarioMap5:
             highlightthickness=0,
             cursor="crosshair",
             xscrollcommand=xscroll.set,
+            takefocus=1,
         )
         self.canvas.pack(side=tk.TOP, fill=tk.X)
         xscroll.config(command=self.canvas.xview)
         self.canvas.bind("<Button-1>", self._on_click)
 
         act_row = ttk.Frame(self.frame)
+        self._act_row = act_row
         act_row.pack(fill=tk.X, pady=(4, 4))
         ttk.Label(act_row, text="Move:").pack(side=tk.LEFT, padx=(0, 8))
         self._move_btns = []
@@ -68,11 +70,50 @@ class LabScenarioMap5:
             btn.pack(side=tk.LEFT, padx=3)
             self._move_btns.append(btn)
         self._move_enabled = True
+        self._key_actions = {
+            "w": "forward",
+            "a": "rotate left",
+            "d": "rotate right",
+        }
+
+        ttk.Label(act_row, text="(W / A / D)", foreground="#6c7086").pack(side=tk.LEFT, padx=(8, 0))
 
         self._build_result_panel()
         self.set_result_display(state_rows=[], has_action=False)
 
+        self._bind_keyboard()
         self.redraw()
+
+    def _bind_keyboard(self):
+        targets = [self.frame, self.canvas, self._act_row, self._state_box, self._reward_box]
+        for widget in targets:
+            widget.bind("<KeyPress>", self._on_key_press)
+        self.canvas.bind("<Button-1>", self._focus_map, add="+")
+        self.frame.bind("<Enter>", self._focus_map)
+
+    def _focus_map(self, _event=None):
+        try:
+            self.canvas.focus_set()
+        except tk.TclError:
+            pass
+
+    def _on_key_press(self, event):
+        if not self._move_enabled:
+            return
+        w = event.widget
+        if isinstance(w, (tk.Entry, ttk.Entry)):
+            return
+        try:
+            wclass = w.winfo_class()
+        except tk.TclError:
+            wclass = ""
+        if wclass in ("TSpinbox", "Spinbox"):
+            return
+        action = self._key_actions.get(event.keysym.lower())
+        if not action:
+            return
+        self._action(action)
+        return "break"
 
     def _build_result_panel(self):
         outer = ttk.Frame(self.frame)

@@ -1,0 +1,34 @@
+{
+  "version": 1,
+  "enabled_modules": [
+    "checkpoint",
+    "explore_penalty",
+    "goal",
+    "heading",
+    "obstacle",
+    "rotation",
+    "step"
+  ],
+  "total_formula": "Mỗi bước đi +  Va chạm tường +  Tiến lên thành công +  Lại gần đích +  Đến đích +  Lại gần checkpoint +  Chạm checkpoint +  Xoay tại chỗ +  Xoay hướng thông thoáng +  Xoay lãng phí +  Xoay tại chỗ liên tục +  Vào lại ô cũ nhiều lần +  Đi qua đi lại",
+  "element_weights": {
+    "R_STEP": -1.0,
+    "collision": -20.0,
+    "forward_clear": 4.0,
+    "goal_trend": 5.0,
+    "goal_reached": 100.0,
+    "cp_trend": 8.0,
+    "checkpoint": 30.0,
+    "rotate": -3.0,
+    "facing_clear": 5.0,
+    "wasted_rotate": -12.0,
+    "excess_rotate": -20.0,
+    "revisit": -20.0,
+    "ping_pong": -20.0
+  },
+  "thresholds": {
+    "MAX_ROTATE_STREAK": 4,
+    "MAX_NODE_REVISITS": 5,
+    "MAX_PING_PONG_CYCLES": 2
+  },
+  "name": "reward_result"
+}

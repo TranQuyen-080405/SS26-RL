@@ -123,19 +123,23 @@ class LearnLabApp:
         right = ttk.Frame(main_layout)
         right.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
+        self.apply_status = tk.StringVar(
+            value="Bấm 'Lưu công thức' để lưu file JSON và áp dụng cho Train"
+        )
+        self.export_text = None
+
         self.scenario_map = LabScenarioMap5(left, self.world, on_change=self._on_scenario_event)
         self._build_reward_config(right)
 
-        exp = ttk.LabelFrame(self.container, text="Xuất cấu hình", padding=4)
-        exp.pack(fill=tk.X, padx=6, pady=(0, 6))
-        bar = ttk.Frame(exp)
-        bar.pack(fill=tk.X)
-        ttk.Button(bar, text="Copy", command=self._copy_export).pack(side=tk.LEFT, padx=2)
-        ttk.Button(bar, text="Reset mặc định", command=self._reset_defaults).pack(side=tk.LEFT, padx=2)
-        self.apply_status = tk.StringVar(value="Bấm nút 'Lưu công thức' để lưu cấu hình và áp dụng cho Train")
-        ttk.Label(bar, textvariable=self.apply_status).pack(side=tk.LEFT, padx=8)
-        self.export_text = scrolledtext.ScrolledText(exp, height=3, font=("Consolas", 8))
-        self.export_text.pack(fill=tk.X)
+        # exp = ttk.LabelFrame(self.container, text="Xuất cấu hình", padding=4)
+        # exp.pack(fill=tk.X, padx=6, pady=(0, 6))
+        # bar = ttk.Frame(exp)
+        # bar.pack(fill=tk.X)
+        # ttk.Button(bar, text="Copy", command=self._copy_export).pack(side=tk.LEFT, padx=2)
+        # ttk.Button(bar, text="Reset mặc định", command=self._reset_defaults).pack(side=tk.LEFT, padx=2)
+        # ttk.Label(bar, textvariable=self.apply_status).pack(side=tk.LEFT, padx=8)
+        # self.export_text = scrolledtext.ScrolledText(exp, height=3, font=("Consolas", 8))
+        # self.export_text.pack(fill=tk.X)
 
     def _build_reward_config(self, parent):
         top = ttk.LabelFrame(parent, text="State dùng", padding=8)
@@ -193,6 +197,9 @@ class LearnLabApp:
         ttk.Button(formula_bar, text="Làm mới danh sách", command=self._refresh_formula_combo).pack(side=tk.LEFT, padx=(0, 8))
         self.btn_save_formula = ttk.Button(formula_bar, text="Lưu công thức", command=self._save_to_project)
         self.btn_save_formula.pack(side=tk.LEFT)
+        ttk.Label(formula_bar, textvariable=self.apply_status, foreground="#555").pack(
+            side=tk.LEFT, padx=(12, 0)
+        )
 
         ensure_formula_dir()
         self._refresh_formula_combo()
@@ -463,6 +470,8 @@ class LearnLabApp:
         self.formula_builder.set_expr(reward_config.get_total_formula_student())
 
     def _refresh_export(self):
+        if not self.export_text:
+            return
         self._sync_config_from_ui()
         vals = reward_config.get_reward_dict()
         text = (

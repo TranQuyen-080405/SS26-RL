@@ -9,17 +9,17 @@ from RL_lib.student_formula import default_total_formula, tokens_to_expr, eval_s
 
 # --- Hằng reward (đặt 0 nếu module tắt / không dùng) ---
 R_STEP = -1.0
-R_COLLISION = 20.0
+R_COLLISION = -20.0
 R_GOAL_CLOSER = 5.0
 R_GOAL_FARTHER = 0.0
 R_CP_CLOSER = 8.0
 R_CP_FARTHER = 0.0
 R_CHECKPOINT_FIRST = 30.0
 R_GOAL_REACHED = 100.0
-R_ROTATE_IN_PLACE = 30
+R_ROTATE_IN_PLACE = -3.0
 R_FACING_CLEAR = 5.0
 R_FORWARD_CLEAR = 4.0
-R_WASTED_ROTATE = 12.0
+R_WASTED_ROTATE = -12.0
 
 MAX_ROTATE_STREAK = 4
 MAX_NODE_REVISITS = 5
@@ -28,9 +28,9 @@ COLLISION_RESET = False
 MAX_STEPS_PER_EPISODE = 600
 
 # --- Learn Lab: module bật + công thức từng element ---
-ENABLED_MODULES = set(['explore_penalty', 'rotation'])
+ENABLED_MODULES = set(['checkpoint', 'explore_penalty', 'goal', 'heading', 'obstacle', 'rotation', 'step'])
 ELEMENT_FORMULAS = dict(DEFAULT_ELEMENT_FORMULAS)
-TOTAL_FORMULA_STUDENT = 'Xoay tại chỗ +  Xoay hướng thông thoáng +  Xoay lãng phí'
+TOTAL_FORMULA_STUDENT = 'Mỗi bước đi +  Va chạm tường +  Tiến lên thành công +  Lại gần đích +  Đến đích +  Lại gần checkpoint +  Chạm checkpoint +  Xoay tại chỗ +  Xoay hướng thông thoáng +  Xoay lãng phí +  Xoay tại chỗ liên tục +  Vào lại ô cũ nhiều lần +  Đi qua đi lại'
 
 REWARD_KEYS = (
     "R_STEP",
