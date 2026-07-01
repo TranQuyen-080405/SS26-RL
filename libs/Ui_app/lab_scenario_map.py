@@ -393,7 +393,15 @@ class LabScenarioMap5:
                 if (x, y) == goal:
                     fill = "#f38ba8"
                 elif (x, y) in cps:
-                    fill = "#f9e2af"
+                    try:
+                        idx = cps.index((x, y))
+                        visited = self.world.robot.get("cp_visited") or []
+                        if idx < len(visited) and visited[idx]:
+                            fill = "#89dceb"
+                        else:
+                            fill = "#f9e2af"
+                    except ValueError:
+                        fill = "#f9e2af"
                 c.create_rectangle(px, py, px + CELL, py + CELL, fill=fill, outline="#45475a")
 
         for y in range(h):

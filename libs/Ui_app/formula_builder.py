@@ -95,7 +95,8 @@ class FormulaBuilder(ttk.Frame):
             (_INNER_PAD, _INNER_PAD), window=self._chip_inner, anchor=tk.NW
         )
         self._chip_inner.bind("<Configure>", self._on_inner_configure)
-        self._chip_canvas.bind("<Configure>", self._on_canvas_configure)
+        self._resize_after_id = None
+        self._chip_canvas.bind("<Configure>", self._on_canvas_configure_debounced)
         for seq in ("<MouseWheel>", "<Shift-MouseWheel>", "<Button-4>", "<Button-5>"):
             self._chip_canvas.bind(seq, self._on_formula_wheel)
             self._chip_inner.bind(seq, self._on_formula_wheel)
@@ -282,8 +283,14 @@ class FormulaBuilder(ttk.Frame):
         if self._drag and self._drag.get("active"):
             self._refresh_drop_visual(self._drag.get("insert_idx", 0))
 
-    def _on_canvas_configure(self, event):
+    def _on_canvas_configure_debounced(self, event):
+        if self._resize_after_id:
+            self.after_cancel(self._resize_after_id)
         w = event.width
+        self._resize_after_id = self.after(80, lambda: self._on_canvas_configure(w))
+
+    def _on_canvas_configure(self, w):
+        self._resize_after_id = None
         if w <= 1 or w == self._last_layout_w:
             return
         self._last_layout_w = w

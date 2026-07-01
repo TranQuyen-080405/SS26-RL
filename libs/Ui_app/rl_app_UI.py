@@ -79,6 +79,7 @@ class RlApp:
         self._eps_entry = None
         self._eps_edit_iid = None
         self._start_queue_processing()
+        self.learn_lab_app = None
 
         self._build_toolbar()
         self._build_checkpoint_bar()
@@ -89,6 +90,10 @@ class RlApp:
         self.mode.trace_add("write", lambda *_: self._on_mode_change())
         self.view.trace_add("write", lambda *_: self._on_view_change())
         self._on_mode_change()
+
+        if not self._standalone:
+            self.container.bind("<Visibility>", self.update_formula_name)
+        self.update_formula_name()
 
     def _build_toolbar(self):
         bar = ttk.LabelFrame(self.container, text="Điều khiển chung", padding=8)
@@ -125,9 +130,18 @@ class RlApp:
         )
         self.delay_group.grid(row=0, column=10, padx=(0, 8))
 
-        # box_button(bar, text="Refresh maps", command=self.refresh_maps, role="secondary").grid(
-        #     row=0, column=11, padx=(4, 0)
-        # )
+        # Row 1: Công thức reward hiện tại
+        ttk.Label(bar, text="Công thức reward:").grid(row=1, column=0, columnspan=2, sticky=tk.W, pady=(8, 0))
+        self.formula_name_var = tk.StringVar(value="")
+        self.combo_formula = ttk.Combobox(
+            bar,
+            textvariable=self.formula_name_var,
+            state="readonly",
+            width=48,
+            postcommand=self.refresh_formula_list,
+        )
+        self.combo_formula.grid(row=1, column=2, columnspan=9, sticky=tk.W, pady=(8, 0))
+        self.combo_formula.bind("<<ComboboxSelected>>", self._on_formula_selected)
 
     def _build_checkpoint_bar(self):
         self.ck_frame = ttk.LabelFrame(self.container, text="Policy train", padding=(8, 6))
@@ -1172,6 +1186,84 @@ class RlApp:
     def _run_done(self):
         self._end_run()
         self.status.set("Done")
+
+    def set_learn_lab_app(self, app):
+        self.learn_lab_app = app
+
+    def refresh_formula_list(self):
+        try:
+            from RL_lib.formula_store import list_saved_formulas
+            names = list_saved_formulas()
+            self.combo_formula["values"] = names
+        except Exception:
+            pass
+
+    def _on_formula_selected(self, _event=None):
+        name = self.formula_name_var.get().strip()
+        if not name:
+            return
+        if self.learn_lab_app:
+            self.learn_lab_app.load_and_compile_formula(name)
+        else:
+            # Standalone fallback: load to memory & compile to reward_config.py
+            try:
+                from RL_lib.formula_store import load_formula_file, normalize_formula_basename
+                from RL_lib import reward_config
+                import importlib
+                
+                data = load_formula_file(name)
+                # Apply in memory
+                weights = data.get("element_weights") or {}
+                reward_config.sync_weights_from_elements(weights)
+                
+                thresholds = data.get("thresholds") or {}
+                for k, v in thresholds.items():
+                    if k in reward_config.REWARD_KEYS:
+                        setattr(reward_config, k, v)
+                
+                reward_config.set_total_formula_student(data.get("total_formula") or "")
+                reward_config.set_enabled_modules(data.get("enabled_modules") or [])
+                
+                norm_name = normalize_formula_basename(name)
+                reward_config.set_formula_name(norm_name)
+                
+                # Patch file
+                pc_path = os.path.join(os.path.dirname(reward_config.__file__), "reward_config.py")
+                with open(pc_path, "r", encoding="utf-8") as f:
+                    src = f.read()
+                
+                from Ui_app.learn_lab_UI import _patch_line, _patch_enabled_modules, _patch_total_formula, _patch_formula_name
+                
+                for k, v in reward_config.get_reward_dict().items():
+                    if k in reward_config.REWARD_KEYS:
+                        src = _patch_line(src, k, v)
+                src = _patch_enabled_modules(src, sorted(data.get("enabled_modules") or []))
+                src = _patch_total_formula(src, data.get("total_formula") or "")
+                src = _patch_formula_name(src, norm_name)
+                
+                with open(pc_path, "w", encoding="utf-8") as f:
+                    f.write(src)
+                
+                importlib.reload(reward_config)
+                try:
+                    import Simulation.robot.trainer as trainer
+                    importlib.reload(trainer)
+                except Exception:
+                    pass
+                self.status.set("Đã nạp công thức: %s" % norm_name)
+            except Exception as exc:
+                messagebox.showerror("Nạp công thức", "Lỗi nạp công thức: %s" % exc)
+
+    def update_formula_name(self, event=None):
+        if event and event.widget is not self.container:
+            return
+        self.refresh_formula_list()
+        try:
+            from RL_lib import reward_config
+            name = reward_config.get_formula_name()
+            self.formula_name_var.set(name)
+        except Exception:
+            self.formula_name_var.set("Không xác định")
 
     def run(self):
         if self._standalone:

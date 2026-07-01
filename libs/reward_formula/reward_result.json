@@ -9,26 +9,29 @@
     "rotation",
     "step"
   ],
-  "total_formula": "Mỗi bước đi +  Va chạm tường +  Tiến lên thành công +  Lại gần đích +  Đến đích +  Lại gần checkpoint +  Chạm checkpoint +  Xoay tại chỗ +  Xoay hướng thông thoáng +  Xoay lãng phí +  Xoay tại chỗ liên tục +  Vào lại ô cũ nhiều lần +  Đi qua đi lại",
+  "total_formula": "Mỗi bước đi +  Va chạm tường +  Tiến lên thành công +  Lại gần đích +  Đến đích +  Xoay sang hướng thông thoáng +  Xoay tại chỗ +  Xoay khi có thể đi thẳng +  Vào lại ô cũ +  Đi qua đi lại liên tục",
   "element_weights": {
-    "R_STEP": -1.0,
-    "collision": -20.0,
-    "forward_clear": 4.0,
-    "goal_trend": 5.0,
-    "goal_reached": 100.0,
-    "cp_trend": 8.0,
-    "checkpoint": 30.0,
-    "rotate": -3.0,
-    "facing_clear": 5.0,
-    "wasted_rotate": -12.0,
-    "excess_rotate": -20.0,
-    "revisit": -20.0,
-    "ping_pong": -20.0
+    "R_STEP": 1,
+    "collision": -20,
+    "forward_clear": 4,
+    "wall_detected": 0.0,
+    "goal_trend": 5,
+    "goal_reached": 50,
+    "cp_trend": 0.0,
+    "checkpoint": 0.0,
+    "rotate": -5,
+    "facing_clear": 5,
+    "wasted_rotate": -12,
+    "excess_rotate": 0.0,
+    "revisit": -20,
+    "ping_pong": -20,
+    "straight_streak": 0.0
   },
   "thresholds": {
     "MAX_ROTATE_STREAK": 4,
     "MAX_NODE_REVISITS": 5,
-    "MAX_PING_PONG_CYCLES": 2
+    "MAX_PING_PONG_CYCLES": 2,
+    "MAX_STRAIGHT_STREAK": 3
   },
   "name": "reward_result"
 }

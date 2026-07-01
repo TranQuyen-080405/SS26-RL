@@ -3,13 +3,25 @@
 from modules.server.ble_monitor import (
     publish_idle,
     publish_log,
+    set_map_cfg,
     start,
     wait_for_connection,
     wait_for_start,
 )
 
+# ---- Cấu hình map deploy (sửa ở đây) ----
+MAP_CFG = {
+    "w": 10,
+    "h": 10,
+    "start": (5, 0),
+    "goal": (5, 9),
+    "checkpoints": [],
+    "walls": [],
+}
+
 if __name__ == "__main__":
     start()
+    set_map_cfg(MAP_CFG)
     wait_for_connection()
     while True:
         wait_for_start()
@@ -17,7 +29,7 @@ if __name__ == "__main__":
         try:
             from modules.logics.logic import run
 
-            run()
+            run(MAP_CFG)
         except Exception as exc:
             print("infer crash:", exc)
             try:

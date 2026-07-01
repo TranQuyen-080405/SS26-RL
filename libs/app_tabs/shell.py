@@ -91,7 +91,8 @@ class SS26App:
 
         self.rl_app = RlApp(parent=tab_rl, root=self.root)
         MapEditorApp(parent=tab_map, root=self.root, on_saved=self.rl_app.notify_map_saved)
-        LearnLabApp(parent=tab_lab, root=self.root)
+        self.learn_lab_app = LearnLabApp(parent=tab_lab, root=self.root)
+        self.rl_app.set_learn_lab_app(self.learn_lab_app)
         self._monitor = RobotMonitorApp(parent=tab_robot, root=self.root)
 
         if 0 <= initial_tab < 4:

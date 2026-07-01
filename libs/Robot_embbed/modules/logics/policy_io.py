@@ -1,16 +1,35 @@
 """Load policy — MicroPython (.bin only, memoryview — tiết kiệm RAM)."""
 
+import os
 import struct
 
 from modules.logics.rl_core import N_ROWS, ACTIONS
 
-_DEFAULT_POLICY_BIN = "modules/logics/Q_table/policy.bin"
+_Q_TABLE_DIR = "modules/logics/Q_table"
 _POLICY_MV = None
+_LOADED_NAME = None
 
 
-def load_policy_bin(path=_DEFAULT_POLICY_BIN):
-    """Nạp policy.bin vào memoryview. Trả True nếu OK."""
-    global _POLICY_MV
+def _find_bin(folder=_Q_TABLE_DIR):
+    """Tìm file .bin đầu tiên trong folder Q_table."""
+    try:
+        for name in os.listdir(folder):
+            if name.endswith(".bin"):
+                return folder + "/" + name
+    except OSError:
+        pass
+    return None
+
+
+def load_policy_bin(path=None):
+    """Nạp file .bin vào memoryview. Nếu path=None, tự tìm trong Q_table."""
+    global _POLICY_MV, _LOADED_NAME
+    if path is None:
+        path = _find_bin()
+    if path is None:
+        _POLICY_MV = None
+        _LOADED_NAME = None
+        return False
     try:
         with open(path, "rb") as f:
             data = f.read()
@@ -18,10 +37,17 @@ def load_policy_bin(path=_DEFAULT_POLICY_BIN):
         if len(data) != need:
             return False
         _POLICY_MV = memoryview(data)
+        _LOADED_NAME = path
         return True
     except Exception:
         _POLICY_MV = None
+        _LOADED_NAME = None
         return False
+
+
+def loaded_name():
+    """Trả về tên file .bin đã load (hoặc None)."""
+    return _LOADED_NAME
 
 
 def policy_loaded():

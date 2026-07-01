@@ -12,21 +12,21 @@ STATE_MODULES = (
         "label": "Mỗi bước đi",
         "in_encode": False,
         "encode_fields": [],
-        "desc": "Luôn trừ/cộng mỗi action (không nằm trong vector state s).",
+        "desc": "Luôn trừ/cộng mỗi action (không nằm trong vector state).",
     },
     {
         "id": "obstacle",
-        "label": "Obstacle N/W/E/S",
+        "label": "Obstacle",
         "in_encode": True,
         "encode_fields": ["obstacle_nwes"],
-        "desc": "4 bit tường quanh robot trong s — liên quan va tường / forward.",
+        "desc": "4 bit tường quanh robot trong state — liên quan va tường / forward.",
     },
     {
         "id": "goal",
         "label": "Goal",
         "in_encode": True,
         "encode_fields": ["dist_goal_trend"],
-        "desc": "Trend khoảng cách goal (−1/0/+1) trong s + sự kiện tới goal.",
+        "desc": "Trend khoảng cách goal (−1/0/+1) trong state + sự kiện tới goal.",
     },
     {
         "id": "checkpoint",
@@ -40,21 +40,21 @@ STATE_MODULES = (
         "label": "Heading",
         "in_encode": True,
         "encode_fields": ["heading"],
-        "desc": "Hướng N/W/E/S trong s (4 giá trị cuối encode).",
+        "desc": "Hướng (N/W/E/S) trong state (4 giá trị cuối encode).",
     },
     {
         "id": "rotation",
         "label": "Xoay",
         "in_encode": False,
         "encode_fields": [],
-        "desc": "Action rotate — sinh reward xoay / xoay lãng / facing clear.",
+        "desc": "Action rotate — sinh reward xoay / xoay lãng phí / facing clear.",
     },
     {
         "id": "explore_penalty",
-        "label": "Phạt đi lặp / ping-pong",
+        "label": "Lặp lại đường đi",
         "in_encode": False,
         "encode_fields": [],
-        "desc": "Đi vào ô cũ quá nhiều, ping-pong (train, không có trong s).",
+        "desc": "Đi vào ô cũ quá nhiều.",
     },
 )
 
@@ -81,6 +81,12 @@ REWARD_ELEMENTS = {
         "module": "obstacle",
         "constants": ["R_FORWARD_CLEAR"],
         "default_formula": "R_FORWARD_CLEAR if moved and not collision else 0",
+    },
+    "wall_detected": {
+        "label": "Phát hiện tường",
+        "module": "obstacle",
+        "constants": ["R_WALL_DETECT"],
+        "default_formula": "R_WALL_DETECT if wall_detected else 0",
     },
     "goal_trend": {
         "label": "Lại gần đích",
@@ -113,13 +119,13 @@ REWARD_ELEMENTS = {
         "default_formula": "R_ROTATE_IN_PLACE if rotated else 0",
     },
     "facing_clear": {
-        "label": "Xoay hướng thông thoáng",
+        "label": "Xoay sang hướng thông thoáng",
         "module": "rotation",
         "constants": ["R_FACING_CLEAR"],
         "default_formula": "R_FACING_CLEAR if facing_clear_on else 0",
     },
     "wasted_rotate": {
-        "label": "Xoay lãng phí",
+        "label": "Xoay khi có thể đi thẳng",
         "module": "rotation",
         "constants": ["R_WASTED_ROTATE"],
         "default_formula": "R_WASTED_ROTATE if wasted_rotate_on else 0",
@@ -131,16 +137,22 @@ REWARD_ELEMENTS = {
         "default_formula": "R_COLLISION if excess_rotate else 0",
     },
     "revisit": {
-        "label": "Vào lại ô cũ nhiều lần",
+        "label": "Vào lại ô cũ",
         "module": "explore_penalty",
         "constants": ["R_COLLISION", "MAX_NODE_REVISITS"],
         "default_formula": "R_COLLISION if revisit_penalty else 0",
     },
     "ping_pong": {
-        "label": "Đi qua đi lại",
+        "label": "Đi qua đi lại liên tục",
         "module": "explore_penalty",
         "constants": ["R_COLLISION", "MAX_PING_PONG_CYCLES"],
         "default_formula": "R_COLLISION if ping_pong_penalty else 0",
+    },
+    "straight_streak": {
+        "label": "Giữ nguyên hướng đi",
+        "module": "heading",
+        "constants": ["R_STRAIGHT", "MAX_STRAIGHT_STREAK"],
+        "default_formula": "R_STRAIGHT if straight_streak_on else 0",
     },
 }
 
@@ -161,6 +173,8 @@ ELEMENT_WEIGHT_KEY = {
     "excess_rotate": "R_COLLISION",
     "revisit": "R_COLLISION",
     "ping_pong": "R_COLLISION",
+    "straight_streak": "R_STRAIGHT",
+    "wall_detected": "R_WALL_DETECT",
 }
 
 # Ngưỡng (ẩn tên code trong UI — label riêng)
@@ -168,6 +182,7 @@ THRESHOLD_LABELS = {
     "MAX_ROTATE_STREAK": "Ngưỡng xoay liên tiếp",
     "MAX_NODE_REVISITS": "Ngưỡng lặp ô",
     "MAX_PING_PONG_CYCLES": "Ngưỡng lặp",
+    "MAX_STRAIGHT_STREAK": "Ngưỡng giữ hướng",
 }
 
 FORMULA_HELP = "Ghép reward + phép + − × ÷ ^ ( ). Ví dụ: 2 ^ Mỗi bước đi + Va chạm tường × 2"

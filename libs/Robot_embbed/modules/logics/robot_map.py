@@ -143,9 +143,11 @@ def set_obstacle(robot_map, x, y, direction, blocked):
     node = get_node(robot_map, x, y)
     if node is None:
         return
+    nx, ny = neighbor_xy(x, y, direction)
+    if not is_valid(nx, ny, robot_map["width"], robot_map["height"]):
+        blocked = True
     val = 1 if blocked else 0
     node[OBSTACLE_KEYS[direction]] = val
-    nx, ny = neighbor_xy(x, y, direction)
     neighbor = get_node(robot_map, nx, ny)
     if neighbor is not None:
         neighbor[OBSTACLE_KEYS[OPPOSITE[direction]]] = val

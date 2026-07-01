@@ -1,166 +1,266 @@
 """
-Action trên robot thật — cập nhật x,y,direct sau khi sensor xác nhận.
-
-bot: dict state RL (x, y, direct, robot_map, …)
-robot: module xBot (from robot import robot) — motor / xoay
+Action robot thật — RL policy + xBot hardware.
+Hành vi phần cứng lấy từ code mẫu robotcon_xbot:
+  forward  = foward_fix() + follow_line_until(400ms)
+  rotate   = turn_angle(80) + fix_line + sleep(0.5)
+Giữa mỗi action có gap 0.2s.
 """
 import time
 
-from modules.logics.readSensor import read_obstacle, read_line
+from line_array import line_array
+from ultrasonic import ultrasonic
+from robot import robot
+
 from modules.logics.grid import neighbor_xy
 from modules.logics.robot_state import (
-    update_direction,
-    update_position,
-    snapshot_dist_before_move,
-    inject_distances_from_map,
-    compute_trends_after_move,
-    mark_moved,
-    build_encoded_state,
-    perceive_edge,
-    update_rotate_streak,
-    clear_move_trends,
+    update_direction, update_position,
+    snapshot_dist_before_move, inject_distances_from_map,
+    compute_trends_after_move, mark_moved,
+    build_encoded_state, perceive_edge,
+    update_rotate_streak, update_straight_streak, clear_move_trends,
 )
 from modules.logics.policy_io import get_policy_for_state
 from modules.logics.robot_map import can_move
+from modules.logics.robotcon_xbot import follow_line_until_cross
 
-from robot import robot
+# Cấu hình
+_LP    = 0     # line array port
+_UP    = 1     # ultrasonic port
+_SPD   = 30    # tốc độ bám line
+_TURN  = 80    # góc xoay (degree)
+_GAP   = 200   # delay giữa các action (ms)
+_OBS   = 8     # khoảng cách phát hiện vật cản (cm)
 
-_LINE_PORT = 0
-_US_PORT = 1
-_FOLLOW_SPEED = 25
-_LOST_BACK_SPEED = 6
-_FOLLOW_LOOP_MS = 12
 
-
-def _drive_stop():
+def _log(msg):
+    """Gửi log qua Bluetooth BLE lên PC và in ra Serial."""
     try:
-        robot.stop()
+        from modules.server.ble_monitor import publish_log
+        publish_log(msg)
     except Exception:
         pass
+    print(msg)
 
 
-def _obstacle_hit():
-    return bool(read_obstacle(port=_US_PORT))
+def _is_stopped():
+    """Kiểm tra tín hiệu Stop từ PC."""
+    try:
+        from modules.server.ble_monitor import is_stopped
+        return is_stopped()
+    except Exception:
+        return False
 
 
-def _follow_line_step(port=_LINE_PORT):
-    """Một bước bám — trả mode từ read_line (không dừng ở node)."""
-    mode = read_line(port)
-    if mode == "lost":
-        robot.backward(_LOST_BACK_SPEED)
-    elif mode == "forward" or mode == "node":
-        robot.forward(_FOLLOW_SPEED)
-    elif mode == "left":
-        robot.turn_left(10)
-    elif mode == "right":
-        robot.turn_right(10)
-    return mode
+def _read_obstacle():
+    """Đọc ultrasonic. True nếu vật cản < _OBS cm."""
+    try:
+        time.sleep_ms(30)
+        d = ultrasonic.distance_cm(_UP)
+    except Exception:
+        return False
+    if d >= 200:
+        return False
+    return d < _OBS
 
 
-def _follow_line_to_next_node(port=_LINE_PORT):
+def _finish(bot, res):
+    """Cập nhật streak counters và trả kết quả."""
+    update_rotate_streak(bot, res)
+    update_straight_streak(bot, res)
+    return res
+
+
+def _collision(bot):
+    """Trả kết quả va chạm."""
+    _log("SW: Collision registered")
+    clear_move_trends(bot)
+    return _finish(bot, {"success": False, "moved": False, "collision": True})
+
+
+# ================================================================
+# HW: Di chuyển thẳng — dùng follow_line_until_cross
+#   1. Thoát node hiện tại (chờ tới khi KHÔNG còn (1,1,1,1))
+#   2. Bám line tới node kế (phát hiện (1,1,1,1) 4 lần liên tiếp)
+#   3. Chạy thêm 0.1s rồi dừng (ổn định vị trí trên node)
+# ================================================================
+
+def _forward_to_node():
     """
-    Tiến tới node kế: nếu đang đứng trên node (4 sensor đen) thì chạy ra trước,
-    rồi bám line đến khi gặp node tiếp theo.
+    Bám line từ node hiện tại tới node kế tiếp.
+    Dùng follow_line_until_cross — robust hơn foward_fix:
+      - Tự exit node hiện tại (status=1)
+      - Follow line rồi detect node mới bằng 4 lần (1,1,1,1) (status=2)
+      - Dừng đúng tại node mới
+    Returns True nếu tới node, False nếu bị stop/va chạm.
     """
-    while read_line(port) == "node":
-        robot.forward(_FOLLOW_SPEED)
-        if _obstacle_hit():
-            _drive_stop()
-            return False
-        time.sleep_ms(_FOLLOW_LOOP_MS)
+    _log("HW: Forward — follow_line_until_cross tới node kế")
 
+    if _is_stopped():
+        robot.stop()
+        return False
+
+    follow_line_until_cross(_SPD, _LP, 20000)
+    _log("HW: Node kế tiếp reached")
+    return True
+
+
+# ================================================================
+# HW: Căn chỉnh line sau xoay — lấy từ fix_line_right/left()
+# ================================================================
+
+def _fix_line_right():
+    """Micro-adjust sau xoay phải tới khi 2 sensor giữa thấy đen (0,1,1,0)."""
+    _log("HW: Căn chỉnh line sau xoay phải")
     while True:
-        mode = _follow_line_step(port)
-        if mode == "node":
-            _drive_stop()
-            return True
-        if _obstacle_hit():
-            _drive_stop()
-            return False
-        time.sleep_ms(_FOLLOW_LOOP_MS)
+        s = line_array.read(_LP)
+        if s == (0, 1, 1, 0):
+            break
+        elif s in ((1, 0, 0, 0), (1, 1, 0, 0), (0, 1, 0, 0)):
+            robot.turn_left_angle(3)
+        elif s == (0, 0, 0, 0):
+            robot.turn_left_angle(5)
+        elif s in ((0, 0, 0, 1), (0, 0, 1, 1), (0, 0, 1, 0)):
+            robot.turn_right_angle(4)
 
+
+def _fix_line_left():
+    """Micro-adjust sau xoay trái tới khi 2 sensor giữa thấy đen (0,1,1,0)."""
+    _log("HW: Căn chỉnh line sau xoay trái")
+    while True:
+        s = line_array.read(_LP)
+        if s == (0, 1, 1, 0):
+            break
+        elif s in ((1, 0, 0, 0), (1, 1, 0, 0), (0, 1, 0, 0)):
+            robot.turn_left_angle(4)
+        elif s == (0, 0, 0, 0):
+            robot.turn_right_angle(5)
+        elif s in ((0, 0, 0, 1), (0, 0, 1, 1), (0, 0, 1, 0)):
+            robot.turn_right_angle(3)
+
+
+# ================================================================
+# SW: Cập nhật state sau forward
+# ================================================================
 
 def _commit_forward(bot):
-    """Sau khi đã tới node mới (sensor xác nhận): cập nhật x,y và trend."""
+    """Đã tới node mới → cập nhật x,y, dist, trend, checkpoint."""
+    _log("SW: Commit forward — tính tọa độ mới")
     snapshot_dist_before_move(bot)
-    d = bot["direct"]
-    nx, ny = neighbor_xy(bot["x"], bot["y"], d)
+    nx, ny = neighbor_xy(bot["x"], bot["y"], bot["direct"])
     update_position(bot, nx, ny)
     inject_distances_from_map(bot)
     compute_trends_after_move(bot)
-    # Cập nhật danh sách checkpoint đã đi qua khi chạy thật
-    cps = bot["robot_map"].get("checkpoints") or []
-    visited = bot.get("cp_visited") or []
-    for i, (cx, cy) in enumerate(cps):
-        if bot["x"] == cx and bot["y"] == cy and i < len(visited):
-            visited[i] = True
+    _log("SW: Vị trí mới (%d,%d)" % (bot["x"], bot["y"]))
+    # Đánh dấu checkpoint đã đi qua
+    for i, (cx, cy) in enumerate(bot["robot_map"].get("checkpoints") or []):
+        if bot["x"] == cx and bot["y"] == cy:
+            vis = bot.get("cp_visited") or []
+            if i < len(vis):
+                vis[i] = True
+                _log("SW: Checkpoint %d (%d,%d) visited" % (i, cx, cy))
     mark_moved(bot)
 
 
-def _finish_action(bot, result):
-    update_rotate_streak(bot, result)
-    return result
-
+# ================================================================
+# Các action RL — kết hợp HW + SW
+# ================================================================
 
 def forward_hw(bot):
-    """
-    Tiến 1 node trên robot thật:
-    1. ultrasonic — tường phía trước
-    2. follow line đến khi cả 4 sensor line đen (node)
-    3. _commit_forward — cập nhật x,y, dist, trend (giống sim)
-    """
-    x, y, d = bot["x"], bot["y"], bot["direct"]
+    """Tiến 1 node: check map → ultrasonic → follow line → commit."""
+    _log("HW: === FORWARD ===")
+    if not can_move(bot["robot_map"], bot["x"], bot["y"], bot["direct"]):
+        _log("SW: Hướng %s bị chặn trong bộ nhớ map" % bot["direct"])
+        return _collision(bot)
 
-    if not can_move(bot["robot_map"], x, y, d):
-        clear_move_trends(bot)
-        return _finish_action(bot, {"success": False, "moved": False, "collision": True})
+    if _read_obstacle():
+        _log("HW: Ultrasonic phát hiện vật cản")
+        perceive_edge(bot, True)
+        _log("SW: Cập nhật tường hướng %s" % bot["direct"])
+        return _collision(bot)
 
-    hit = read_obstacle(port=_US_PORT)
-    if hit:
-        clear_move_trends(bot)
-        return _finish_action(bot, {"success": False, "moved": False, "collision": True})
-
-    if not _follow_line_to_next_node(_LINE_PORT):
-        clear_move_trends(bot)
-        return _finish_action(bot, {"success": False, "moved": False, "collision": True})
+    if not _forward_to_node():
+        _log("HW: Forward thất bại")
+        perceive_edge(bot, True)
+        return _collision(bot)
 
     _commit_forward(bot)
-    return _finish_action(bot, {"success": True, "moved": True, "collision": False})
+    _log("HW: Forward thành công → (%d,%d)" % (bot["x"], bot["y"]))
+    return _finish(bot, {"success": True, "moved": True, "collision": False})
 
 
 def rotate_left_hw(bot):
-    robot.turn_left_angle(80)
+    """Xoay trái: motor turn → fix line → cập nhật hướng."""
+    _log("HW: === ROTATE LEFT ===")
+    robot.turn_left_angle(_TURN)
+    _fix_line_left()
+    time.sleep_ms(500)
+    # SW: cập nhật hướng
     update_direction(bot, "left")
     clear_move_trends(bot)
-    return _finish_action(bot, {"success": True, "moved": False, "collision": False})
+    _log("SW: Hướng mới = %s" % bot["direct"])
+    return _finish(bot, {"success": True, "moved": False, "collision": False})
 
 
 def rotate_right_hw(bot):
-    robot.turn_right_angle(80)
+    """Xoay phải: motor turn → fix line → cập nhật hướng."""
+    _log("HW: === ROTATE RIGHT ===")
+    robot.turn_right_angle(_TURN)
+    _fix_line_right()
+    time.sleep_ms(500)
+    # SW: cập nhật hướng
     update_direction(bot, "right")
     clear_move_trends(bot)
-    return _finish_action(bot, {"success": True, "moved": False, "collision": False})
+    _log("SW: Hướng mới = %s" % bot["direct"])
+    return _finish(bot, {"success": True, "moved": False, "collision": False})
 
 
-def execute_action(bot, action_name):
-    if action_name == "forward":
+def execute_action(bot, action):
+    """Thực thi 1 action (blocking — chờ xong mới return)."""
+    if action == "forward":
         return forward_hw(bot)
-    if action_name == "rotate left":
+    if action == "rotate left":
         return rotate_left_hw(bot)
-    if action_name == "rotate right":
+    if action == "rotate right":
         return rotate_right_hw(bot)
-    return _finish_action(bot, {"success": False, "moved": False, "collision": False})
+    return _finish(bot, {"success": False, "moved": False, "collision": False})
 
+
+# ================================================================
+# Vòng lặp RL: 1 bước infer
+# ================================================================
 
 def run_policy_step(bot):
-    try:
-        obs = read_obstacle(port=_US_PORT)
-    except Exception:
-        obs = None
-    if obs is not None:
-        perceive_edge(bot, bool(obs))
+    """
+    1 bước infer:
+      1. Quét ultrasonic → cập nhật tường
+      2. Encode state → query policy → chọn action
+      3. Execute action (blocking)
+      4. Gap 0.2s giữa các bước
+    """
+    _log("--- run_policy_step ---")
+
+    # 1. HW: quét ultrasonic trước mặt
+    obs = _read_obstacle()
+    _log("HW: Ultrasonic = %s" % ("vật cản" if obs else "trống"))
+    perceive_edge(bot, obs)
+    if obs:
+        _log("SW: Tường hướng %s ghi nhận" % bot["direct"])
+
+    # 2. SW: encode state → chọn action từ Q-table
     s = build_encoded_state(bot)
+    _log("SW: State=%d" % s)
     name = get_policy_for_state(s)
+    _log("SW: Policy → %s" % name)
+
+    # 3. Execute action (blocking)
     result = execute_action(bot, name)
-    time.sleep_ms(3000)
+    _log("SW: Kết quả: success=%s moved=%s collision=%s" % (
+        result.get("success"), result.get("moved"), result.get("collision")))
+
+    # 4. Gap 0.2s — chia nhỏ để có thể dừng ngay
+    for _ in range(4):
+        if _is_stopped():
+            break
+        time.sleep_ms(50)
+
     return name, result

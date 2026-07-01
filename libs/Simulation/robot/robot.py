@@ -39,6 +39,7 @@ def make_robot(x, y, direction, robot_map):
         "has_prev_node": False,
         "cp_visited": [False] * n_cp,
         "rotate_streak": 0,
+        "straight_streak": 0,
     }
 
 
@@ -123,6 +124,19 @@ def update_rotate_streak(robot, result):
         robot["rotate_streak"] = robot.get("rotate_streak", 0) + 1
     else:
         robot["rotate_streak"] = 0
+
+
+def update_straight_streak(robot, result):
+    """Đếm số lần đi thẳng hoặc giữ nguyên hướng liên tiếp (không xoay thành công); reset khi xoay."""
+    rotated = bool(
+        result.get("success")
+        and not result.get("moved")
+        and not result.get("collision")
+    )
+    if rotated:
+        robot["straight_streak"] = 0
+    else:
+        robot["straight_streak"] = robot.get("straight_streak", 0) + 1
 
 
 def build_encoded_state(robot):

@@ -27,6 +27,7 @@ def make_robot(x, y, direction, robot_map):
         "has_prev_node": False,
         "cp_visited": [False] * n_cp,
         "rotate_streak": 0,
+        "straight_streak": 0,
     }
 
 
@@ -108,6 +109,19 @@ def update_rotate_streak(robot, result):
         robot["rotate_streak"] = 0
 
 
+def update_straight_streak(robot, result):
+    """Đếm số lần đi thẳng hoặc giữ nguyên hướng liên tiếp (không xoay thành công); reset khi xoay."""
+    rotated = bool(
+        result.get("success")
+        and not result.get("moved")
+        and not result.get("collision")
+    )
+    if rotated:
+        robot["straight_streak"] = 0
+    else:
+        robot["straight_streak"] = robot.get("straight_streak", 0) + 1
+
+
 def build_encoded_state(robot):
     node = get_node(robot["robot_map"], robot["x"], robot["y"])
     if node is None:
@@ -123,3 +137,12 @@ def build_encoded_state(robot):
 
 def perceive_edge(robot, is_blocked):
     _perceive_edge(robot["robot_map"], robot["x"], robot["y"], robot["direct"], is_blocked)
+
+
+def clear_obstacle_memory(robot):
+    """Xóa bộ nhớ tường trên RobotMap (đầu episode)."""
+    for node in robot["robot_map"]["nodes"].values():
+        node["N_obstacle"] = 0
+        node["W_obstacle"] = 0
+        node["E_obstacle"] = 0
+        node["S_obstacle"] = 0

@@ -25,7 +25,25 @@ _conn = None
 _tx_handle = None
 _rx_handle = None
 _start_flag = False
+_stop_flag = False
 _adv_name = BLE_NAME
+_map_cfg = None
+
+
+def is_stopped():
+    global _stop_flag
+    return _stop_flag
+
+
+def clear_stop_flag():
+    global _stop_flag
+    _stop_flag = False
+
+
+def set_map_cfg(cfg):
+    """main.py gọi hàm này để truyền cấu hình map vào BLE monitor."""
+    global _map_cfg
+    _map_cfg = cfg
 
 
 def _advertise(name):
@@ -62,19 +80,17 @@ def publish_log(text):
 
 
 def _on_rx(data):
-    global _start_flag
+    global _start_flag, _stop_flag
     if not data:
         return
-    if data[0:1] == b"S":
+    cmd = data.strip().upper()
+    if cmd in (b"S", b"START"):
         _start_flag = True
+        _stop_flag = False
         publish_log("RX START (PC)")
-        return
-    try:
-        if data.strip().upper() in (b"S", b"START"):
-            _start_flag = True
-            publish_log("RX START (PC)")
-    except Exception:
-        pass
+    elif cmd in (b"T", b"STOP"):
+        _stop_flag = True
+        publish_log("RX STOP (PC)")
 
 
 def _irq(event, data):
@@ -153,20 +169,25 @@ def _walls_from_map(rmap):
     from modules.logics.grid import OBSTACLE_KEYS
 
     walls = []
+    w, h = rmap["width"], rmap["height"]
     for (x, y), node in rmap["nodes"].items():
         for d in ("N", "W", "E", "S"):
             if node[OBSTACLE_KEYS[d]]:
+                if x == 0 and d == "W": continue
+                if x == w - 1 and d == "E": continue
+                if y == 0 and d == "S": continue
+                if y == h - 1 and d == "N": continue
                 walls.append([x, y, d])
     return walls
 
 
 def _compact_state(robot, phase="i", step=0, action=None):
-    """Gói nhỏ (<240B) — PC đã có khung map; không gửi walls mỗi bước."""
     out = {
         "x": robot["x"],
         "y": robot["y"],
         "d": robot["direct"],
         "p": phase,
+        "walls": _walls_from_map(robot["robot_map"]),
     }
     if step:
         out["n"] = step
@@ -195,16 +216,14 @@ def publish_map_meta():
     """Gửi khung map (w/h/start/goal/checkpoints) — PC Robot Monitor đồng bộ layout."""
     import json
 
-    try:
-        from deploy_map import MAP_W, MAP_H, START, GOAL, CHECKPOINTS
-    except ImportError:
+    if _map_cfg is None:
         return
     obj = {
-        "w": MAP_W,
-        "h": MAP_H,
-        "s": list(START),
-        "g": list(GOAL),
-        "c": [list(cp) for cp in CHECKPOINTS],
+        "w": _map_cfg["w"],
+        "h": _map_cfg["h"],
+        "s": list(_map_cfg["start"]),
+        "g": list(_map_cfg["goal"]),
+        "c": [list(cp) for cp in _map_cfg["checkpoints"]],
     }
     try:
         payload = json.dumps(obj, separators=(",", ":"))
@@ -217,13 +236,16 @@ def publish_map_meta():
 
 def publish_idle(robot=None):
     if robot is None:
-        from deploy_map import MAP_W, MAP_H, START, GOAL, CHECKPOINTS, WALLS
+        if _map_cfg is None:
+            return
         from modules.logics.robot_map import init_robot_map, apply_walls_from_spec
         from modules.logics.robot_state import make_robot
 
-        rmap = init_robot_map(MAP_W, MAP_H, goal=GOAL, checkpoints=CHECKPOINTS, start=START)
-        apply_walls_from_spec(rmap, WALLS)
-        robot = make_robot(START[0], START[1], "N", rmap)
+        s = _map_cfg["start"]
+        rmap = init_robot_map(_map_cfg["w"], _map_cfg["h"], goal=_map_cfg["goal"],
+                              checkpoints=_map_cfg["checkpoints"], start=s)
+        apply_walls_from_spec(rmap, _map_cfg["walls"])
+        robot = make_robot(s[0], s[1], "N", rmap)
     publish_state(robot, phase="i", step=0)
     publish_map_meta()
 
@@ -247,10 +269,11 @@ def wait_for_connection(poll_ms=100):
 
 
 def wait_for_start(poll_ms=80):
-    global _start_flag
+    global _start_flag, _stop_flag
     import time
 
     _start_flag = False
+    _stop_flag = False
     has_btn = False
     try:
         from btn_onboard import btn_onboard

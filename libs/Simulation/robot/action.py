@@ -19,6 +19,7 @@ from robot import robot as rb
 
 def _finish_action(robot, result):
     rb.update_rotate_streak(robot, result)
+    rb.update_straight_streak(robot, result)
     return result
 
 

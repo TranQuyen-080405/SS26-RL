@@ -1,0 +1,32 @@
+{
+  "name": "test_real",
+  "kind": "infer",
+  "width": 10,
+  "height": 10,
+  "start": [
+    5,
+    0
+  ],
+  "goal": [
+    5,
+    9
+  ],
+  "checkpoints": [],
+  "walls": [
+    {
+      "x": 5,
+      "y": 4,
+      "dir": "N"
+    },
+    {
+      "x": 7,
+      "y": 4,
+      "dir": "E"
+    },
+    {
+      "x": 7,
+      "y": 5,
+      "dir": "N"
+    }
+  ]
+}

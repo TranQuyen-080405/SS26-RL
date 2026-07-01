@@ -2,28 +2,33 @@
   "version": 1,
   "enabled_modules": [
     "explore_penalty",
-    "rotation"
+    "rotation",
+    "heading",
+    "obstacle"
   ],
-  "total_formula": "Xoay tại chỗ +  Xoay hướng thông thoáng +  Xoay lãng phí",
+  "total_formula": "Xoay hướng + Xoay sang hướng thông thoáng + Xoay khi có thể đi thẳng + Giữ nguyên hướng đi + Phát hiện tường",
   "element_weights": {
-    "R_STEP": -1.0,
-    "collision": 20.0,
-    "forward_clear": 4.0,
-    "goal_trend": 5.0,
-    "goal_reached": 100.0,
-    "cp_trend": 8.0,
-    "checkpoint": 30.0,
-    "rotate": 30,
-    "facing_clear": 5.0,
-    "wasted_rotate": 12.0,
-    "excess_rotate": 20.0,
-    "revisit": 20.0,
-    "ping_pong": 20.0
+    "R_STEP": 0.0,
+    "collision": 0.0,
+    "forward_clear": 0.0,
+    "goal_trend": 0.0,
+    "goal_reached": 0.0,
+    "cp_trend": 0.0,
+    "checkpoint": 0.0,
+    "rotate": 0.0,
+    "facing_clear": 0.0,
+    "wasted_rotate": 0.0,
+    "excess_rotate": 0.0,
+    "revisit": 0.0,
+    "ping_pong": 0.0,
+    "straight_streak": 0.0,
+    "wall_detected": 0.0
   },
   "thresholds": {
     "MAX_ROTATE_STREAK": 4,
     "MAX_NODE_REVISITS": 5,
-    "MAX_PING_PONG_CYCLES": 2
+    "MAX_PING_PONG_CYCLES": 2,
+    "MAX_STRAIGHT_STREAK": 3
   },
   "name": "reward_1"
 }

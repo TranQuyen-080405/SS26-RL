@@ -65,6 +65,7 @@ class MapEditorApp:
         self._offset_x = CANVAS_PAD
         self._offset_y = CANVAS_PAD
         self._edge_hit = EDGE_HIT
+        self._resize_after_id = None
 
         self._build_toolbar()
         self._build_canvas()
@@ -120,10 +121,19 @@ class MapEditorApp:
         self.canvas = tk.Canvas(wrap, bg="#1e1e2e", highlightthickness=0)
         self.canvas.pack(fill=tk.BOTH, expand=True)
         self.canvas.bind("<Button-1>", self.on_click)
-        self.canvas.bind("<Configure>", lambda e: self.redraw())
+        self.canvas.bind("<Configure>", self._on_resize_event)
         self.root.bind("<Escape>", self._on_escape)
         self.root.bind("<Delete>", self._on_delete_key)
         self.root.bind("<BackSpace>", self._on_delete_key)
+
+    def _on_resize_event(self, event):
+        if self._resize_after_id:
+            self.canvas.after_cancel(self._resize_after_id)
+        self._resize_after_id = self.canvas.after(50, self._throttled_redraw)
+
+    def _throttled_redraw(self):
+        self._resize_after_id = None
+        self.redraw()
 
         # hint = ttk.Label(
         #     self.container,

@@ -250,6 +250,7 @@ class RobotMapCanvas:
         self.canvas = tk.Canvas(self.frame, bg="#1e1e2e", highlightthickness=0)
         self.canvas.pack(fill=tk.BOTH, expand=True)
         self.model = MonitorMapModel()
+        self.connected = False
         self.path = []
         w, h = self.model.w, self.model.h
         self.info_var = tk.StringVar(
@@ -262,7 +263,17 @@ class RobotMapCanvas:
         self._offset_x = 24
         self._offset_y = 24
         
-        self.canvas.bind("<Configure>", lambda e: self.redraw())
+        self._resize_after_id = None
+        self.canvas.bind("<Configure>", self._on_resize_event)
+        self.redraw()
+
+    def _on_resize_event(self, event):
+        if self._resize_after_id:
+            self.canvas.after_cancel(self._resize_after_id)
+        self._resize_after_id = self.canvas.after(50, self._throttled_redraw)
+
+    def _throttled_redraw(self):
+        self._resize_after_id = None
         self.redraw()
 
     def pack(self, **kwargs):
@@ -364,18 +375,28 @@ class RobotMapCanvas:
         w, h = m.w, m.h
         start, goal = m.start, m.goal
         cps = {tuple(cp) for cp in m.checkpoints}
+        
+        # Chỉ vẽ các chi tiết start, goal, checkpoints, robot khi đã kết nối
+        connected = getattr(self, "connected", False)
+        visited_cps = set()
+        if connected:
+            visited_cps = {cp for cp in cps if cp in self.path or cp == (m.x, m.y)}
 
         # Draw grid cells
         for y in range(h):
             for x in range(w):
                 px, py = self.cell_px(x, y, h)
                 fill = "#ffffff"
-                if (x, y) == start:
-                    fill = "#a6e3a1"
-                elif (x, y) == goal:
-                    fill = "#f38ba8"
-                elif (x, y) in cps:
-                    fill = "#f9e2af"
+                if connected:
+                    if (x, y) == start:
+                        fill = "#a6e3a1"
+                    elif (x, y) == goal:
+                        fill = "#f38ba8"
+                    elif (x, y) in cps:
+                        if (x, y) in visited_cps:
+                            fill = "#89dceb"
+                        else:
+                            fill = "#f9e2af"
                 c.create_rectangle(px, py, px + self._cell, py + self._cell, fill=fill, outline="#45475a")
                 
                 # Draw black plus sign touching the square edges
@@ -413,30 +434,31 @@ class RobotMapCanvas:
                     ("S", px, py + self._cell, px + self._cell, py + self._cell),
                     ("W", px, py, px, py + self._cell),
                 ]:
-                    is_wall = (x, y, d) in m.walls
+                    is_wall = connected and ((x, y, d) in m.walls)
                     color = "#f38ba8" if is_wall else "#585b70"
                     width = 5 if is_wall else 2
                     c.create_line(x1, y1, x2, y2, fill=color, width=width)
 
-        if self.path:
+        if connected and self.path:
             pts = [self.cell_center(self.path[0][0], self.path[0][1], h)]
             for x, y in self.path[1:]:
                 pts.append(self.cell_center(x, y, h))
             for i in range(len(pts) - 1):
                 c.create_line(pts[i][0], pts[i][1], pts[i + 1][0], pts[i + 1][1], fill="#89b4fa", width=3)
 
-        cx, cy = self.cell_center(m.x, m.y, h)
-        r = self._cell // 4
-        c.create_oval(cx - r, cy - r, cx + r, cy + r, fill="#cba6f7", outline="#cdd6f4", width=2)
-        arrow_len = max(8, self._cell // 4)
-        dir_offsets = {
-            "N": (0, -arrow_len),
-            "E": (arrow_len, 0),
-            "S": (0, arrow_len),
-            "W": (-arrow_len, 0)
-        }
-        dx, dy = dir_offsets.get(m.d, (0, -arrow_len))
-        c.create_line(cx, cy, cx + dx, cy + dy, fill="#1e1e2e", width=3, arrow=tk.LAST, arrowshape=(8, 10, 4))
+        if connected:
+            cx, cy = self.cell_center(m.x, m.y, h)
+            r = self._cell // 4
+            c.create_oval(cx - r, cy - r, cx + r, cy + r, fill="#cba6f7", outline="#cdd6f4", width=2)
+            arrow_len = max(8, self._cell // 4)
+            dir_offsets = {
+                "N": (0, -arrow_len),
+                "E": (arrow_len, 0),
+                "S": (0, arrow_len),
+                "W": (-arrow_len, 0)
+            }
+            dx, dy = dir_offsets.get(m.d, (0, -arrow_len))
+            c.create_line(cx, cy, cx + dx, cy + dy, fill="#1e1e2e", width=3, arrow=tk.LAST, arrowshape=(8, 10, 4))
 
 
 class RobotMonitorApp:
@@ -468,6 +490,7 @@ class RobotMonitorApp:
         self._rx_char = None
         self._tx_buf = ""
         self._start_infer_event = threading.Event()
+        self._stop_infer_event = threading.Event()
         self._infer_running = False
         self._build_ui()
 
@@ -484,6 +507,8 @@ class RobotMonitorApp:
         self.btn_connect.pack(side=tk.LEFT, padx=2)
         self.btn_start = ttk.Button(bar, text="Start infer", command=self.request_start_infer, state=tk.DISABLED)
         self.btn_start.pack(side=tk.LEFT, padx=2)
+        self.btn_stop = ttk.Button(bar, text="Stop infer", command=self.request_stop_infer, state=tk.DISABLED)
+        self.btn_stop.pack(side=tk.LEFT, padx=2)
         ttk.Button(bar, text="Xóa log", command=self.clear_log).pack(side=tk.LEFT, padx=2)
         ttk.Button(bar, text="Chạy lại", command=self.reset_for_rerun).pack(side=tk.LEFT, padx=2)
 
@@ -520,6 +545,11 @@ class RobotMonitorApp:
     def append_log(self, text):
         self.log.configure(state=tk.NORMAL)
         self.log.insert(tk.END, text)
+        
+        num_lines = int(self.log.index('end-1c').split('.')[0])
+        if num_lines > 1000:
+            self.log.delete("1.0", f"{num_lines - 1000}.0")
+            
         self.log.see(tk.END)
         self.log.configure(state=tk.DISABLED)
 
@@ -561,17 +591,30 @@ class RobotMonitorApp:
     def disconnect(self):
         self._stop_ble.set()
         self._start_infer_event.set()
+        self._stop_infer_event.set()
         self._connected = False
         self._client = None
         self._rx_char = None
         self._tx_buf = ""
         self.btn_connect.configure(text="Kết nối")
-        self.btn_start.configure(state=tk.DISABLED)
+        self._on_connection_changed(False)
         self.status_var.set("Đã ngắt kết nối.")
         self._set_infer_status("Infer: chưa kết nối", running=False)
         if self._ble_thread:
             self._ble_thread.join(timeout=3.0)
             self._ble_thread = None
+
+    def _on_connection_changed(self, connected):
+        self._connected = connected
+        self.map_view.connected = connected
+        if not connected:
+            self.map_view.reset_to_start()
+            self.btn_stop.configure(state=tk.DISABLED)
+            self.btn_start.configure(state=tk.DISABLED)
+        else:
+            self.btn_start.configure(state=tk.NORMAL)
+            self.btn_stop.configure(state=tk.DISABLED)
+        self.map_view.redraw()
 
     def _set_infer_status(self, text, running=None):
         self.infer_var.set(text)
@@ -579,8 +622,10 @@ class RobotMonitorApp:
             self._infer_running = running
             if running:
                 self.btn_start.configure(state=tk.DISABLED)
+                self.btn_stop.configure(state=tk.NORMAL)
             elif self._connected:
                 self.btn_start.configure(state=tk.NORMAL)
+                self.btn_stop.configure(state=tk.DISABLED)
 
     def _handle_ble_state(self, state):
         self.map_view.apply_ble(state)
@@ -603,6 +648,9 @@ class RobotMonitorApp:
         elif "START OK" in line or "infer loop" in line:
             self._set_infer_status("Infer: đang chạy", running=True)
             self.status_var.set("Robot đã bắt đầu infer.")
+        elif "RX STOP" in line:
+            self.status_var.set("Robot đã nhận lệnh Stop...")
+            self._set_infer_status("Infer: dừng (stop) — bấm Chạy lại rồi Start infer", running=False)
         elif line.startswith("GOAL"):
             self._set_infer_status("Infer: GOAL ✓ — bấm Chạy lại rồi Start infer", running=False)
         elif "Episode ket thuc" in line or "Het episode" in line:
@@ -616,6 +664,14 @@ class RobotMonitorApp:
         self._start_infer_event.set()
         self._set_infer_status("Infer: đang gửi Start...", running=False)
         self.status_var.set("Đã gửi lệnh Start infer — chờ robot phản hồi...")
+
+    def request_stop_infer(self):
+        if not self._connected:
+            messagebox.showwarning("BLE", "Kết nối robot trước.")
+            return
+        self._stop_infer_event.set()
+        self._set_infer_status("Infer: đang gửi Stop...", running=None)
+        self.status_var.set("Đã gửi lệnh Stop infer — chờ robot dừng...")
 
     def _on_tx_notify(self, _handle, data):
         try:
@@ -663,6 +719,9 @@ class RobotMonitorApp:
 
     async def _send_start(self, client):
         await self._write_rx(client, b"S")
+
+    async def _send_stop(self, client):
+        await self._write_rx(client, b"T")
 
     async def _wait_io_gatt(self, client, timeout=12.0):
         steps = max(1, int(timeout / 0.35))
@@ -729,12 +788,17 @@ class RobotMonitorApp:
                 scanner = BleakScanner(detection_callback=detection_callback)
                 await scanner.start()
                 try:
-                    await asyncio.wait_for(scan_event.wait(), timeout=5.0)
-                except asyncio.TimeoutError:
-                    pass
+                    for _ in range(50):
+                        if self._stop_ble.is_set():
+                            break
+                        if scan_event.is_set():
+                            break
+                        await asyncio.sleep(0.1)
                 finally:
                     await scanner.stop()
 
+                if self._stop_ble.is_set():
+                    raise BleakError("Kết nối bị hủy bởi người dùng.")
                 if device is None:
                     raise BleakError("Không tìm thấy thiết bị BLE '%s' trong 5 giây." % target_name)
 
@@ -754,14 +818,11 @@ class RobotMonitorApp:
                 self._client = client
                 self._rx_char = rx_char
                 self._connected = True
-                self.root.after(0, lambda: self.map_view.reset_to_start())
+                self.root.after(0, lambda: self._on_connection_changed(True))
                 self.root.after(0, lambda: self._set_infer_status("Infer: idle — bấm Start infer", running=False))
                 self.root.after(
                     0,
-                    lambda: (
-                        self.status_var.set("Da ket noi — bam Start infer hoac nut board."),
-                        self.btn_start.configure(state=tk.NORMAL),
-                    ),
+                    lambda: self.status_var.set("Da ket noi — bam Start infer hoac nut board."),
                 )
 
                 while not self._stop_ble.is_set():
@@ -777,6 +838,17 @@ class RobotMonitorApp:
                             )
                         except Exception as exc:
                             self.root.after(0, lambda e=exc: self.status_var.set("Loi gui Start: %s" % e))
+                    
+                    if self._stop_infer_event.is_set():
+                        self._stop_infer_event.clear()
+                        try:
+                            await self._send_stop(client)
+                            self.root.after(
+                                0,
+                                lambda: self.status_var.set("Lenh Stop infer da gui — cho robot dung..."),
+                            )
+                        except Exception as exc:
+                            self.root.after(0, lambda e=exc: self.status_var.set("Loi gui Stop: %s" % e))
                     await asyncio.sleep(0.15)
 
             except BleakCharacteristicNotFoundError as exc:
@@ -804,7 +876,7 @@ class RobotMonitorApp:
                     0,
                     lambda: (
                         self.btn_connect.configure(text="Kết nối"),
-                        self.btn_start.configure(state=tk.DISABLED),
+                        self._on_connection_changed(False),
                     ),
                 )
                 self._ble_thread = None

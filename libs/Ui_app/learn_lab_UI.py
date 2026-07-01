@@ -44,41 +44,47 @@ _THRESHOLD_FOR_EID = {
     "excess_rotate": "MAX_ROTATE_STREAK",
     "revisit": "MAX_NODE_REVISITS",
     "ping_pong": "MAX_PING_PONG_CYCLES",
+    "straight_streak": "MAX_STRAIGHT_STREAK",
 }
 
 # Giá trị mặc định weight theo cục reward (học sinh thấy tên tiếng Việt)
 _DEFAULT_WEIGHTS = {
-    "R_STEP": -1.0,
-    "collision": -20.0,
-    "forward_clear": 4.0,
-    "goal_trend": 5.0,
-    "goal_reached": 100.0,
-    "cp_trend": 8.0,
-    "checkpoint": 30.0,
-    "rotate": -3.0,
-    "facing_clear": 5.0,
-    "wasted_rotate": -12.0,
-    "excess_rotate": -20.0,
-    "revisit": -20.0,
-    "ping_pong": -20.0,
+    "R_STEP": 0.0,
+    "collision": 0.0,
+    "forward_clear": 0.0,
+    "goal_trend": 0.0,
+    "goal_reached": 0.0,
+    "cp_trend": 0.0,
+    "checkpoint": 0.0,
+    "rotate": 0.0,
+    "facing_clear": 0.0,
+    "wasted_rotate": 0.0,
+    "excess_rotate": 0.0,
+    "revisit": 0.0,
+    "ping_pong": 0.0,
+    "straight_streak": 0.0,
+    "wall_detected": 0.0,
 }
 
 _REWARD_DESCRIPTIONS = {
-    "collision": "Robot đâm vào tường",
-    "forward_clear": "Đi thẳng 1 ô an toàn",
-    "goal_trend": "Đi gần/xa Goal",
-    "goal_reached": "Chạm ô Goal",
-    "cp_trend": "Đi gần/xa Checkpoint",
-    "checkpoint": "Đi đến checkpoint (chỉ tính một lần)",
-    "rotate": "Mỗi lần xoay hướng",
-    "facing_clear": "Xoay sang hướng không có vật cản",
-    "wasted_rotate": "Xoay tại chỗ liên tục",
-    "excess_rotate": "Phạt khi xoay liên tiếp vượt quá ngưỡng",
-    "revisit": "Đi vào một ô quá nhiều lần",
-    "ping_pong": "Đi qua lại 2 ô liên tục",
+    "collision": "Robot va chạm tường",
+    "forward_clear": "Tiến lên ô không có vật cản",
+    "goal_trend": "Thay đổi khoảng cách tới Goal",
+    "goal_reached": "Đứng tại ô Goal",
+    "cp_trend": "Thay đổi khoảng cách tới Checkpoint",
+    "checkpoint": "Đến Checkpoint lần đầu",
+    "rotate": "Hành động xoay hướng",
+    "facing_clear": "Hướng mặt về ô không vật cản sau khi xoay",
+    "wasted_rotate": "Xoay hướng khi đường phía trước trống",
+    "excess_rotate": "Số lần xoay liên tiếp vượt quá ngưỡng",
+    "revisit": "Số lần đi vào ô đã đi qua vượt quá ngưỡng",
+    "ping_pong": "Số lần đi qua lại liên tục giữa 2 ô vượt quá ngưỡng",
+    "straight_streak": "Số lần giữ nguyên hướng đi liên tiếp vượt quá ngưỡng",
+    "wall_detected": "Phát hiện có vật cản ngay trước mặt sau hành động",
     "MAX_ROTATE_STREAK": "Ngưỡng xoay",
     "MAX_NODE_REVISITS": "Số lần đi vào 1 ô",
     "MAX_PING_PONG_CYCLES": "Số lần đi qua lại",
+    "MAX_STRAIGHT_STREAK": "Ngưỡng giữ hướng",
 }
 
 
@@ -513,9 +519,47 @@ class LearnLabApp:
         try:
             self._apply_formula_snapshot(load_formula_file(name))
             self._loaded_formula_name = normalize_formula_basename(name)
+            reward_config.set_formula_name(self._loaded_formula_name)
             self.apply_status.set("Đã nạp: %s — chỉnh rồi bấm Lưu công thức" % self._loaded_formula_name)
         except (OSError, ValueError, json.JSONDecodeError) as exc:
             messagebox.showerror("Nạp công thức", str(exc))
+
+    def load_and_compile_formula(self, name):
+        """Nạp công thức từ file và compile/apply vào dự án (reward_config.py)."""
+        try:
+            data = load_formula_file(name)
+            self._apply_formula_snapshot(data)
+            self._loaded_formula_name = normalize_formula_basename(name)
+            reward_config.set_formula_name(self._loaded_formula_name)
+            self._refresh_formula_combo(select_name=self._loaded_formula_name)
+
+            # Ghi đè cấu hình vào file reward_config.py
+            vals = reward_config.get_reward_dict()
+            enabled = self._enabled_modules()
+
+            pc_path = os.path.join(_ROOT, "RL_lib", "reward_config.py")
+            src = _read_reward_module_source()
+            for k, v in vals.items():
+                if k in reward_config.REWARD_KEYS:
+                    src = _patch_line(src, k, v)
+            src = _patch_enabled_modules(src, sorted(enabled))
+            src = _patch_total_formula(src, reward_config.get_total_formula_student())
+            src = _patch_formula_name(src, self._loaded_formula_name)
+            with open(pc_path, "w", encoding="utf-8") as f:
+                f.write(src)
+
+            importlib.reload(reward_config)
+            try:
+                import Simulation.robot.trainer as trainer
+                importlib.reload(trainer)
+            except Exception:
+                pass
+
+            self.apply_status.set("Đã áp dụng công thức: %s" % self._loaded_formula_name)
+            return True
+        except Exception as exc:
+            messagebox.showerror("Nạp công thức", "Lỗi nạp công thức: %s" % exc, parent=self.root)
+            return False
 
     def _apply_formula_snapshot(self, data):
         self._loading = True
@@ -600,9 +644,11 @@ class LearnLabApp:
                     src = _patch_line(src, k, v)
             src = _patch_enabled_modules(src, sorted(enabled))
             src = _patch_total_formula(src, reward_config.get_total_formula_student())
+            src = _patch_formula_name(src, save_name)
             with open(pc_path, "w", encoding="utf-8") as f:
                 f.write(src)
 
+            reward_config.set_formula_name(save_name)
             importlib.reload(reward_config)
             try:
                 import Simulation.robot.trainer as trainer
@@ -628,6 +674,8 @@ class LearnLabApp:
         self.world.reset_scenario()
         self.scenario_map.redraw()
         self._on_modules_changed()
+        self._loaded_formula_name = "Mặc định"
+        reward_config.set_formula_name("Mặc định")
 
     def run(self):
         if self._standalone:
@@ -666,6 +714,13 @@ def _patch_total_formula(src, expr):
     rep = "TOTAL_FORMULA_STUDENT = %r" % expr
     if re.search(r"^TOTAL_FORMULA_STUDENT\s*=", src, re.MULTILINE):
         return re.sub(r"^TOTAL_FORMULA_STUDENT\s*=.*$", rep, src, count=1, flags=re.MULTILINE)
+    return src
+
+
+def _patch_formula_name(src, name):
+    rep = "FORMULA_NAME = %r" % name
+    if re.search(r"^FORMULA_NAME\s*=", src, re.MULTILINE):
+        return re.sub(r"^FORMULA_NAME\s*=.*$", rep, src, count=1, flags=re.MULTILINE)
     return src
 
 

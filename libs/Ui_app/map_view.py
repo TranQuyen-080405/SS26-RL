@@ -36,6 +36,7 @@ class SimMapCanvas:
         self._map_fingerprint = None
         self._canvas_size = (0, 0)
         self._configure_after = None
+        self._last_visited_cps = set()
 
         self.info_var = tk.StringVar(value="Chọn map infer và bấm Run.")
         ttk.Label(self.frame, textvariable=self.info_var, anchor=tk.W).pack(fill=tk.X, pady=(4, 0))
@@ -214,6 +215,9 @@ class SimMapCanvas:
         goal = tuple(self.sim_map["goal"])
         cps = {tuple(cp) for cp in self.sim_map.get("checkpoints") or []}
 
+        visited_cps = {cp for cp in cps if cp in self.path or cp == self.robot_pos}
+        self._last_visited_cps = visited_cps
+
         for y in range(h):
             for x in range(w):
                 px, py = self.cell_px(x, y)
@@ -223,7 +227,10 @@ class SimMapCanvas:
                 elif (x, y) == goal:
                     fill = "#f38ba8"
                 elif (x, y) in cps:
-                    fill = "#f9e2af"
+                    if (x, y) in visited_cps:
+                        fill = "#89dceb"
+                    else:
+                        fill = "#f9e2af"
                 c.create_rectangle(
                     px, py, px + cell, py + cell,
                     fill=fill, outline="#45475a", width=1, tags=(_TAG_STATIC,),
@@ -297,7 +304,12 @@ class SimMapCanvas:
             self.redraw()
             return
         layout_changed = self._update_layout()
-        if layout_changed or not self.canvas.find_withtag(_TAG_STATIC):
+        
+        cps = {tuple(cp) for cp in self.sim_map.get("checkpoints") or []}
+        visited_cps = {cp for cp in cps if cp in self.path or cp == self.robot_pos}
+        visited_changed = visited_cps != getattr(self, "_last_visited_cps", set())
+        
+        if layout_changed or visited_changed or not self.canvas.find_withtag(_TAG_STATIC):
             self.canvas.delete(_TAG_STATIC)
             self._draw_static()
         self.canvas.delete(_TAG_DYNAMIC)
