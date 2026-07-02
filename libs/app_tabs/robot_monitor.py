@@ -27,17 +27,18 @@ _DEPLOY_DIR = robot_embbed_dir()
 
 
 def _load_robot_deploy_map():
-    """Đọc deploy_map.py — khớp makeRobot / BLE trên ESP32."""
+    """Đọc cấu hình MAP_CFG từ Robot_embbed/main.py — khớp makeRobot / BLE trên ESP32."""
     if _DEPLOY_DIR not in sys.path:
         sys.path.insert(0, _DEPLOY_DIR)
     try:
-        import deploy_map as dm
-    except ImportError:
+        import main as emb_main
+        cfg = emb_main.MAP_CFG
+    except Exception:
         return {
             "width": 10,
             "height": 10,
-            "start": (0, 0),
-            "goal": (9, 9),
+            "start": (5, 0),
+            "goal": (5, 9),
             "checkpoints": [],
             "walls": [],
         }
@@ -48,12 +49,12 @@ def _load_robot_deploy_map():
         return (int(w[0]), int(w[1]), str(w[2]))
 
     return {
-        "width": int(dm.MAP_W),
-        "height": int(dm.MAP_H),
-        "start": tuple(dm.START),
-        "goal": tuple(dm.GOAL),
-        "checkpoints": [tuple(cp) for cp in (dm.CHECKPOINTS or [])],
-        "walls": [_norm_wall(w) for w in (getattr(dm, "WALLS", None) or [])],
+        "width": int(cfg.get("w", 10)),
+        "height": int(cfg.get("h", 10)),
+        "start": tuple(cfg.get("start", (5, 0))),
+        "goal": tuple(cfg.get("goal", (5, 9))),
+        "checkpoints": [tuple(cp) for cp in (cfg.get("checkpoints") or [])],
+        "walls": [_norm_wall(w) for w in (cfg.get("walls") or [])],
     }
 
 
@@ -65,7 +66,7 @@ _DIR_ARROW = {"N": (0, -10), "E": (10, 0), "S": (0, 10), "W": (-10, 0)}
 
 _PHASE_LABEL = {
     "i": "Idle (chờ Start)",
-    "r": "Đang infer",
+    "r": "Đang inference",
     "g": "Goal",
     "c": "Collision",
 }
@@ -358,7 +359,7 @@ class RobotMapCanvas:
         self.model.last_action = ""
         self._update_info()
         self.info_var.set(
-            "[Idle] Robot (%d,%d) %s | goal (%d,%d) — bấm Start infer"
+            "[Idle] Robot (%d,%d) %s | goal (%d,%d) — bấm Start inference"
             % (self.model.x, self.model.y, self.model.d, self.model.goal[0], self.model.goal[1])
         )
         self.redraw()
@@ -498,32 +499,32 @@ class RobotMonitorApp:
         bar = ttk.Frame(self.container, padding=8)
         bar.pack(fill=tk.X)
 
-        ttk.Label(bar, text="Tên BLE:").pack(side=tk.LEFT, padx=(0, 4))
+        ttk.Label(bar, text="Nhập tên:").pack(side=tk.LEFT, padx=(0, 4))
         self.ble_name_var = tk.StringVar(value="Robot")
         self.entry_ble_name = ttk.Entry(bar, textvariable=self.ble_name_var, width=15)
         self.entry_ble_name.pack(side=tk.LEFT, padx=(0, 8))
 
         self.btn_connect = ttk.Button(bar, text="Kết nối", command=self.toggle_connect)
         self.btn_connect.pack(side=tk.LEFT, padx=2)
-        self.btn_start = ttk.Button(bar, text="Start infer", command=self.request_start_infer, state=tk.DISABLED)
+        self.btn_start = ttk.Button(bar, text="Start inference", command=self.request_start_infer, state=tk.DISABLED)
         self.btn_start.pack(side=tk.LEFT, padx=2)
-        self.btn_stop = ttk.Button(bar, text="Stop infer", command=self.request_stop_infer, state=tk.DISABLED)
+        self.btn_stop = ttk.Button(bar, text="Stop inference", command=self.request_stop_infer, state=tk.DISABLED)
         self.btn_stop.pack(side=tk.LEFT, padx=2)
         ttk.Button(bar, text="Xóa log", command=self.clear_log).pack(side=tk.LEFT, padx=2)
         ttk.Button(bar, text="Chạy lại", command=self.reset_for_rerun).pack(side=tk.LEFT, padx=2)
 
-        self.infer_var = tk.StringVar(value="Infer: chưa chạy")
+        self.infer_var = tk.StringVar(value="Inference: chưa chạy")
         ttk.Label(bar, textvariable=self.infer_var, width=28).pack(side=tk.LEFT, padx=(8, 0))
 
         self.status_var = tk.StringVar(
-            value="Nhập tên BLE → Kết nối → Start infer."
+            value="Nhập tên BLE → Kết nối → Start inference."
         )
         ttk.Label(bar, textvariable=self.status_var).pack(side=tk.LEFT, padx=12)
 
         paned = ttk.Panedwindow(self.container, orient=tk.HORIZONTAL)
         paned.pack(fill=tk.BOTH, expand=True, padx=8, pady=(0, 8))
 
-        log_frame = ttk.LabelFrame(paned, text="Terminal robot (print)", padding=4)
+        log_frame = ttk.LabelFrame(paned, text="Terminal robot", padding=4)
         self.log = scrolledtext.ScrolledText(
             log_frame,
             wrap=tk.WORD,
@@ -535,7 +536,7 @@ class RobotMonitorApp:
         self.log.pack(fill=tk.BOTH, expand=True)
         self.log.configure(state=tk.DISABLED)
 
-        map_frame = ttk.LabelFrame(paned, text="Robot map (từ BLE)", padding=4)
+        map_frame = ttk.LabelFrame(paned, text="Robot map", padding=4)
         self.map_view = RobotMapCanvas(map_frame)
         self.map_view.pack(fill=tk.BOTH, expand=True)
 
@@ -565,9 +566,9 @@ class RobotMonitorApp:
         self._start_infer_event.clear()
         self._infer_running = False
         self.map_view.reset_to_start()
-        self._set_infer_status("Infer: sẵn sàng — bấm Start infer", running=False)
-        self.status_var.set("Đã reset — đặt robot về ô start, bấm Start infer để chạy lại.")
-        self.append_log("--- PC reset (start, path) — cho Start infer ---\n")
+        self._set_infer_status("Inference: sẵn sàng — bấm Start inference", running=False)
+        self.status_var.set("Đã reset — đặt robot về ô start, bấm Start inference để chạy lại.")
+        self.append_log("--- PC reset (start, path) — cho Start inference ---\n")
 
     def reset_path(self):
         self.map_view.reset_path()
@@ -599,7 +600,7 @@ class RobotMonitorApp:
         self.btn_connect.configure(text="Kết nối")
         self._on_connection_changed(False)
         self.status_var.set("Đã ngắt kết nối.")
-        self._set_infer_status("Infer: chưa kết nối", running=False)
+        self._set_infer_status("Inference: chưa kết nối", running=False)
         if self._ble_thread:
             self._ble_thread.join(timeout=3.0)
             self._ble_thread = None
@@ -631,14 +632,14 @@ class RobotMonitorApp:
         self.map_view.apply_ble(state)
         phase = state.get("p", "")
         if phase == "r":
-            self._set_infer_status("Infer: đang chạy (bước %d)" % state.get("n", 0), running=True)
+            self._set_infer_status("Inference: đang chạy (bước %d)" % state.get("n", 0), running=True)
         elif phase == "g":
-            self._set_infer_status("Infer: GOAL ✓ — bấm Chạy lại rồi Start infer", running=False)
+            self._set_infer_status("Inference: GOAL ✓ — bấm Chạy lại rồi Start inference", running=False)
         elif phase == "c":
-            self._set_infer_status("Infer: dừng (collision) — bấm Chạy lại rồi Start infer", running=False)
+            self._set_infer_status("Inference: dừng (collision) — bấm Chạy lại rồi Start inference", running=False)
         elif phase == "i":
             if not self._infer_running:
-                self._set_infer_status("Infer: idle — bấm Start infer", running=False)
+                self._set_infer_status("Inference: idle — bấm Start inference", running=False)
 
     def _handle_ble_log(self, text):
         self.append_log(text)
@@ -646,32 +647,32 @@ class RobotMonitorApp:
         if "RX START" in line:
             self.status_var.set("Robot đã nhận lệnh Start...")
         elif "START OK" in line or "infer loop" in line:
-            self._set_infer_status("Infer: đang chạy", running=True)
-            self.status_var.set("Robot đã bắt đầu infer.")
+            self._set_infer_status("Inference: đang chạy", running=True)
+            self.status_var.set("Robot đã bắt đầu inference.")
         elif "RX STOP" in line:
             self.status_var.set("Robot đã nhận lệnh Stop...")
-            self._set_infer_status("Infer: dừng (stop) — bấm Chạy lại rồi Start infer", running=False)
+            self._set_infer_status("Inference: dừng (stop) — bấm Chạy lại rồi Start inference", running=False)
         elif line.startswith("GOAL"):
-            self._set_infer_status("Infer: GOAL ✓ — bấm Chạy lại rồi Start infer", running=False)
+            self._set_infer_status("Inference: GOAL ✓ — bấm Chạy lại rồi Start inference", running=False)
         elif "Episode ket thuc" in line or "Het episode" in line:
-            self._set_infer_status("Infer: sẵn sàng — bấm Start infer", running=False)
-            self.status_var.set("Robot chờ Start — bấm Chạy lại (map) rồi Start infer.")
+            self._set_infer_status("Inference: sẵn sàng — bấm Start inference", running=False)
+            self.status_var.set("Robot chờ Start — bấm Chạy lại (map) rồi Start inference.")
 
     def request_start_infer(self):
         if not self._connected:
             messagebox.showwarning("BLE", "Kết nối robot trước.")
             return
         self._start_infer_event.set()
-        self._set_infer_status("Infer: đang gửi Start...", running=False)
-        self.status_var.set("Đã gửi lệnh Start infer — chờ robot phản hồi...")
+        self._set_infer_status("Inference: đang gửi Start...", running=False)
+        self.status_var.set("Đã gửi lệnh Start inference — chờ robot phản hồi...")
 
     def request_stop_infer(self):
         if not self._connected:
             messagebox.showwarning("BLE", "Kết nối robot trước.")
             return
         self._stop_infer_event.set()
-        self._set_infer_status("Infer: đang gửi Stop...", running=None)
-        self.status_var.set("Đã gửi lệnh Stop infer — chờ robot dừng...")
+        self._set_infer_status("Inference: đang gửi Stop...", running=None)
+        self.status_var.set("Đã gửi lệnh Stop inference — chờ robot dừng...")
 
     def _on_tx_notify(self, _handle, data):
         try:
@@ -771,7 +772,7 @@ class RobotMonitorApp:
             try:
                 target_name = self.ble_name_var.get().strip()
                 if not target_name:
-                    raise BleakError("Nhập tên thiết bị BLE cần kết nối.")
+                    raise BleakError("Nhập tên thiết bị Bluetooth cần kết nối.")
 
                 self.root.after(0, lambda: self.status_var.set("Đang quét tìm thiết bị '%s'..." % target_name))
 
@@ -819,10 +820,10 @@ class RobotMonitorApp:
                 self._rx_char = rx_char
                 self._connected = True
                 self.root.after(0, lambda: self._on_connection_changed(True))
-                self.root.after(0, lambda: self._set_infer_status("Infer: idle — bấm Start infer", running=False))
+                self.root.after(0, lambda: self._set_infer_status("Inference: idle — bấm Start inference", running=False))
                 self.root.after(
                     0,
-                    lambda: self.status_var.set("Da ket noi — bam Start infer hoac nut board."),
+                    lambda: self.status_var.set("Da ket noi — bam Start inference hoac nut board."),
                 )
 
                 while not self._stop_ble.is_set():
@@ -834,7 +835,7 @@ class RobotMonitorApp:
                             await self._send_start(client)
                             self.root.after(
                                 0,
-                                lambda: self.status_var.set("Lenh Start infer da gui — cho robot phan hoi..."),
+                                lambda: self.status_var.set("Lenh Start inference da gui — cho robot phan hoi..."),
                             )
                         except Exception as exc:
                             self.root.after(0, lambda e=exc: self.status_var.set("Loi gui Start: %s" % e))
@@ -845,7 +846,7 @@ class RobotMonitorApp:
                             await self._send_stop(client)
                             self.root.after(
                                 0,
-                                lambda: self.status_var.set("Lenh Stop infer da gui — cho robot dung..."),
+                                lambda: self.status_var.set("Lenh Stop inference da gui — cho robot dung..."),
                             )
                         except Exception as exc:
                             self.root.after(0, lambda e=exc: self.status_var.set("Loi gui Stop: %s" % e))

@@ -22,6 +22,8 @@ def export_reward_config_py(values):
         "R_FACING_CLEAR",
         "R_FORWARD_CLEAR",
         "R_WASTED_ROTATE",
+        "R_VISIT_WINDOW",
+        "R_PING_PONG",
     ):
         v = values.get(k, 0)
         if isinstance(v, float) and v == int(v):
@@ -32,8 +34,10 @@ def export_reward_config_py(values):
     lines.append("")
     for k in (
         "MAX_ROTATE_STREAK",
-        "MAX_NODE_REVISITS",
+        "MAX_REVISIT_STEPS",
+        "MAX_CELL_REPEAT",
         "MAX_PING_PONG_CYCLES",
+        "MAX_PING_PONG_SPAN",
         "MAX_STEPS_PER_EPISODE",
     ):
         lines.append("%s = %d" % (k, int(values.get(k, 0))))

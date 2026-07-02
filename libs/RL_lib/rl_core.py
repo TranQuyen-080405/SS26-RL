@@ -13,10 +13,10 @@ TREND_COMBOS = 3 ** TREND_SLOTS
 N_ROWS = 16 * TREND_COMBOS * 4
 
 
-def dist_trend(dist_truoc, dist_sau):
-    if dist_sau < dist_truoc:
+def dist_trend(prev_dist, current_dist):
+    if current_dist < prev_dist:
         return 1
-    if dist_sau > dist_truoc:
+    if current_dist > prev_dist:
         return -1
     return 0
 

@@ -32,6 +32,20 @@ Robot_embbed/main.py
 
 **Không infer khi boot:** `main.py` không gọi `run()` trước `wait_for_start()`.
 
+### 1.1 Ranh giới đồng bộ PC ↔ ESP32 (sau chỉnh reward Learn Lab)
+
+| Thành phần | PC Train | PC Infer | ESP32 Infer |
+|---|---|---|---|
+| `RL_lib/rl_core.py` | ✓ | ✓ | copy → `logics/rl_core.py` |
+| `policy.bin` | export | load | load `Q_table/policy.bin` |
+| `reward_config.py` | ✓ | ✗ | ✗ |
+| `node_visits` / `pos_history` / ping-pong | ✓ (reward) | append ngầm* | ✗ |
+| `compute_reward` | ✓ | ✗ | ✗ |
+
+\* `Simulation/robot/action.py` gọi `update_explore_on_move` nhưng infer không đọc penalty.
+
+**Hành vi explore trên robot thật:** học gián tiếp qua Q-table (train có penalty → policy tránh lặp), không có runtime phạt điểm trên mạch.
+
 ---
 
 ## 2. Hằng số map (phải khớp PC monitor)

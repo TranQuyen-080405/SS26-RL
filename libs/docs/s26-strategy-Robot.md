@@ -94,18 +94,44 @@ Policy **không** gọi motor trực tiếp — luôn qua `Robot.execute_action(
 
 **File đề xuất:** `Simulation/robot/robot.py`, `Robot_embbed/modules/logics/logic.py` (orchestrator)
 
-### 3.1 Thuộc tính
+### 3.1 Thuộc tính (dict `robot` — code hiện tại)
+
+**Chung PC Simulation + ESP32 (ảnh hưởng `encode_state`):**
+
+| Key | Kiểu | Mô tả |
+|---|---|---|
+| `x`, `y` | `int` | Vị trí lưới |
+| `direct` | `N/W/E/S` | Hướng nhìn |
+| `robot_map` | `RobotMap` | Bộ nhớ obstacle + dist trên node |
+| `prev_dist_goal` | `int \| None` | Snapshot trước forward — tính trend |
+| `prev_dist_cp` | `list` | Snapshot CP (độ dài `N_CP_MAX`) |
+| `dist_goal_trend` | `-1/0/+1` | Sau forward / reset khi rotate |
+| `dist_cp_trend` | `list` | Trend từng CP |
+| `has_prev_node` | `bool` | Đã từng forward trong episode |
+| `cp_visited` | `list[bool]` | CP đã thưởng (train + logic CP) |
+| `rotate_streak` | `int` | Xoay liên tiếp — **reward PC** |
+| `straight_streak` | `int` | Giữ hướng — **reward PC** |
+
+**Chỉ Simulation (`Simulation/robot/robot.py`) — reward / explore, không port ESP32:**
+
+| Key | Mô tả |
+|---|---|
+| `node_visits` | `dict[(x,y)→count]` lần forward vào ô |
+| `pos_history` | `list[(x,y)]` — seed ô start khi reset episode |
+| `ping_pong_count` | Số chu kỳ qua-lại (palindrome) |
+| `_ping_pong_hist_len` | Chống đếm trùng một bước |
+
+File ESP32: `Robot_embbed/modules/logics/robot_state.py` — **không** có các field explore.
+
+**Không đưa vào `encode_state`:** mọi field trên chỉ phục vụ reward hoặc episode logic; `s` chỉ từ obstacle + trends + heading (`RL_lib/rl_core.py`).
+
+### 3.1.1 (legacy) Thuộc tính OOP đề xuất ban đầu
 
 | Thuộc tính | Kiểu | Mô tả |
 |---|---|---|
-| `x`, `y` | `int` | Vị trí node hiện tại trên lưới |
-| `direct` | `"N"\|"W"\|"E"\|"S"` | Hướng robot đang nhìn |
-| `robot_map` | `Map` | **Chỉ** RobotMap instance |
-| `current_node` | `Node` | `robot_map.get_node(x, y)` — cache, cập nhật khi di chuyển |
-| `policy` | `Policy` / `Q` | Bảng Q đã load (ESP32: từ Flash) |
-| `prev_dist_goal` | `int \| None` | Khoảng cách goal ở node trước — tính trend |
-| `prev_dist_cp` | `list[int]` | Tương tự cho từng checkpoint |
-| `at_goal` | `bool` | Đã tới goal chưa |
+| `current_node` | `Node` | `robot_map.get_node(x, y)` — cache |
+| `policy` | `Q` | Bảng Q (ESP32 load từ Flash) |
+| `at_goal` | `bool` | Có thể suy từ `is_at_goal(robot)` |
 
 ### 3.2 Phương thức bắt buộc
 

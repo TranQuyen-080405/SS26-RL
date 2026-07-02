@@ -20,9 +20,9 @@ def run(cfg):
         if publish_log:
             publish_log(msg)
 
-    print("--------------------------------------------------")
-    print("SUMMER SCHOOL 2026 - ROBOT REINFORCEMENT LEARNING")
-    print("--------------------------------------------------")
+    _log("--------------------------------------------------")
+    _log("SUMMER SCHOOL 2026 - ROBOT REINFORCEMENT LEARNING")
+    _log("--------------------------------------------------")
 
     _log("SW: Scanning Q_table for .bin...")
     if not load_policy_bin():
@@ -46,12 +46,20 @@ def run(cfg):
     if pump:
         pump(50)
 
-    while True:
+    # Lazy import — dùng trong loop, nhưng import một lần ở đầu
+    is_stopped = None
+    _stop = None
+    try:
         from modules.server.ble_monitor import is_stopped
-        if is_stopped():
+        from modules.logics.action import _stop
+    except ImportError:
+        pass
+
+    while True:
+        if is_stopped and is_stopped():
             _log("SW: Stop signal received from PC. Stopping robot...")
-            from modules.logics.action import _stop
-            _stop()
+            if _stop:
+                _stop()
             break
 
         if is_at_goal(bot):

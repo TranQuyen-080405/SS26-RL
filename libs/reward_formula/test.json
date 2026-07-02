@@ -2,15 +2,16 @@
   "version": 1,
   "enabled_modules": [
     "explore_penalty",
-    "rotation",
     "heading",
-    "obstacle"
+    "obstacle",
+    "rotation"
   ],
-  "total_formula": "Xoay hướng + Xoay sang hướng thông thoáng + Xoay khi có thể đi thẳng + Giữ nguyên hướng đi + Phát hiện tường",
+  "total_formula": "Va chạm tường",
   "element_weights": {
     "R_STEP": 0.0,
-    "collision": 0.0,
+    "collision": 1,
     "forward_clear": 0.0,
+    "wall_detected": 0.0,
     "goal_trend": 0.0,
     "goal_reached": 0.0,
     "cp_trend": 0.0,
@@ -22,8 +23,7 @@
     "visit_window": 0.0,
     "visit_repeat": 0.0,
     "ping_pong": 0.0,
-    "straight_streak": 0.0,
-    "wall_detected": 0.0
+    "straight_streak": 0.0
   },
   "thresholds": {
     "MAX_ROTATE_STREAK": 4,
@@ -33,5 +33,5 @@
     "MAX_PING_PONG_SPAN": 5,
     "MAX_STRAIGHT_STREAK": 3
   },
-  "name": "reward_1"
+  "name": "test"
 }

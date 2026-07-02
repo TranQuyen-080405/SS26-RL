@@ -42,8 +42,9 @@ from Ui_app.formula_builder import FormulaBuilder, module_chip_style, reward_eid
 
 _THRESHOLD_FOR_EID = {
     "excess_rotate": "MAX_ROTATE_STREAK",
-    "revisit": "MAX_NODE_REVISITS",
-    "ping_pong": "MAX_PING_PONG_CYCLES",
+    "visit_window": "MAX_REVISIT_STEPS",
+    "visit_repeat": "MAX_CELL_REPEAT",
+    "ping_pong": ["MAX_PING_PONG_CYCLES", "MAX_PING_PONG_SPAN"],
     "straight_streak": "MAX_STRAIGHT_STREAK",
 }
 
@@ -60,7 +61,8 @@ _DEFAULT_WEIGHTS = {
     "facing_clear": 0.0,
     "wasted_rotate": 0.0,
     "excess_rotate": 0.0,
-    "revisit": 0.0,
+    "visit_window": 0.0,
+    "visit_repeat": 0.0,
     "ping_pong": 0.0,
     "straight_streak": 0.0,
     "wall_detected": 0.0,
@@ -77,13 +79,16 @@ _REWARD_DESCRIPTIONS = {
     "facing_clear": "Hướng mặt về ô không vật cản sau khi xoay",
     "wasted_rotate": "Xoay hướng khi đường phía trước trống",
     "excess_rotate": "Số lần xoay liên tiếp vượt quá ngưỡng",
-    "revisit": "Số lần đi vào ô đã đi qua vượt quá ngưỡng",
-    "ping_pong": "Số lần đi qua lại liên tục giữa 2 ô vượt quá ngưỡng",
+    "visit_window": "Vào lại cùng một ô trong vòng N bước gần nhất",
+    "visit_repeat": "Số lần quay lại ô đã từng đi qua vượt ngưỡng (không tính lần đầu)",
+    "ping_pong": "Đi qua-lại cùng một đoạn đường (palindrome); chỉnh Ô mỗi chiều cho đường dài 2–5 ô",
     "straight_streak": "Số lần giữ nguyên hướng đi liên tiếp vượt quá ngưỡng",
     "wall_detected": "Phát hiện có vật cản ngay trước mặt sau hành động",
     "MAX_ROTATE_STREAK": "Ngưỡng xoay",
-    "MAX_NODE_REVISITS": "Số lần đi vào 1 ô",
-    "MAX_PING_PONG_CYCLES": "Số lần đi qua lại",
+    "MAX_REVISIT_STEPS": "Số bước",
+    "MAX_CELL_REPEAT": "Lần quay lại",
+    "MAX_PING_PONG_CYCLES": "Chu kỳ qua lại",
+    "MAX_PING_PONG_SPAN": "Số ô tối đa mỗi chiều (2 = hai ô, 5 = năm ô)",
     "MAX_STRAIGHT_STREAK": "Ngưỡng giữ hướng",
 }
 
@@ -270,35 +275,37 @@ class LearnLabApp:
                 anchor=tk.W,
             ).pack(side=tk.LEFT, padx=(12, 0))
 
-        for eid, tk_key in _THRESHOLD_FOR_EID.items():
-            if tk_key not in THRESHOLD_LABELS:
-                continue
-            mod = REWARD_ELEMENTS[eid]["module"]
-            chip = module_chip_style(mod)
-            tr = tk.Frame(self._weights_container, bg=chip["bg"], padx=6, pady=4)
-            self._threshold_rows[tk_key] = tr
-            tk.Label(
-                tr,
-                text=THRESHOLD_LABELS[tk_key],
-                bg=chip["bg"],
-                fg=chip["fg"],
-                font=("", 9),
-                anchor=tk.W,
-                width=28,
-            ).pack(side=tk.LEFT)
-            tv = tk.StringVar(value="4")
-            self._threshold_vars[tk_key] = tv
-            ttk.Spinbox(tr, from_=0, to=50, width=8, textvariable=tv).pack(side=tk.LEFT, padx=4)
-            tv.trace_add("write", lambda *_: self._on_weight_edited())
-            desc = _REWARD_DESCRIPTIONS.get(tk_key, "")
-            tk.Label(
-                tr,
-                text="—  " + desc,
-                bg=chip["bg"],
-                fg=chip["fg"],
-                font=("", 9, "italic"),
-                anchor=tk.W,
-            ).pack(side=tk.LEFT, padx=(12, 0))
+        for eid, tk_keys in _THRESHOLD_FOR_EID.items():
+            keys = tk_keys if isinstance(tk_keys, list) else [tk_keys]
+            for tk_key in keys:
+                if tk_key not in THRESHOLD_LABELS:
+                    continue
+                mod = REWARD_ELEMENTS[eid]["module"]
+                chip = module_chip_style(mod)
+                tr = tk.Frame(self._weights_container, bg=chip["bg"], padx=6, pady=4)
+                self._threshold_rows[tk_key] = tr
+                tk.Label(
+                    tr,
+                    text=THRESHOLD_LABELS[tk_key],
+                    bg=chip["bg"],
+                    fg=chip["fg"],
+                    font=("", 9),
+                    anchor=tk.W,
+                    width=28,
+                ).pack(side=tk.LEFT)
+                tv = tk.StringVar(value="4")
+                self._threshold_vars[tk_key] = tv
+                ttk.Spinbox(tr, from_=0, to=50, width=8, textvariable=tv).pack(side=tk.LEFT, padx=4)
+                tv.trace_add("write", lambda *_: self._on_weight_edited())
+                desc = _REWARD_DESCRIPTIONS.get(tk_key, "")
+                tk.Label(
+                    tr,
+                    text="—  " + desc,
+                    bg=chip["bg"],
+                    fg=chip["fg"],
+                    font=("", 9, "italic"),
+                    anchor=tk.W,
+                ).pack(side=tk.LEFT, padx=(12, 0))
 
         self._bind_reward_wheel_tree(self._reward_scroll_canvas)
 
@@ -350,8 +357,11 @@ class LearnLabApp:
             if row:
                 row.pack(fill=tk.X, pady=2, padx=2)
             tk_key = _THRESHOLD_FOR_EID.get(eid)
-            if tk_key and tk_key in self._threshold_rows and eid in eid_set:
-                self._threshold_rows[tk_key].pack(fill=tk.X, pady=(0, 2), padx=2)
+            if tk_key:
+                keys = tk_key if isinstance(tk_key, list) else [tk_key]
+                for k in keys:
+                    if k in self._threshold_rows and eid in eid_set:
+                        self._threshold_rows[k].pack(fill=tk.X, pady=(0, 2), padx=2)
 
 
 
@@ -562,6 +572,9 @@ class LearnLabApp:
             return False
 
     def _apply_formula_snapshot(self, data):
+        from RL_lib.formula_store import migrate_formula_snapshot
+
+        data = migrate_formula_snapshot(data)
         self._loading = True
         try:
             modules = set(data.get("enabled_modules") or [])
@@ -669,7 +682,14 @@ class LearnLabApp:
         for eid, var in self._weight_vars.items():
             var.set(str(_DEFAULT_WEIGHTS.get(eid, 0)))
         for k, var in self._threshold_vars.items():
-            var.set(str({"MAX_ROTATE_STREAK": 4, "MAX_NODE_REVISITS": 5, "MAX_PING_PONG_CYCLES": 2}[k]))
+            var.set(str({
+                "MAX_ROTATE_STREAK": 4,
+                "MAX_REVISIT_STEPS": 5,
+                "MAX_CELL_REPEAT": 3,
+                "MAX_PING_PONG_CYCLES": 1,
+                "MAX_PING_PONG_SPAN": 5,
+                "MAX_STRAIGHT_STREAK": 3,
+            }.get(k, var.get())))
         self.formula_builder.set_tokens(default_total_formula(set(self._module_vars.keys())))
         self.world.reset_scenario()
         self.scenario_map.redraw()

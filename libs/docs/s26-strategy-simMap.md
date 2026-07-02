@@ -271,19 +271,39 @@ Luồng một bước train:
 
 ---
 
-## 7. Reward — input từ SimMap
+## 7. Reward — input từ SimMap + explore tracking
 
-Reward tính trên trainer (có SimMap), không trên robot.
+Reward tính trên trainer / Learn Lab (có SimMap), **không** trên ESP32.
 
-| Sự kiện | Nguồn SimMap |
+| Nhóm | Nguồn dữ liệu |
 |---|---|
-| Tới goal | `is_at_goal(x,y)` |
-| Gần/xa goal | `dist_to_goal` trước/sau action |
-| Checkpoint | `is_at_checkpoint`, `cp_visited` — **+điểm 1 lần**/CP/episode |
-| Đụng tường | `read_block` True khi forward |
-| Hết bước | `step_count >= max_steps` |
+| Goal / CP / collision | `sim_map` ground truth + `robot` trends |
+| Checkpoint một lần | `cp_visited[i]` trên robot dict |
+| Explore penalty | `node_visits`, `pos_history`, `ping_pong_count` — **chỉ Simulation** |
 
-Chi tiết bảng điểm: [ss26-strategy-RLtraining.md §4.1](./ss26-strategy-RLtraining.md).
+### 7.1 Luồng harness (một bước)
+
+```
+execute_action_sim
+  → update_explore_on_move (nếu moved)
+compute_reward_breakdown
+  → bump_ping_pong_count (nếu moved)
+  → cờ visit_window / visit_repeat / ping_pong_penalty
+  → parts[eid] theo ELEMENT_FORMULAS
+  → total theo TOTAL_FORMULA_STUDENT
+```
+
+### 7.2 Explore — không có trên Robot_embbed
+
+| Field robot (PC) | ESP32 |
+|---|---|
+| `node_visits` | không |
+| `pos_history` | không |
+| `ping_pong_count` | không |
+
+Infer PC vẫn append `pos_history` (side effect) nhưng **không** tính reward.
+
+Chi tiết thuật toán & ngưỡng: [ss26-strategy-RLtraining.md §4.4](./ss26-strategy-RLtraining.md).
 
 ---
 

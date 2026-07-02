@@ -3,14 +3,6 @@ Train / infer — đọc map JSON từ map/train/ và map/infer/.
 """
 
 import os
-import sys
-
-_SIM = os.path.abspath(os.path.join(os.path.dirname(__file__)))
-_ROOT = os.path.abspath(os.path.join(_SIM, ".."))
-if _ROOT not in sys.path:
-    sys.path.insert(0, _ROOT)
-if _SIM not in sys.path:
-    sys.path.insert(0, _SIM)
 
 N_EPISODES_DEFAULT = 10000
 MAX_STEPS_INFER = 800
@@ -124,6 +116,7 @@ def _reset_at_start(robot, sim_map):
     robot["dist_goal_trend"] = 0
     robot["dist_cp_trend"] = [0, 0, 0]
     robot["rotate_streak"] = 0
+    rb.reset_explore_tracking(robot)
     rb.clear_obstacle_memory(robot)
     rb.inject_distances_from_map(robot)
     rb.perceive_facing_from_sim(robot, sim_map)

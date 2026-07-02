@@ -14,9 +14,9 @@ Tài liệu **triển khai** (làm lại từ code), không phải lý thuyết 
 
 | Doc | Nội dung |
 |-----|----------|
-| [ss26-strategy-RLtraining.md](./ss26-strategy-RLtraining.md) | Q-learning, encode_state, reward, train |
+| [ss26-strategy-RLtraining.md](./ss26-strategy-RLtraining.md) | Q-learning, encode, **reward module hoá**, explore penalty, train vs infer |
 | [s26-strategy-Robot.md](./s26-strategy-Robot.md) | RobotMap, action, inference (concept) |
-| [s26-strategy-simMap.md](./s26-strategy-simMap.md) | SimMap ground truth PC |
+| [s26-strategy-simMap.md](./s26-strategy-simMap.md) | SimMap ground truth, harness reward |
 
 ## Phần cứng xController
 

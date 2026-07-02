@@ -28,6 +28,7 @@ def _robot(
     rotate_streak=0,
     cp_visited=None,
     node_visits=None,
+    pos_history=None,
     ping_pong_count=0,
 ):
     return {
@@ -39,7 +40,9 @@ def _robot(
         "rotate_streak": rotate_streak,
         "cp_visited": cp_visited if cp_visited is not None else [False, False, False],
         "node_visits": node_visits or {},
+        "pos_history": list(pos_history or []),
         "ping_pong_count": ping_pong_count,
+        "_ping_pong_hist_len": len(pos_history or []),
         "robot_map": {"goal": (9, 9), "checkpoints": []},
     }
 
@@ -53,6 +56,9 @@ SCENARIO_LIST = [
     ("tới goal", "at_goal"),
     ("checkpoint lần đầu", "checkpoint"),
     ("xoay quá nhiều (excess rotate)", "excess_rotate"),
+    ("lặp ô gần (visit_window)", "visit_window"),
+    ("quay lại ô (visit_repeat)", "visit_repeat"),
+    ("ping-pong", "ping_pong"),
 ]
 
 
@@ -121,6 +127,36 @@ def get_scenario(key):
             _mini_map(),
             {"success": True, "moved": False, "collision": False},
             "rotate left",
+            False,
+        )
+    if key == "visit_window":
+        return (
+            _robot(x=3, y=3, node_visits={(3, 3): 2}, pos_history=[(3, 3), (4, 3), (3, 3)]),
+            _mini_map(start=(3, 3)),
+            {"success": True, "moved": True, "collision": False},
+            "forward",
+            False,
+        )
+    if key == "visit_repeat":
+        return (
+            _robot(x=3, y=3, node_visits={(3, 3): 5}),
+            _mini_map(start=(3, 3)),
+            {"success": True, "moved": True, "collision": False},
+            "forward",
+            False,
+        )
+    if key == "ping_pong":
+        return (
+            _robot(
+                x=2,
+                y=0,
+                ping_pong_count=2,
+                pos_history=[(1, 0), (2, 0), (1, 0), (2, 0), (1, 0)],
+                node_visits={(1, 0): 3, (2, 0): 2},
+            ),
+            _mini_map(start=(1, 0)),
+            {"success": True, "moved": True, "collision": False},
+            "forward",
             False,
         )
     return None

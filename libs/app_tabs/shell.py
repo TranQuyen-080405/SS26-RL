@@ -9,7 +9,7 @@ from app_tabs.robot_monitor import RobotMonitorApp
 _TAB_COLORS = (
     ("Edit Map", "#3d5240", "#a6e3a1"),
     ("Edit State", "#524a32", "#f9e2af"),
-    ("Train / Infer", "#32405a", "#89b4fa"),
+    ("Train / Inference", "#32405a", "#89b4fa"),
     ("Monitor", "#45325a", "#cba6f7"),
 )
 

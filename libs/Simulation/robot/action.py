@@ -2,16 +2,6 @@
 Action — Simulation cập nhật x,y,direct; ESP32 có TODO motor/sensor.
 """
 
-import sys
-import os
-
-_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
-_SIM = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-if _ROOT not in sys.path:
-    sys.path.insert(0, _ROOT)
-if _SIM not in sys.path:
-    sys.path.insert(0, _SIM)
-
 from RL_lib.grid import neighbor_xy
 from map import sim_map as sm
 from robot import robot as rb
@@ -20,6 +10,8 @@ from robot import robot as rb
 def _finish_action(robot, result):
     rb.update_rotate_streak(robot, result)
     rb.update_straight_streak(robot, result)
+    if result.get("moved"):
+        rb.update_explore_on_move(robot)
     return result
 
 

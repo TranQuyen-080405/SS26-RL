@@ -1,5 +1,6 @@
 """
-Hệ số reward — nguồn đồng bộ PC (Learn Lab / train) và Robot_embbed.
+Hệ số reward — nguồn PC: Learn Lab + Simulation train.
+ESP32 infer không import module này; chỉ dùng policy.bin + rl_core.py.
 Chỉnh tại tab State & Reward: bật module, hằng R_*, công thức từng reward element.
 """
 
@@ -8,33 +9,38 @@ from RL_lib.reward_formula import safe_eval_formula
 from RL_lib.student_formula import default_total_formula, tokens_to_expr, eval_student_formula
 
 # --- Hằng reward (đặt 0 nếu module tắt / không dùng) ---
-R_STEP = 1
-R_COLLISION = -20
-R_GOAL_CLOSER = 5
+R_STEP = 0.0
+R_COLLISION = 0.0
+R_GOAL_CLOSER = 0.0
 R_GOAL_FARTHER = 0.0
 R_CP_CLOSER = 0.0
 R_CP_FARTHER = 0.0
 R_CHECKPOINT_FIRST = 0.0
-R_GOAL_REACHED = 50
-R_ROTATE_IN_PLACE = -5
-R_FACING_CLEAR = 5
-R_FORWARD_CLEAR = 4
-R_WASTED_ROTATE = -12
+R_GOAL_REACHED = 0.0
+R_ROTATE_IN_PLACE = 0.0
+R_FACING_CLEAR = 0.0
+R_FORWARD_CLEAR = 0.0
+R_WASTED_ROTATE = 0.0
 R_STRAIGHT = 0.0
 R_WALL_DETECT = 0.0
+R_VISIT_WINDOW = 0.0
+R_VISIT_REPEAT = 0.0
+R_PING_PONG = 0.0
 
 MAX_ROTATE_STREAK = 4
-MAX_NODE_REVISITS = 5
-MAX_PING_PONG_CYCLES = 2
+MAX_REVISIT_STEPS = 5
+MAX_CELL_REPEAT = 3
+MAX_PING_PONG_CYCLES = 1
+MAX_PING_PONG_SPAN = 5
 MAX_STRAIGHT_STREAK = 3
 COLLISION_RESET = False
 MAX_STEPS_PER_EPISODE = 600
 
 # --- Learn Lab: module bật + công thức từng element ---
-FORMULA_NAME = 'reward_result'
-ENABLED_MODULES = set(['checkpoint', 'explore_penalty', 'goal', 'heading', 'obstacle', 'rotation', 'step'])
+FORMULA_NAME = 'test'
+ENABLED_MODULES = set(['explore_penalty', 'heading', 'obstacle', 'rotation'])
 ELEMENT_FORMULAS = dict(DEFAULT_ELEMENT_FORMULAS)
-TOTAL_FORMULA_STUDENT = 'Mỗi bước đi +  Va chạm tường +  Tiến lên thành công +  Lại gần đích +  Đến đích +  Xoay sang hướng thông thoáng +  Xoay tại chỗ +  Xoay khi có thể đi thẳng +  Vào lại ô cũ +  Đi qua đi lại liên tục'
+TOTAL_FORMULA_STUDENT = 'Va chạm tường'
 
 REWARD_KEYS = (
     "R_STEP",
@@ -51,9 +57,14 @@ REWARD_KEYS = (
     "R_WASTED_ROTATE",
     "R_STRAIGHT",
     "R_WALL_DETECT",
+    "R_VISIT_WINDOW",
+    "R_VISIT_REPEAT",
+    "R_PING_PONG",
     "MAX_ROTATE_STREAK",
-    "MAX_NODE_REVISITS",
+    "MAX_REVISIT_STEPS",
+    "MAX_CELL_REPEAT",
     "MAX_PING_PONG_CYCLES",
+    "MAX_PING_PONG_SPAN",
     "MAX_STRAIGHT_STREAK",
     "COLLISION_RESET",
     "MAX_STEPS_PER_EPISODE",
@@ -128,12 +139,21 @@ def _build_reward_context(robot, sim_map, result, could_forward_before=False):
     straight_streak = robot.get("straight_streak", 0)
     trend = robot.get("dist_goal_trend", 0)
 
-    node_visits = dict(robot.get("node_visits") or {})
+    node_visits = robot.get("node_visits") or {}
+    visits = node_visits.get((robot["x"], robot["y"]), 0) if moved else 0
+    repeat_visits = max(0, visits - 1)
+    ping = 0
+    revisit_window = False
     if moved:
-        key = (robot["x"], robot["y"])
-        node_visits[key] = node_visits.get(key, 0) + 1
-    visits = node_visits.get((robot["x"], robot["y"]), 0)
-    ping = robot.get("ping_pong_count", 0)
+        from robot import robot as rb
+
+        rb.bump_ping_pong_count(robot, MAX_PING_PONG_SPAN)
+        ping = robot.get("ping_pong_count", 0)
+        hist = robot.get("pos_history") or []
+        if len(hist) >= 2 and MAX_REVISIT_STEPS > 0:
+            key = hist[-1]
+            prior = hist[-(MAX_REVISIT_STEPS + 1) : -1]
+            revisit_window = key in prior
 
     cp_closer = False
     cp_farther = False
@@ -185,8 +205,9 @@ def _build_reward_context(robot, sim_map, result, could_forward_before=False):
             "facing_clear_on": facing_clear_on,
             "wasted_rotate_on": rotated and could_forward_before,
             "excess_rotate": streak > MAX_ROTATE_STREAK,
-            "revisit_penalty": visits > MAX_NODE_REVISITS,
-            "ping_pong_penalty": ping > MAX_PING_PONG_CYCLES,
+            "visit_window_penalty": revisit_window,
+            "visit_repeat_penalty": moved and repeat_visits > MAX_CELL_REPEAT,
+            "ping_pong_penalty": moved and ping > MAX_PING_PONG_CYCLES,
             "straight_streak_on": straight_streak >= MAX_STRAIGHT_STREAK,
             "wall_detected": bool(sim_map and sm.get_block(sim_map, robot["x"], robot["y"], robot["direct"])),
         }

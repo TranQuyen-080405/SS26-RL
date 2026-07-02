@@ -62,8 +62,7 @@ class LabWorld5:
         self.robot["dist_goal_trend"] = 0
         self.robot["dist_cp_trend"] = [0, 0, 0]
         self.robot["rotate_streak"] = 0
-        self.robot["node_visits"] = {}
-        self.robot["ping_pong_count"] = 0
+        rb.reset_explore_tracking(self.robot)
         rb.clear_obstacle_memory(self.robot)
         rb.inject_distances_from_map(self.robot)
         rb.perceive_facing_from_sim(self.robot, self.sim_map)

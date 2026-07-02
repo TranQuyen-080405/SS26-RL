@@ -8,8 +8,8 @@ import os
 import re
 
 _SIM_MAP_DIR = os.path.dirname(os.path.abspath(__file__))
-_REPO_ROOT = os.path.abspath(os.path.join(_SIM_MAP_DIR, "..", ".."))
-MAP_ROOT = os.path.join(_REPO_ROOT, "map")
+_LIBS_ROOT = os.path.abspath(os.path.join(_SIM_MAP_DIR, "..", ".."))
+MAP_ROOT = os.path.join(_LIBS_ROOT, "map")
 TRAIN_MAPS_DIR = os.path.join(MAP_ROOT, "train")
 INFER_MAPS_DIR = os.path.join(MAP_ROOT, "infer")
 # Tương thích import cũ

@@ -24,6 +24,19 @@ _OP_PARSE = {
     ")": ")",
 }
 
+_LABEL_ALIASES = {
+    "Vào lại ô cũ": "Quay lại ô",
+    "Lặp ô (tổng)": "Lặp ô gần",
+    "Lặp ô tổng": "Lặp ô gần",
+}
+
+
+def migrate_reward_labels(expr):
+    s = str(expr or "")
+    for old, new in _LABEL_ALIASES.items():
+        s = s.replace(old, new)
+    return s
+
 
 def label_for(eid):
     return REWARD_ELEMENTS[eid]["label"]
@@ -75,7 +88,7 @@ def parse_expr_to_tokens(expr, known_labels):
     labels = sorted(set(known_labels), key=len, reverse=True)
     tokens = []
     i = 0
-    s = str(expr).strip()
+    s = migrate_reward_labels(str(expr).strip())
     while i < len(s):
         if s[i].isspace():
             i += 1
@@ -186,13 +199,12 @@ def validate_formula_tokens(tokens):
 def compile_student_formula(expr, enabled_eids):
     if not expr or not str(expr).strip():
         return ""
-    s = normalize_student_ops(expr)
+    s = migrate_reward_labels(normalize_student_ops(expr))
     for lbl, eid in labels_sorted():
-        if eid not in enabled_eids:
-            # Replace with 0.0 if the module for this label is disabled
-            s = re.sub(r'\b' + re.escape(lbl) + r'\b', '0.0', s)
-        else:
-            s = re.sub(r'\b' + re.escape(lbl) + r'\b', f"{_PART_PREFIX}{eid}", s)
+        if lbl not in s:
+            continue
+        replacement = "0.0" if eid not in enabled_eids else "%s%s" % (_PART_PREFIX, eid)
+        s = s.replace(lbl, replacement)
 
     # Validate expression to prevent arbitrary code execution
     tree = ast.parse(s, mode='eval')

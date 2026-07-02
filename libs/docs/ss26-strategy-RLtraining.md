@@ -1,8 +1,7 @@
 # SS26 — Chiến lược RL Training & Inference
 
-> Đặc tả bổ sung cho phần **forward** (`get_policy`) và **backward** (reward + học)  
-> trong [SS26 Planning Nhìn công](../SS26%20Planning%20Nhìn%20công.txt).  
-> Tài liệu này mô tả **concept và khung code** — chưa phải implementation.
+> Đặc tả **forward** (`get_policy`) và **backward** (reward + học) — đồng bộ với code trong `libs/`.  
+> Phần **encode / Q-learning / export** đã implement; reward là **module hoá** qua Learn Lab (`reward_config.py`).
 
 ---
 
@@ -185,7 +184,13 @@ class State:
     ...
 ```
 
-**Nơi đặt code:** `Simulation/robot/modules/state.py` và `Robot_embbed/modules/logics/state.py` — **cùng một công thức**, chỉ khác ngôn ngữ (Python / MicroPython).
+**Nơi đặt code (đã có):**
+
+| Thành phần | File |
+|---|---|
+| `encode_state`, `get_policy`, `N_ROWS=5184` | `RL_lib/rl_core.py` |
+| Bản ESP32 (copy thủ công) | `Robot_embbed/modules/logics/rl_core.py` |
+| `build_encoded_state(robot)` | `Simulation/robot/robot.py`, `Robot_embbed/.../robot_state.py` |
 
 ---
 
@@ -216,9 +221,12 @@ Không cần backprop, không cần ma trận lớn lúc chạy — chỉ đọc
 
 ### 3.3 Module `Policy` / `get_policy`
 
-Đã có skeleton trong:
-- `Simulation/robot/modules/policy.py` → class `Policy`
-- `Robot_embbed/modules/logics/policy.py` → hàm `get_policy`
+Đã có skeleton / implementation:
+
+| Môi trường | File |
+|---|---|
+| PC Simulation | `RL_lib/rl_core.py` → `get_policy` |
+| ESP32 | `Robot_embbed/modules/logics/policy_io.py` → `get_policy_for_state` |
 
 **Interface thống nhất:**
 
@@ -271,34 +279,163 @@ Kích thước (`N_cp_max=3`): `5184 × 3 × 4` bytes ≈ **62 KB** mỗi file b
 
 ## 4. Backward — Reward và hàm học (chỉ trên PC)
 
-### 4.1 Câu hỏi: *Từ state suy ra được reward?*
+### 4.0 Phạm vi: Train vs Infer vs Robot
 
-**Trả lời ngắn:** Reward **không** là hàm chỉ của `state` tĩnh, mà của **transition** `(s, a, s')` — tức state trước + action + state sau.
+| Giai đoạn | `compute_reward` | Explore tracking (`pos_history`…) | Cập nhật Q |
+|---|---|---|---|
+| **Train** (`trainer.run_episode`) | Có | Có | Có |
+| **Infer PC** (`rl_runner.run_infer_episode`) | Không | Có ngầm* | Không |
+| **Infer ESP32** (`makeRobot.run`) | Không | Không | Không |
 
-Tuy nhiên, vì state đã encode **xu hướng khoảng cách** (`dist_*_trend`), ta có thể viết reward **dựa trên thành phần của s'** sau khi thực hiện action:
+\* Infer PC dùng chung `Simulation/robot/action.py` → `update_explore_on_move()` nhưng **không** gọi `compute_reward`. Tracking không ảnh hưởng action; chỉ Train mới dùng penalty để học Q.
+
+**Hành vi “tránh lặp đường” trên robot:** đến từ **policy.bin đã train**, không phải runtime penalty trên ESP32.
+
+**Đồng bộ PC ↔ ESP32 (bắt buộc):** `rl_core.py`, `grid.py`, `policy.bin`.  
+**Không port:** `reward_config.py`, explore tracking, công thức học sinh.
+
+---
+
+### 4.1 Kiến trúc reward (implementation)
+
+Nguồn sự thật: `RL_lib/reward_config.py`. Catalog UI: `RL_lib/lab_registry.py`.
 
 ```
-r = r_goal(s') + r_checkpoint(s') + r_step + r_collision(s, a) + r_success(s')
+Learn Lab (learn_lab_UI.py)
+  → ENABLED_MODULES, ELEMENT_FORMULAS, TOTAL_FORMULA_STUDENT, R_*, MAX_*
+  → reward_config.py (Apply / Lưu công thức)
+  → libs/reward_formula/*.json (snapshot học sinh)
+
+Train (Simulation/robot/trainer.py)
+  → execute_action_sim → compute_reward → q_update
 ```
 
-**Bảng reward đề xuất (có thể chỉnh khi test):**
+**Hai lớp công thức:**
 
-| Sự kiện | Reward | Cách nhận biết |
+1. **Element formula** — mỗi reward block (vd. `collision`, `visit_window`):
+   `ELEMENT_FORMULAS[eid]` hoặc `default_formula` trong `lab_registry.REWARD_ELEMENTS`.
+2. **Total formula** — học sinh ghép label tiếng Việt:
+   `TOTAL_FORMULA_STUDENT` → `student_formula.eval_student_formula(parts)`.
+
+Module state **bật/tắt** qua `ENABLED_MODULES` (id trong `lab_registry.STATE_MODULES`). Element thuộc module tắt → `parts[eid]=0`.
+
+---
+
+### 4.2 Luồng một bước train (reward)
+
+```
+1. could_fwd = sim_map.can_move(x,y,direct)
+2. result = execute_action_sim(robot, sim_map, action)
+      → update_rotate_streak / update_straight_streak
+      → nếu moved: update_explore_on_move(robot)   # node_visits, pos_history
+3. s' = build_encoded_state(robot)
+4. total, parts = compute_reward_breakdown(robot, sim_map, result, could_forward_before=could_fwd)
+      → _build_reward_context: cờ bool + bump_ping_pong_count
+      → safe_eval_formula từng element
+      → eval_student_formula tổng
+5. q_update(s, a, total, s', done)
+```
+
+File: `Simulation/robot/trainer.py` (`run_episode`), `Simulation/robot/action.py`, `RL_lib/reward_config.py`.
+
+---
+
+### 4.3 Bảng reward elements (catalog)
+
+Định nghĩa đầy đủ: `RL_lib/lab_registry.py` → `REWARD_ELEMENTS`.
+
+| eid (code) | Label UI | Module | Hằng chính | Cờ / điều kiện |
+|---|---|---|---|---|
+| `R_STEP` | Mỗi bước đi | step | `R_STEP` | luôn (mỗi action) |
+| `collision` | Va chạm tường | obstacle | `R_COLLISION` | `collision` |
+| `forward_clear` | Tiến lên thành công | obstacle | `R_FORWARD_CLEAR` | `moved and not collision` |
+| `wall_detected` | Phát hiện tường | obstacle | `R_WALL_DETECT` | `wall_detected` |
+| `goal_trend` | Lại gần / xa đích | goal | `R_GOAL_CLOSER`, `R_GOAL_FARTHER` | `goal_closer`, `goal_farther` |
+| `goal_reached` | Đến đích | goal | `R_GOAL_REACHED` | `at_goal` |
+| `cp_trend` | Lại gần CP | checkpoint | `R_CP_CLOSER`, `R_CP_FARTHER` | `cp_closer`, `cp_farther` |
+| `checkpoint` | Chạm checkpoint | checkpoint | `R_CHECKPOINT_FIRST` | `at_cp_first` |
+| `rotate` | Xoay tại chỗ | rotation | `R_ROTATE_IN_PLACE` | `rotated` |
+| `facing_clear` | Xoay sang hướng thông thoáng | rotation | `R_FACING_CLEAR` | `facing_clear_on` (= `can_move` sau xoay) |
+| `wasted_rotate` | Xoay khi có thể đi thẳng | rotation | `R_WASTED_ROTATE` | `wasted_rotate_on` |
+| `excess_rotate` | Xoay liên tục | rotation | `R_COLLISION` | `excess_rotate` |
+| `visit_window` | Lặp ô gần | explore_penalty | `R_VISIT_WINDOW` | `visit_window_penalty` |
+| `visit_repeat` | Quay lại ô | explore_penalty | `R_VISIT_REPEAT` | `visit_repeat_penalty` |
+| `ping_pong` | Đi qua đi lại liên tục | explore_penalty | `R_PING_PONG` | `ping_pong_penalty` |
+| `straight_streak` | Giữ nguyên hướng đi | heading | `R_STRAIGHT` | `straight_streak_on` |
+
+**Checkpoint:** `cp_visited[i]` trên robot; mỗi CP **+reward một lần** / episode (`at_cp_first`).
+
+---
+
+### 4.4 Explore penalty — tracking & thuật toán (PC only)
+
+**Robot dict (Simulation)** — không có trên ESP32:
+
+| Field | Reset (`reset_explore_tracking`) | Cập nhật |
 |---|---|---|
-| Tới goal | `+100` | `robot.at_goal()` hoặc `dist_goal == 0` |
-| Đi gần goal hơn | `+10` | `dist_goal_trend == +1` trong s' |
-| Đi xa goal hơn | `-5` | `dist_goal_trend == -1` |
-| Qua checkpoint (lần đầu) | `+30` | `is_at_checkpoint(x,y,i)` và `cp_visited[i] == False` → đánh dấu đã qua |
-| Qua lại CP đã ghé | `0` | `cp_visited[i] == True` — **chỉ tính điểm 1 lần** |
-| Mỗi bước (time penalty) | `-1` | mọi step |
-| Đâm tường / action invalid | `-20` | `forward` khi `obstacle[robot.direct] == 1` (tường phía trước theo heading) |
-| Xoay tại chỗ (không tiến) | `-0.5` | rotate left/right |
+| `node_visits` | `{}` | `update_explore_on_move`: `visits[(x,y)] += 1` khi forward OK |
+| `pos_history` | `[(x,y)]` start | append ô sau mỗi forward; giữ tối đa 128 |
+| `ping_pong_count` | `0` | `bump_ping_pong_count` |
+| `_ping_pong_hist_len` | `1` | chống đếm trùng một bước |
 
-**Checkpoint (đã chốt):** Không bắt buộc thứ tự — robot ghé CP nào trước cũng được. Trainer/Robot giữ `cp_visited: list[bool]` độ dài `N_cp` map; mỗi CP chỉ nhận reward **một lần** mỗi episode.
+File: `Simulation/robot/robot.py`. Gọi reset từ `trainer._reset_episode_at_start`, `lab_world._reset_robot_state`.
 
-**Concept:** Reward shaping hướng robot về goal và checkpoint mà không cần biết toàn bộ map — chỉ cần khoảng cách cục bộ và obstacle đã biết.
+#### 4.4.1 Lặp ô gần (`visit_window`)
 
-### 4.2 Bellman update — Q-learning (tabular)
+- **Ngưỡng:** `MAX_REVISIT_STEPS` (mặc định 5).
+- **Cờ:** `visit_window_penalty` = sau forward, ô hiện tại đã nằm trong `pos_history[-MAX_REVISIT_STEPS : -1]`.
+- **Ý nghĩa:** quay lại cùng ô **trong N bước forward gần nhất** (không tính lần đứng hiện tại).
+
+```python
+key = hist[-1]
+prior = hist[-(MAX_REVISIT_STEPS + 1) : -1]
+visit_window_penalty = key in prior
+```
+
+#### 4.4.2 Quay lại ô (`visit_repeat`)
+
+- **Ngưỡng:** `MAX_CELL_REPEAT` (mặc định 3).
+- **Đếm:** `visits[(x,y)]` tổng số lần forward **đặt chân** vào ô (kể lần đầu).
+- **Cờ:** `visit_repeat_penalty` = `moved` và `(visits - 1) > MAX_CELL_REPEAT`  
+  (chỉ tính **lần quay lại**, không tính lần vào đầu).
+
+Học sinh chọn **một hoặc cả hai** block trong công thức tổng.
+
+#### 4.4.3 Đi qua đi lại liên tục (`ping_pong`)
+
+- **Ngưỡng chu kỳ:** `MAX_PING_PONG_CYCLES` (mặc định 1) — phạt khi `ping_pong_count > ngưỡng`.
+- **Độ dài đường:** `MAX_PING_PONG_SPAN` (mặc định 5) — số **ô tối đa mỗi chiều** trên đoạn thẳng.
+
+Sau mỗi forward, `bump_ping_pong_count(robot, MAX_PING_PONG_SPAN)`:
+
+1. Duyệt `span` từ lớn → nhỏ (`max_span = max(1, MAX_PING_PONG_SPAN - 1)` bước mỗi chiều).
+2. Lấy đoạn `hist[-(2*span+1):]` — nếu **palindrome** và đầu = cuối → `ping_pong_count += 1` (một lần qua-lại hoàn chỉnh).
+3. Nếu không khớp và 3 ô cuối **khác nhau hết** → reset `ping_pong_count = 0` (thoát hành lang).
+
+| MAX_PING_PONG_SPAN | Ví dụ palindrome (hoàn tất 1 chu kỳ) |
+|:---:|:---|
+| 2 | `A → B → A` |
+| 3 | `A → B → C → B → A` |
+| 5 | `A → B → C → D → E → D → C → B → A` |
+
+---
+
+### 4.5 Công thức học sinh & lưu file
+
+| Thành phần | File |
+|---|---|
+| Parse / validate token | `RL_lib/student_formula.py` |
+| Eval an toàn `R_* if flag else 0` | `RL_lib/reward_formula.py` |
+| Lưu/nạp JSON | `RL_lib/formula_store.py` → `libs/reward_formula/*.json` |
+| UI builder | `Ui_app/formula_builder.py`, `Ui_app/learn_lab_UI.py` |
+
+**Migration snapshot cũ:** `formula_store.migrate_formula_snapshot` — `revisit`→`visit_repeat`, `visit_total`→`visit_window`, nhãn `Lặp ô tổng`→`Lặp ô gần`.
+
+**Lưu ý label:** không dùng `()` trong tên reward (vd. tránh `Lặp ô (tổng)`) — parser công thức học sinh nhầm với ngoặc toán.
+
+---
+
+### 4.6 Bellman update — Q-learning (tabular)
 
 **Công thức:**
 
@@ -314,46 +451,25 @@ Q[s, a] ← Q[s, a] + α × (r + γ × max_a' Q[s', a'] − Q[s, a])
 
 **Episode kết thúc khi:** đến goal, hết max_steps, hoặc robot kẹt.
 
-### 4.3 Module `Trainer` (chỉ Simulation — khung code)
+### 4.7 Module Trainer (đã có)
+
+File: `Simulation/robot/trainer.py` — `run_episode`, `train_multi`, `eval_greedy_policy`.
 
 ```python
-class Trainer:
-  def __init__(self, map, robot, hyperparams):
-    self.Q = zeros(N_states, N_actions)
-    self.alpha = hyperparams.alpha
-    self.gamma = hyperparams.gamma
-    self.epsilon = hyperparams.epsilon
-
-  def select_action(self, s) -> int:
-    """ε-greedy: random hoặc argmax Q[s]."""
-    ...
-
-  def compute_reward(self, s, a, s_prime, info) -> float:
-    """Backward: từ transition suy ra r."""
-    ...
-
-  def update(self, s, a, r, s_prime, done):
-    """Một bước Q-learning."""
-    target = r if done else r + self.gamma * max(self.Q[s_prime])
-    self.Q[s, a] += self.alpha * (target - self.Q[s, a])
-
-  def run_episode(self) -> float:
-    """Reset map/robot → lặp đến done → return tổng reward."""
-    ...
-
-  def train(self, n_episodes: int):
-    for ep in range(n_episodes):
-      self.run_episode()
-      self.decay_epsilon()
-
-  def export_policy(self, json_path="policy.json", bin_path="policy.bin"):
-    """Xuất đồng thời JSON (debug) và BIN (ESP32)."""
-    ...
+# Khung tương đương code hiện tại
+def run_episode(robot, sim_map, q_table, epsilon, ...):
+    _reset_episode_at_start(robot, sim_map)  # + reset_explore_tracking
+    loop:
+        s = build_encoded_state(robot)
+        a = epsilon_greedy(s, q_table, epsilon)
+        result = execute_action_sim(robot, sim_map, a)
+        r = compute_reward(robot, sim_map, result, could_forward_before=...)
+        q_update(q_table, s, a, r, s_prime, done)
 ```
 
-**Vị trí file đề xuất:** `Simulation/robot/modules/trainer.py` (mới).
+Export: `Simulation/robot/policy_io.py` → `Q_table/policy.bin` (+ JSON tùy chọn).
 
-### 4.4 Luồng train một episode
+### 4.8 Luồng train một episode
 
 ```
 reset robot → vị trí start, map obstacle ground truth
@@ -370,7 +486,7 @@ until done
 
 Simulation dùng `Map` (ground truth) để tính khoảng cách thật; robot chỉ thấy obstacle qua sensor/memory — **giống robot thật**.
 
-### 4.5 Chiến lược train (đã chốt)
+### 4.9 Chiến lược train (đã chốt)
 
 **Giai đoạn 1 — Một map cố định**
 
@@ -426,20 +542,19 @@ Q(s, a) ≈ w_a · φ(s)
 | `get_policy` | `policy.get_policy` / `Policy.get_action` | Forward |
 | `Action` (3 hàm) | `simAction.Action`, `Robot_embbed/action` | Forward |
 | `map` / `node` obstacle | `RobotMap`, `Node.perceive` | Forward (cập nhật state) |
-| Reward + Q update | `Trainer` (mới) | Backward |
-| Export policy | `Trainer.export_policy` | Backward → file cho ESP32 |
+| Reward + Q update | `Simulation/robot/trainer.py` + `RL_lib/reward_config.py` | Backward |
+| Explore tracking | `Simulation/robot/robot.py` (`update_explore_on_move`, …) | Backward only |
+| Export policy | `Simulation/robot/policy_io.py` | Backward → ESP32 |
 
 ---
 
-## 7. Thứ tự implement đề xuất
+## 7. Thứ tự bảo trì & kiểm tra
 
-1. **Hoàn thiện `State.encode`** + `dist_*_trend` trên Simulation  
-2. **`compute_reward`** + unit test vài transition tay  
-3. **`Trainer`** + train thử map nhỏ 5×5  
-4. **`export_policy`** → `policy.json` + `policy.bin` cùng lúc  
-5. Nối `get_policy` trên Simulation với Q vừa train (closed loop)  
-6. Port `encode_state` + `get_policy` + đọc `policy.bin` lên ESP32  
-7. Tinh chỉnh reward nếu robot xoay tròn / không tới goal  
+1. Giữ `RL_lib/rl_core.py` ↔ `Robot_embbed/.../rl_core.py` **đồng bộ**
+2. Chỉnh reward trong Learn Lab → Apply / Lưu → train lại → export `policy.bin`
+3. Explore penalty: thử trên map Learn Lab 12×5 (`lab_world.py`, `lab_scenarios.py`) trước train map lớn
+4. Closed-loop infer PC (`rl_runner.run_infer_episode`) — greedy tới goal
+5. Copy `policy.bin` (+ `rl_core.py` nếu đổi encode) lên ESP32
 
 ---
 

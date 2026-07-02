@@ -2,16 +2,6 @@
 Robot state — dict + hàm thuần (Simulation).
 """
 
-import sys
-import os
-
-_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
-_SIM = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-if _ROOT not in sys.path:
-    sys.path.insert(0, _ROOT)
-if _SIM not in sys.path:
-    sys.path.insert(0, _SIM)
-
 from RL_lib.grid import turn_left, turn_right
 from RL_lib.rl_core import N_CP_MAX, dist_trend, encode_state
 from robot.robot_map import (
@@ -137,6 +127,52 @@ def update_straight_streak(robot, result):
         robot["straight_streak"] = 0
     else:
         robot["straight_streak"] = robot.get("straight_streak", 0) + 1
+
+
+def reset_explore_tracking(robot):
+    """Reset đếm lặp ô / ping-pong đầu episode."""
+    robot["node_visits"] = {}
+    robot["pos_history"] = [(robot["x"], robot["y"])]
+    robot["ping_pong_count"] = 0
+    robot["_ping_pong_hist_len"] = 1
+
+
+def update_explore_on_move(robot):
+    """Sau forward thành công — đếm lần vào ô và chu kỳ A↔B."""
+    key = (robot["x"], robot["y"])
+    visits = robot.get("node_visits")
+    if visits is None:
+        visits = {}
+        robot["node_visits"] = visits
+    visits[key] = visits.get(key, 0) + 1
+
+    hist = robot.setdefault("pos_history", [])
+    hist.append(key)
+    if len(hist) > 128:
+        del hist[:-128]
+
+
+def bump_ping_pong_count(robot, max_cells_per_leg):
+    """Đếm lần đi qua-lại trên một đoạn thẳng (palindrome), tối đa max_cells_per_leg ô mỗi chiều."""
+    hist = robot.get("pos_history") or []
+    if robot.get("_ping_pong_hist_len") == len(hist):
+        return
+    robot["_ping_pong_hist_len"] = len(hist)
+    count = robot.get("ping_pong_count", 0)
+    max_span = max(1, int(max_cells_per_leg) - 1)
+    found = False
+    for span in range(max_span, 0, -1):
+        need = 2 * span + 1
+        if len(hist) < need:
+            continue
+        segment = hist[-need:]
+        if segment[0] == segment[-1] and segment == segment[::-1]:
+            count += 1
+            found = True
+            break
+    if not found and len(hist) >= 3 and len(set(hist[-3:])) == 3:
+        count = 0
+    robot["ping_pong_count"] = count
 
 
 def build_encoded_state(robot):

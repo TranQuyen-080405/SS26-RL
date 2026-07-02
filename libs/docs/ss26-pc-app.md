@@ -65,22 +65,41 @@ Thuật toán: `RL_lib/`, `Simulation/robot/` — xem `docs/ss26-strategy-RLtrai
 
 ## 5. Tab State & Reward (Learn Lab)
 
-File: `Ui_app/learn_lab_UI.py`, logic: `RL_lib/reward_config.py`, `RL_lib/state_codec.py`, `RL_lib/lab_scenarios.py`.
+File: `Ui_app/learn_lab_UI.py`
 
-**State (trái):** học sinh ghép obstacle N/W/E/S, trend goal, trend CP1–3, heading → hiển thị `s` (0…5183) và preview Q nếu load `policy.bin`.
+| Layer | Module |
+|---|---|
+| UI map 12×5 + WASD | `Ui_app/lab_scenario_map.py`, `RL_lib/lab_world.py` |
+| Catalog module/element | `RL_lib/lab_registry.py` |
+| Reward runtime | `RL_lib/reward_config.py` |
+| Công thức học sinh | `RL_lib/student_formula.py`, `Ui_app/formula_builder.py` |
+| Lưu JSON | `RL_lib/formula_store.py` → `libs/reward_formula/*.json` |
+| Kịch bản test | `RL_lib/lab_scenarios.py` |
 
-**Reward (phải):** spinbox các hệ số (`R_GOAL_CLOSER`, `R_COLLISION`, …) — chỉnh live → ô export cập nhật. **Chạy thử** kịch bản preset (forward gần goal, va tường, checkpoint, …) → breakdown từng thành phần reward.
+**State:** bật/tắt module (`obstacle`, `goal`, `checkpoint`, `heading`, …) → preview `s` qua `encode_for_lab`.
 
-**Đồng bộ (không xung đột):**
+**Reward:** học sinh ghép **label tiếng Việt** (vd. `Va chạm tường + Lặp ô gần`). Mỗi block trong công thức mới hiện spinbox weight + ngưỡng (nếu có).
 
-| Nút | Ghi file |
-|-----|----------|
-| **Apply → Train** | `RL_lib/reward_config.py` (hằng + công thức + logic train) |
-| **Copy export** | Clipboard: snippet reward |
+**Explore penalty (module `explore_penalty`):**
 
-Train tab import `compute_reward` từ `RL_lib/reward_config.py` — Apply có hiệu lực ngay sau reload trainer. ESP32 infer **không** dùng reward — chỉ cần `policy.bin` (+ `rl_core.py`, map trong `makeRobot.py`).
+| Block UI | Ngưỡng UI |
+|---|---|
+| Lặp ô gần | Số bước (`MAX_REVISIT_STEPS`) |
+| Quay lại ô | Lần quay lại (`MAX_CELL_REPEAT`) |
+| Đi qua đi lại liên tục | Chu kỳ qua lại + **Ô mỗi chiều** (`MAX_PING_PONG_CYCLES`, `MAX_PING_PONG_SPAN`) |
 
-State encoding cố định trong `RL_lib/rl_core.py` — tab này dạy **ghép thành phần**, không đổi công thức firmware.
+**Đồng bộ:**
+
+| Hành động | Kết quả |
+|---|---|
+| **Lưu công thức** | JSON + patch `reward_config.py` + reload trainer |
+| **Nạp** | `migrate_formula_snapshot` (tên cũ → mới) |
+| **Apply → Train** | `reward_config.py` active cho `trainer.py` |
+
+Train tab: `compute_reward` từ `reward_config.py`.  
+ESP32 infer: **không** reward — chỉ `policy.bin` + `rl_core.py` (+ map cố định firmware).
+
+Encoding `s`: cố định `RL_lib/rl_core.py` — Learn Lab không đổi công thức encode khi chỉnh reward.
 
 ---
 

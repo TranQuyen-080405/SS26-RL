@@ -136,17 +136,23 @@ REWARD_ELEMENTS = {
         "constants": ["R_COLLISION", "MAX_ROTATE_STREAK"],
         "default_formula": "R_COLLISION if excess_rotate else 0",
     },
-    "revisit": {
-        "label": "Vào lại ô cũ",
+    "visit_window": {
+        "label": "Lặp ô gần",
         "module": "explore_penalty",
-        "constants": ["R_COLLISION", "MAX_NODE_REVISITS"],
-        "default_formula": "R_COLLISION if revisit_penalty else 0",
+        "constants": ["R_VISIT_WINDOW", "MAX_REVISIT_STEPS"],
+        "default_formula": "R_VISIT_WINDOW if visit_window_penalty else 0",
+    },
+    "visit_repeat": {
+        "label": "Quay lại ô",
+        "module": "explore_penalty",
+        "constants": ["R_VISIT_REPEAT", "MAX_CELL_REPEAT"],
+        "default_formula": "R_VISIT_REPEAT if visit_repeat_penalty else 0",
     },
     "ping_pong": {
         "label": "Đi qua đi lại liên tục",
         "module": "explore_penalty",
-        "constants": ["R_COLLISION", "MAX_PING_PONG_CYCLES"],
-        "default_formula": "R_COLLISION if ping_pong_penalty else 0",
+        "constants": ["R_PING_PONG", "MAX_PING_PONG_CYCLES", "MAX_PING_PONG_SPAN"],
+        "default_formula": "R_PING_PONG if ping_pong_penalty else 0",
     },
     "straight_streak": {
         "label": "Giữ nguyên hướng đi",
@@ -171,8 +177,9 @@ ELEMENT_WEIGHT_KEY = {
     "facing_clear": "R_FACING_CLEAR",
     "wasted_rotate": "R_WASTED_ROTATE",
     "excess_rotate": "R_COLLISION",
-    "revisit": "R_COLLISION",
-    "ping_pong": "R_COLLISION",
+    "visit_window": "R_VISIT_WINDOW",
+    "visit_repeat": "R_VISIT_REPEAT",
+    "ping_pong": "R_PING_PONG",
     "straight_streak": "R_STRAIGHT",
     "wall_detected": "R_WALL_DETECT",
 }
@@ -180,8 +187,10 @@ ELEMENT_WEIGHT_KEY = {
 # Ngưỡng (ẩn tên code trong UI — label riêng)
 THRESHOLD_LABELS = {
     "MAX_ROTATE_STREAK": "Ngưỡng xoay liên tiếp",
-    "MAX_NODE_REVISITS": "Ngưỡng lặp ô",
-    "MAX_PING_PONG_CYCLES": "Ngưỡng lặp",
+    "MAX_REVISIT_STEPS": "Ngưỡng bước lặp ô",
+    "MAX_CELL_REPEAT": "Ngưỡng quay lại",
+    "MAX_PING_PONG_CYCLES": "Ngưỡng qua lại",
+    "MAX_PING_PONG_SPAN": "Ô mỗi chiều",
     "MAX_STRAIGHT_STREAK": "Ngưỡng giữ hướng",
 }
 

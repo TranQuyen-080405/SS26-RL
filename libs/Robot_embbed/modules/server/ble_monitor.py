@@ -182,12 +182,13 @@ def _walls_from_map(rmap):
 
 
 def _compact_state(robot, phase="i", step=0, action=None):
+    # Không gửi walls — vượt 240 byte BLE notify limit.
+    # PC tự vẽ tường biên; walls gửi qua M: (publish_map_meta) khi idle.
     out = {
         "x": robot["x"],
         "y": robot["y"],
         "d": robot["direct"],
         "p": phase,
-        "walls": _walls_from_map(robot["robot_map"]),
     }
     if step:
         out["n"] = step

@@ -69,4 +69,44 @@ def load_formula_file(name):
         data = json.load(f)
     if not isinstance(data, dict):
         raise ValueError("File JSON không hợp lệ")
-    return data
+    return migrate_formula_snapshot(data)
+
+
+_LEGACY_REWARD_LABELS = {
+    "Vào lại ô cũ": "Quay lại ô",
+    "Lặp ô (tổng)": "Lặp ô gần",
+    "Lặp ô tổng": "Lặp ô gần",
+}
+
+
+def migrate_formula_snapshot(data):
+    """Nâng cấp snapshot cũ (revisit / visit_total → visit_window / visit_repeat)."""
+    out = dict(data)
+    weights = dict(out.get("element_weights") or {})
+    if "revisit" in weights:
+        weights.setdefault("visit_repeat", weights.pop("revisit"))
+    if "visit_total" in weights:
+        weights.setdefault("visit_window", weights.pop("visit_total"))
+    weights.setdefault("visit_window", 0.0)
+    weights.setdefault("visit_repeat", 0.0)
+    out["element_weights"] = weights
+
+    thresholds = dict(out.get("thresholds") or {})
+    if "MAX_REVISIT_STEPS" not in thresholds:
+        if "MAX_NODE_VISITS" in thresholds:
+            thresholds["MAX_REVISIT_STEPS"] = thresholds.pop("MAX_NODE_VISITS")
+        elif "MAX_NODE_REVISITS" in thresholds:
+            thresholds["MAX_REVISIT_STEPS"] = thresholds.pop("MAX_NODE_REVISITS")
+    thresholds.setdefault("MAX_REVISIT_STEPS", 5)
+    thresholds.setdefault("MAX_CELL_REPEAT", 3)
+    thresholds.setdefault("MAX_PING_PONG_CYCLES", 1)
+    thresholds.setdefault("MAX_PING_PONG_SPAN", 5)
+    thresholds.pop("MAX_NODE_VISITS", None)
+    thresholds.pop("MAX_NODE_REVISITS", None)
+    out["thresholds"] = thresholds
+
+    expr = str(out.get("total_formula") or "")
+    for old, new in _LEGACY_REWARD_LABELS.items():
+        expr = expr.replace(old, new)
+    out["total_formula"] = expr
+    return out

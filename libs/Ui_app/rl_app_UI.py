@@ -48,7 +48,7 @@ class RlApp:
     def __init__(self, parent=None, root=None):
         if parent is None:
             self.root = tk.Tk()
-            self.root.title("SS26 RL — Train / Infer")
+            self.root.title("SS26 RL — Train / Inference")
             self.root.minsize(720, 560)
             self.container = self.root
             self._standalone = True
@@ -103,7 +103,7 @@ class RlApp:
         self.mode_group = SegmentGroup(
             bar,
             self.mode,
-            [("Train", "train"), ("Infer", "infer")],
+            [("Train", "train"), ("Inference", "infer")],
         )
         self.mode_group.grid(row=0, column=1, columnspan=2, sticky=tk.W, padx=(0, 16))
 
@@ -177,7 +177,7 @@ class RlApp:
         self.refresh_checkpoints()
 
     def _build_infer_policy_bar(self):
-        self.infer_policy_frame = ttk.LabelFrame(self.container, text="Policy infer", padding=(8, 6))
+        self.infer_policy_frame = ttk.LabelFrame(self.container, text="Policy inference", padding=(8, 6))
         ttk.Label(self.infer_policy_frame, text="Policy").pack(side=tk.LEFT, padx=(0, 4))
         self.combo_infer_policy = ttk.Combobox(
             self.infer_policy_frame,
@@ -191,7 +191,7 @@ class RlApp:
         ).pack(side=tk.LEFT, padx=(0, 4))
         ttk.Label(
             self.infer_policy_frame,
-            text="Chọn file checkpoints/*.bin để infer",
+            text="Chọn file checkpoints/*.bin để inference",
         ).pack(side=tk.LEFT, padx=8)
         self.refresh_infer_policies()
 
@@ -341,7 +341,7 @@ class RlApp:
             side=tk.LEFT, padx=4, pady=4
         )
 
-        self.infer_list_frame = ttk.LabelFrame(frame, text="Chọn map infer", padding=6)
+        self.infer_list_frame = ttk.LabelFrame(frame, text="Chọn map inference", padding=6)
         list_frame = ttk.Frame(self.infer_list_frame)
         list_frame.pack(fill=tk.BOTH, expand=True)
         scroll = ttk.Scrollbar(list_frame, orient=tk.VERTICAL)
@@ -745,7 +745,7 @@ class RlApp:
             if mode == "train":
                 hint = "%s (%dx%d) — preview | Run để xem train từng bước"
             else:
-                hint = "%s (%dx%d) — bấm Run để chạy infer"
+                hint = "%s (%dx%d) — bấm Run để chạy inference"
             self.map_view.set_status(hint % (name, sim["width"], sim["height"]))
             self.status.set("Map loaded")
             self.root.after_idle(self.map_view.redraw)
@@ -778,7 +778,7 @@ class RlApp:
             self.map_list.delete(0, tk.END)
             for path in self._map_paths:
                 self.map_list.insert(tk.END, os.path.basename(path))
-            self.map_hint.config(text="Infer: chọn map. Map + Run để xem robot infer từng bước.")
+            self.map_hint.config(text="Inference: chọn map. Map + Run để xem robot inference từng bước.")
             self.spin_ep.configure(state=tk.DISABLED)
             if self._map_paths:
                 self.map_list.selection_set(0)
@@ -786,13 +786,13 @@ class RlApp:
             self.root.after_idle(self._preview_map_from_selection)
 
     def _is_busy(self):
-        """Đang chạy train/infer và chưa bấm Stop."""
+        """Đang chạy train/inference và chưa bấm Stop."""
         return self._running and not self._stop_requested
 
     def refresh_map_view(self):
         """Đọc lại map từ map/train|infer/ và vẽ lại bản đồ đang chọn."""
         if self._is_busy():
-            messagebox.showinfo("Refresh map", "Đang chạy train/infer — bấm Stop hoặc đợi xong.")
+            messagebox.showinfo("Refresh map", "Đang chạy train/inference — bấm Stop hoặc đợi xong.")
             return
         kind = "train" if self.mode.get() == "train" else "infer"
         prev_name = None
@@ -835,15 +835,15 @@ class RlApp:
         if self.mode.get() == "infer":
             sel = self.map_list.curselection()
             if not self._map_paths:
-                messagebox.showwarning("Infer", "Không có map trong map/infer/")
+                messagebox.showwarning("Inference", "Không có map trong map/infer/")
                 return
             if not sel:
-                messagebox.showwarning("Infer", "Chọn một map infer.")
+                messagebox.showwarning("Inference", "Chọn một map inference.")
                 return
             try:
                 self._infer_policy_bin()
             except FileNotFoundError as exc:
-                messagebox.showwarning("Infer", str(exc))
+                messagebox.showwarning("Inference", str(exc))
                 return
             if self.view.get() == "map":
                 self._run_infer_map(sel[0])
@@ -954,7 +954,7 @@ class RlApp:
                 self._anim_after_id = None
             self._end_run()
             self.status.set("Stopped")
-            self.map_view.set_status("Đã dừng infer")
+            self.map_view.set_status("Đã dừng inference")
 
 
     def _begin_train(self):
@@ -1161,7 +1161,7 @@ class RlApp:
 
     def _play_steps(self, log, index, outcome, delay):
         if self._stop_requested:
-            self.map_view.set_status("Đã dừng infer")
+            self.map_view.set_status("Đã dừng inference")
             self.status.set("Stopped")
             self._end_run()
             return

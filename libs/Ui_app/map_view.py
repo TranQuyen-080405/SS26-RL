@@ -38,7 +38,7 @@ class SimMapCanvas:
         self._configure_after = None
         self._last_visited_cps = set()
 
-        self.info_var = tk.StringVar(value="Chọn map infer và bấm Run.")
+        self.info_var = tk.StringVar(value="Chọn map inference và bấm Run.")
         ttk.Label(self.frame, textvariable=self.info_var, anchor=tk.W).pack(fill=tk.X, pady=(4, 0))
 
     def pack(self, **kwargs):

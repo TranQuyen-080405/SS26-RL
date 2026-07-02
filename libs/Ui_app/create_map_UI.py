@@ -96,7 +96,7 @@ class MapEditorApp:
 
         ttk.Label(bar, text="Save as").grid(row=0, column=8, padx=(0, 4))
         ttk.Radiobutton(bar, text="train", variable=self.kind, value="train").grid(row=0, column=9)
-        ttk.Radiobutton(bar, text="infer", variable=self.kind, value="infer").grid(row=0, column=10, padx=(0, 12))
+        ttk.Radiobutton(bar, text="inference", variable=self.kind, value="infer").grid(row=0, column=10, padx=(0, 12))
 
         row2 = ttk.Frame(self.container, padding=(8, 0, 8, 8))
         row2.pack(fill=tk.X)

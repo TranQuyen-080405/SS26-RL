@@ -2,16 +2,7 @@
 Khung train — backward (PC). Chưa curriculum / multi-map.
 """
 
-import sys
-import os
 import random
-
-_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
-_SIM = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-if _ROOT not in sys.path:
-    sys.path.insert(0, _ROOT)
-if _SIM not in sys.path:
-    sys.path.insert(0, _SIM)
 
 from RL_lib.rl_core import ACTIONS, get_policy
 from RL_lib.grid import neighbor_xy
@@ -22,22 +13,7 @@ from robot import robot_map as rm
 from robot.policy_io import copy_q_table, empty_q_table, export_policy
 from RL_lib.reward_config import (
     COLLISION_RESET,
-    MAX_NODE_REVISITS,
-    MAX_PING_PONG_CYCLES,
-    MAX_ROTATE_STREAK,
     MAX_STEPS_PER_EPISODE,
-    R_COLLISION,
-    R_CP_CLOSER,
-    R_CP_FARTHER,
-    R_CHECKPOINT_FIRST,
-    R_FACING_CLEAR,
-    R_FORWARD_CLEAR,
-    R_GOAL_CLOSER,
-    R_GOAL_FARTHER,
-    R_GOAL_REACHED,
-    R_ROTATE_IN_PLACE,
-    R_STEP,
-    R_WASTED_ROTATE,
     compute_reward,
 )
 
@@ -51,8 +27,6 @@ def _episode_at_goal(robot, sim_map):
     return rb.is_at_goal(robot)
 
 
-def _copy_q_table(q_table):
-    return [row[:] for row in q_table]
 
 
 def make_robot_for_sim(sim_map):
@@ -117,47 +91,16 @@ def _maybe_save_best(q, train_sims, eval_sims, label, best_q, best_label, best_s
         ok, steps, fail = eval_greedy_maps(eval_sims, q)
         if ok and (best_tier < 2 or (best_tier == 2 and steps < best_steps)):
             names = ", ".join(s.get("name", "?") for s in eval_sims)
-            return _copy_q_table(q), "%s → eval [%s] (%d worst steps)" % (label, names, steps), steps, 2
+            return copy_q_table(q), "%s → eval [%s] (%d worst steps)" % (label, names, steps), steps, 2
         if not ok:
             pass
 
     ok, steps, fail = eval_greedy_maps(train_sims, q)
     if ok and best_tier < 2:
         if best_q is None or steps < best_steps:
-            return _copy_q_table(q), "%s → all train (%d worst steps)" % (label, steps), steps, 1
+            return copy_q_table(q), "%s → all train (%d worst steps)" % (label, steps), steps, 1
 
     return best_q, best_label, best_steps, best_tier
-
-
-def _bump_node_visit(robot, moved):
-    """Đếm lần forward tới ô (x,y) trong episode."""
-    key = (robot["x"], robot["y"])
-    visits = robot.get("node_visits")
-    if visits is None:
-        visits = {}
-        robot["node_visits"] = visits
-    if moved:
-        visits[key] = visits.get(key, 0) + 1
-    return visits.get(key, 0)
-
-
-def _track_ping_pong(robot, moved):
-    """Phát hiện đi qua lại 2 ô (A→B→A→B). Trả số chu kỳ ping-pong liên tiếp."""
-    if not moved:
-        return robot.get("ping_pong_count", 0)
-    hist = robot.setdefault("pos_history", [])
-    hist.append((robot["x"], robot["y"]))
-    if len(hist) > 8:
-        del hist[:-8]
-    count = robot.get("ping_pong_count", 0)
-    if len(hist) >= 4:
-        a, b, c, d = hist[-4:]
-        if a == c and b == d and a != b:
-            count += 1
-        elif len(hist) >= 2 and hist[-1] != hist[-2]:
-            count = 0
-    robot["ping_pong_count"] = count
-    return count
 
 
 def q_update(q_table, s, action_idx, r, s_prime, done, alpha=0.3, gamma=0.95):
@@ -182,9 +125,7 @@ def _reset_episode_at_start(robot, sim_map):
     robot["dist_goal_trend"] = 0
     robot["dist_cp_trend"] = [0, 0, 0]
     robot["rotate_streak"] = 0
-    robot["node_visits"] = {}
-    robot["pos_history"] = []
-    robot["ping_pong_count"] = 0
+    rb.reset_explore_tracking(robot)
     rb.clear_obstacle_memory(robot)
     rb.inject_distances_from_map(robot)
     rb.perceive_facing_from_sim(robot, sim_map)
