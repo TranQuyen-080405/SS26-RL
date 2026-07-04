@@ -43,7 +43,7 @@ COLLISION_RESET = False
 MAX_STEPS_PER_EPISODE = 600
 
 # --- Learn Lab: module bật + công thức từng element ---
-FORMULA_NAME = 'best_engineer_policy'
+FORMULA_NAME = ''
 ENABLED_MODULES = set(['checkpoint', 'explore_penalty', 'goal', 'heading', 'obstacle', 'rotation', 'step'])
 ELEMENT_FORMULAS = dict(DEFAULT_ELEMENT_FORMULAS)
 TOTAL_FORMULA_STUDENT = 'Mỗi bước đi +  Va chạm tường +  Tiến lên thành công +  Lại gần goal +  Đến đích +  Lại gần checkpoint +  Chạm checkpoint +  Xoay sang hướng thông thoáng +  Xoay tại chỗ +  Xoay khi có thể đi thẳng +  Quay lại ô +  Đi qua đi lại liên tục +  Giữ hướng'

@@ -61,6 +61,15 @@ def save_formula_file(name, snapshot):
     return path
 
 
+def delete_formula_file(name):
+    path = formula_json_path(name)
+    if os.path.isfile(path):
+        os.remove(path)
+        return True
+    return False
+
+
+
 def load_formula_file(name):
     path = formula_json_path(name)
     if not os.path.isfile(path):

@@ -5,7 +5,7 @@ Train / infer — đọc map JSON từ map/train/ và map/infer/.
 import os
 
 N_EPISODES_DEFAULT = 10000
-MAX_STEPS_INFER = 800
+MAX_STEPS_INFER = 200
 
 
 def load_train_and_eval_maps():

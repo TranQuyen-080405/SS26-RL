@@ -35,6 +35,7 @@ from RL_lib.formula_store import (
     load_formula_file,
     normalize_formula_basename,
     save_formula_file,
+    delete_formula_file,
 )
 from RL_lib.rl_core import N_ROWS
 from Ui_app.lab_scenario_map import LabScenarioMap5
@@ -219,7 +220,9 @@ class LearnLabApp:
         ttk.Button(formula_bar, text="Nạp", command=self._load_selected_formula).pack(side=tk.LEFT, padx=(0, 8))
         ttk.Button(formula_bar, text="Làm mới danh sách", command=self._refresh_formula_combo).pack(side=tk.LEFT, padx=(0, 8))
         self.btn_save_formula = ttk.Button(formula_bar, text="Lưu công thức", command=self._save_to_project)
-        self.btn_save_formula.pack(side=tk.LEFT)
+        self.btn_save_formula.pack(side=tk.LEFT, padx=(0, 6))
+        self.btn_delete_formula = ttk.Button(formula_bar, text="Xóa công thức", command=self._delete_selected_formula)
+        self.btn_delete_formula.pack(side=tk.LEFT)
         ttk.Label(formula_bar, textvariable=self.apply_status, foreground="#555").pack(
             side=tk.LEFT, padx=(12, 0)
         )
@@ -546,6 +549,31 @@ class LearnLabApp:
         except (OSError, ValueError, json.JSONDecodeError) as exc:
             messagebox.showerror("Nạp công thức", str(exc))
 
+    def _delete_selected_formula(self):
+        name = self.formula_pick_var.get().strip()
+        if not name:
+            messagebox.showinfo("Xóa công thức", "Chưa chọn file công thức nào để xóa.")
+            return
+        confirm = messagebox.askyesno(
+            "Xác nhận xóa",
+            f"Bạn có chắc chắn muốn xóa file công thức '{name}' không?",
+            icon="warning"
+        )
+        if not confirm:
+            return
+        try:
+            if delete_formula_file(name):
+                messagebox.showinfo("Đã xóa", f"Đã xóa thành công file công thức '{name}'!")
+                if self._loaded_formula_name == name:
+                    self._loaded_formula_name = ""
+                    reward_config.set_formula_name("")
+                    self.apply_status.set("Đã xóa file hiện tại.")
+                self._refresh_formula_combo()
+            else:
+                messagebox.showerror("Lỗi", f"Không tìm thấy file công thức '{name}' để xóa.")
+        except Exception as e:
+            messagebox.showerror("Lỗi", f"Lỗi khi xóa file: {str(e)}")
+
     def load_and_compile_formula(self, name):
         """Nạp công thức từ file và compile/apply vào dự án (reward_config.py)."""
         try:
@@ -707,8 +735,8 @@ class LearnLabApp:
         self.world.reset_scenario()
         self.scenario_map.redraw()
         self._on_modules_changed()
-        self._loaded_formula_name = "Mặc định"
-        reward_config.set_formula_name("Mặc định")
+        self._loaded_formula_name = ""
+        reward_config.set_formula_name("")
 
     def run(self):
         if self._standalone:

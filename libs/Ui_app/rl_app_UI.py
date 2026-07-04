@@ -17,7 +17,7 @@ if _ROOT not in sys.path:
 if _SIM not in sys.path:
     sys.path.insert(0, _SIM)
 
-from map.map_io import list_map_files, build_sim_map_from_file
+from map.map_io import list_map_files, build_sim_map_from_file, maps_dir_for_kind
 from Ui_app.map_view import SimMapCanvas
 from Ui_app.ui_widgets import SegmentGroup, box_button, style_train_treeview, train_map_mark, train_row_tags
 
@@ -156,7 +156,10 @@ class RlApp:
         )
         self.combo_checkpoint.pack(side=tk.LEFT, padx=(0, 8))
         self.combo_checkpoint.bind("<<ComboboxSelected>>", self._on_checkpoint_selected)
-        box_button(row1, text="Refresh Q", command=self.refresh_checkpoints, role="secondary").pack(
+        box_button(row1, text="Refresh list", command=self.refresh_checkpoints, role="secondary").pack(
+            side=tk.LEFT, padx=(0, 4)
+        )
+        box_button(row1, text="Delete policy", command=self._delete_selected_train_policy, role="secondary").pack(
             side=tk.LEFT, padx=(0, 4)
         )
 
@@ -189,11 +192,71 @@ class RlApp:
         box_button(
             self.infer_policy_frame, text="Refresh list", command=self.refresh_infer_policies, role="secondary"
         ).pack(side=tk.LEFT, padx=(0, 4))
+        box_button(
+            self.infer_policy_frame, text="Delete policy", command=self._delete_selected_policy, role="secondary"
+        ).pack(side=tk.LEFT, padx=(0, 4))
         ttk.Label(
             self.infer_policy_frame,
             text="Chọn file checkpoints/*.bin để inference",
         ).pack(side=tk.LEFT, padx=8)
         self.refresh_infer_policies()
+
+    def _delete_selected_policy(self):
+        if self._is_busy():
+            messagebox.showinfo("Xóa policy", "Đang chạy train/inference — vui lòng bấm Stop hoặc đợi chạy xong.")
+            return
+        name = self.infer_policy_var.get().strip()
+        if not name:
+            messagebox.showinfo("Xóa policy", "Chưa chọn file policy nào để xóa.")
+            return
+        confirm = messagebox.askyesno(
+            "Xác nhận xóa",
+            f"Bạn có chắc chắn muốn xóa file policy '{name}' không?",
+            icon="warning"
+        )
+        if not confirm:
+            return
+        from robot.policy_io import policy_bin_path
+        path = policy_bin_path(name)
+        try:
+            if os.path.exists(path):
+                os.remove(path)
+                messagebox.showinfo("Đã xóa", f"Đã xóa thành công file policy '{name}'!")
+                self.refresh_infer_policies()
+                self.refresh_checkpoints()
+            else:
+                messagebox.showerror("Lỗi", f"Không tìm thấy file policy '{name}' để xóa.")
+        except Exception as e:
+            messagebox.showerror("Lỗi", f"Lỗi khi xóa file: {str(e)}")
+
+    def _delete_selected_train_policy(self):
+        if self._is_busy():
+            messagebox.showinfo("Xóa policy", "Đang chạy train/inference — vui lòng bấm Stop hoặc đợi chạy xong.")
+            return
+        name = self.checkpoint_var.get().strip()
+        if not name or name == "(mới)":
+            messagebox.showinfo("Xóa policy", "Chưa chọn file policy hợp lệ để xóa.")
+            return
+        confirm = messagebox.askyesno(
+            "Xác nhận xóa",
+            f"Bạn có chắc chắn muốn xóa file policy '{name}' không?",
+            icon="warning"
+        )
+        if not confirm:
+            return
+        from robot.policy_io import policy_bin_path
+        path = policy_bin_path(name)
+        try:
+            if os.path.exists(path):
+                os.remove(path)
+                messagebox.showinfo("Đã xóa", f"Đã xóa thành công file policy '{name}'!")
+                self.refresh_checkpoints()
+                self.refresh_infer_policies()
+            else:
+                messagebox.showerror("Lỗi", f"Không tìm thấy file policy '{name}' để xóa.")
+        except Exception as e:
+            messagebox.showerror("Lỗi", f"Lỗi khi xóa file: {str(e)}")
+
 
     def refresh_infer_policies(self):
         from robot.policy_io import list_policy_bin_files
@@ -340,6 +403,9 @@ class RlApp:
         box_button(btn_row, text="Bỏ chọn", command=self._train_select_none, role="secondary").pack(
             side=tk.LEFT, padx=4, pady=4
         )
+        box_button(btn_row, text="Xóa map", command=self._delete_selected_train_map, role="secondary").pack(
+            side=tk.LEFT, padx=4, pady=4
+        )
 
         self.infer_list_frame = ttk.LabelFrame(frame, text="Chọn map inference", padding=6)
         list_frame = ttk.Frame(self.infer_list_frame)
@@ -347,7 +413,7 @@ class RlApp:
         scroll = ttk.Scrollbar(list_frame, orient=tk.VERTICAL)
         self.map_list = tk.Listbox(
             list_frame,
-            height=14,
+            height=12,
             yscrollcommand=scroll.set,
             selectmode=tk.BROWSE,
             relief=tk.GROOVE,
@@ -361,6 +427,12 @@ class RlApp:
         self.map_list.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         scroll.pack(side=tk.RIGHT, fill=tk.Y)
         self.map_list.bind("<<ListboxSelect>>", self._on_map_select)
+
+        btn_row_infer = tk.Frame(self.infer_list_frame, height=44)
+        btn_row_infer.pack(fill=tk.X, pady=(4, 0))
+        box_button(btn_row_infer, text="Xóa map", command=self._delete_selected_infer_map, role="secondary").pack(
+            side=tk.LEFT, pady=4
+        )
 
     def _build_actions(self):
         bar = ttk.LabelFrame(self.container, text="Train / Inference", padding=8)
@@ -827,6 +899,66 @@ class RlApp:
             self.status.set("Refresh map — %d file trong map/%s/" % (n, kind))
         else:
             self.status.set("Refresh map — %d file trong map/%s/ (chọn View Map để xem)" % (n, kind))
+
+    def _delete_selected_train_map(self):
+        if self._is_busy():
+            messagebox.showinfo("Xóa map", "Đang chạy train/inference — vui lòng bấm Stop hoặc đợi chạy xong.")
+            return
+        sel = self.train_tree.selection()
+        if not sel:
+            messagebox.showinfo("Xóa map", "Vui lòng chọn bản đồ trong danh sách train để xóa.")
+            return
+        row = self._train_row_by_iid(sel[0])
+        if not row:
+            return
+        filename = row["name"]
+        confirm = messagebox.askyesno(
+            "Xác nhận xóa",
+            f"Bạn có chắc chắn muốn xóa bản đồ '{filename}' khỏi danh sách train không?",
+            icon="warning"
+        )
+        if not confirm:
+            return
+        path = os.path.join(maps_dir_for_kind("train"), filename)
+        try:
+            if os.path.exists(path):
+                os.remove(path)
+                messagebox.showinfo("Đã xóa", f"Đã xóa thành công bản đồ '{filename}'!")
+                self.refresh_maps()
+            else:
+                messagebox.showerror("Lỗi", f"Không tìm thấy file bản đồ '{filename}' để xóa.")
+        except Exception as e:
+            messagebox.showerror("Lỗi", f"Lỗi khi xóa file: {str(e)}")
+
+    def _delete_selected_infer_map(self):
+        if self._is_busy():
+            messagebox.showinfo("Xóa map", "Đang chạy train/inference — vui lòng bấm Stop hoặc đợi chạy xong.")
+            return
+        sel = self.map_list.curselection()
+        if not sel:
+            messagebox.showinfo("Xóa map", "Vui lòng chọn bản đồ trong danh sách inference để xóa.")
+            return
+        idx = sel[0]
+        if idx >= len(self._map_paths):
+            return
+        path = self._map_paths[idx]
+        filename = os.path.basename(path)
+        confirm = messagebox.askyesno(
+            "Xác nhận xóa",
+            f"Bạn có chắc chắn muốn xóa bản đồ '{filename}' khỏi danh sách inference không?",
+            icon="warning"
+        )
+        if not confirm:
+            return
+        try:
+            if os.path.exists(path):
+                os.remove(path)
+                messagebox.showinfo("Đã xóa", f"Đã xóa thành công bản đồ '{filename}'!")
+                self.refresh_maps()
+            else:
+                messagebox.showerror("Lỗi", f"Không tìm thấy file bản đồ '{filename}' để xóa.")
+        except Exception as e:
+            messagebox.showerror("Lỗi", f"Lỗi khi xóa file: {str(e)}")
 
     def on_run(self):
         if self._running:

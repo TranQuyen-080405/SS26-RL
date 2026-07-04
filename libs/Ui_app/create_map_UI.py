@@ -111,6 +111,7 @@ class MapEditorApp:
         self.btn_remove_cp = ttk.Button(row2, text="Xóa checkpoint", command=self.remove_selected_checkpoint)
         self.btn_remove_cp.pack(side=tk.LEFT, padx=(0, 12))
 
+        ttk.Button(row2, text="Xóa bản đồ…", command=self.delete_json).pack(side=tk.RIGHT, padx=4)
         ttk.Button(row2, text="Load JSON…", command=self.load_json).pack(side=tk.RIGHT, padx=4)
         ttk.Button(row2, text="Save JSON", command=self.save_json).pack(side=tk.RIGHT, padx=4)
         ttk.Button(row2, text="Clear walls", command=self.clear_walls).pack(side=tk.RIGHT, padx=4)
@@ -450,6 +451,36 @@ class MapEditorApp:
             self.load_spec(spec)
         except (OSError, ValueError, KeyError, json.JSONDecodeError) as e:
             messagebox.showerror("Load", str(e))
+
+    def delete_json(self):
+        kind = self.kind.get()
+        initial = TRAIN_MAPS_DIR if kind == "train" else INFER_MAPS_DIR
+        os.makedirs(initial, exist_ok=True)
+        path = filedialog.askopenfilename(
+            title="Xóa map JSON",
+            initialdir=initial,
+            filetypes=[("Map JSON", "map_*.json"), ("JSON", "*.json")],
+        )
+        if not path:
+            return
+        filename = os.path.basename(path)
+        confirm = messagebox.askyesno(
+            "Xác nhận xóa",
+            f"Bạn có chắc chắn muốn xóa bản đồ '{filename}' không?",
+            icon="warning"
+        )
+        if not confirm:
+            return
+        try:
+            os.remove(path)
+            messagebox.showinfo("Đã xóa", f"Đã xóa thành công bản đồ '{filename}'!")
+            if self._on_saved:
+                try:
+                    self._on_saved(kind, path)
+                except Exception:
+                    pass
+        except Exception as e:
+            messagebox.showerror("Lỗi", f"Không thể xóa file: {str(e)}")
 
     def clear_walls(self):
         self.walls.clear()
