@@ -28,6 +28,10 @@ _LABEL_ALIASES = {
     "Vào lại ô cũ": "Quay lại ô",
     "Lặp ô (tổng)": "Lặp ô gần",
     "Lặp ô tổng": "Lặp ô gần",
+    "Lại gần đích": "Lại gần goal",
+    "Thay đổi khoảng cách tới Goal": "Lại gần goal",
+    "Thay đổi khoảng cách tới Checkpoint": "Lại gần checkpoint",
+    "Giữ nguyên hướng đi": "Giữ hướng n lần thì cộng",
 }
 
 

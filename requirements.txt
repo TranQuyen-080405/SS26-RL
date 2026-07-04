@@ -2,5 +2,3 @@
 numpy
 bleak
 
-# Map editor (create_map tab): cần tkinter
-# Robot monitor (PC): pip install bleak

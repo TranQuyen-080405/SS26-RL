@@ -117,16 +117,12 @@ def update_rotate_streak(robot, result):
 
 
 def update_straight_streak(robot, result):
-    """Đếm số lần đi thẳng hoặc giữ nguyên hướng liên tiếp (không xoay thành công); reset khi xoay."""
-    rotated = bool(
-        result.get("success")
-        and not result.get("moved")
-        and not result.get("collision")
-    )
-    if rotated:
-        robot["straight_streak"] = 0
-    else:
+    """Đếm số lần đi thẳng liên tiếp thành công (chỉ forward thành công mới tăng; reset khi xoay thành công hoặc va chạm)."""
+    moved = bool(result.get("success") and result.get("moved") and not result.get("collision"))
+    if moved:
         robot["straight_streak"] = robot.get("straight_streak", 0) + 1
+    else:
+        robot["straight_streak"] = 0
 
 
 def reset_explore_tracking(robot):

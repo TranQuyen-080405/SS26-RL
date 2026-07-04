@@ -88,11 +88,23 @@ REWARD_ELEMENTS = {
         "constants": ["R_WALL_DETECT"],
         "default_formula": "R_WALL_DETECT if wall_detected else 0",
     },
-    "goal_trend": {
-        "label": "Lại gần đích",
+    "wall_visible": {
+        "label": "Nhìn thấy tường",
+        "module": "obstacle",
+        "constants": ["R_WALL_VISIBLE"],
+        "default_formula": "R_WALL_VISIBLE if wall_visible else 0",
+    },
+    "goal_closer": {
+        "label": "Lại gần goal",
         "module": "goal",
-        "constants": ["R_GOAL_CLOSER", "R_GOAL_FARTHER"],
-        "default_formula": "R_GOAL_CLOSER if goal_closer else (R_GOAL_FARTHER if goal_farther else 0)",
+        "constants": ["R_GOAL_CLOSER"],
+        "default_formula": "R_GOAL_CLOSER if goal_closer else 0",
+    },
+    "goal_farther": {
+        "label": "Tiến xa goal",
+        "module": "goal",
+        "constants": ["R_GOAL_FARTHER"],
+        "default_formula": "R_GOAL_FARTHER if goal_farther else 0",
     },
     "goal_reached": {
         "label": "Đến đích",
@@ -100,11 +112,17 @@ REWARD_ELEMENTS = {
         "constants": ["R_GOAL_REACHED"],
         "default_formula": "R_GOAL_REACHED if at_goal else 0",
     },
-    "cp_trend": {
+    "cp_closer": {
         "label": "Lại gần checkpoint",
         "module": "checkpoint",
-        "constants": ["R_CP_CLOSER", "R_CP_FARTHER"],
-        "default_formula": "R_CP_CLOSER if cp_closer else (R_CP_FARTHER if cp_farther else 0)",
+        "constants": ["R_CP_CLOSER"],
+        "default_formula": "R_CP_CLOSER if cp_closer else 0",
+    },
+    "cp_farther": {
+        "label": "Đi xa checkpoint",
+        "module": "checkpoint",
+        "constants": ["R_CP_FARTHER"],
+        "default_formula": "R_CP_FARTHER if cp_farther else 0",
     },
     "checkpoint": {
         "label": "Chạm checkpoint",
@@ -130,11 +148,17 @@ REWARD_ELEMENTS = {
         "constants": ["R_WASTED_ROTATE"],
         "default_formula": "R_WASTED_ROTATE if wasted_rotate_on else 0",
     },
+    "blocked_rotate": {
+        "label": "Xoay hướng bị chặn",
+        "module": "rotation",
+        "constants": ["R_BLOCKED_ROTATE"],
+        "default_formula": "R_BLOCKED_ROTATE if blocked_rotate_on else 0",
+    },
     "excess_rotate": {
         "label": "Xoay tại chỗ liên tục",
         "module": "rotation",
-        "constants": ["R_COLLISION", "MAX_ROTATE_STREAK"],
-        "default_formula": "R_COLLISION if excess_rotate else 0",
+        "constants": ["R_EXCESS_ROTATE", "MAX_ROTATE_STREAK"],
+        "default_formula": "R_EXCESS_ROTATE if excess_rotate else 0",
     },
     "visit_window": {
         "label": "Lặp ô gần",
@@ -154,11 +178,17 @@ REWARD_ELEMENTS = {
         "constants": ["R_PING_PONG", "MAX_PING_PONG_CYCLES", "MAX_PING_PONG_SPAN"],
         "default_formula": "R_PING_PONG if ping_pong_penalty else 0",
     },
-    "straight_streak": {
-        "label": "Giữ nguyên hướng đi",
+    "straight_streak_reach": {
+        "label": "Giữ hướng",
         "module": "heading",
-        "constants": ["R_STRAIGHT", "MAX_STRAIGHT_STREAK"],
-        "default_formula": "R_STRAIGHT if straight_streak_on else 0",
+        "constants": ["R_STRAIGHT_REACH", "MAX_STRAIGHT_REACH"],
+        "default_formula": "R_STRAIGHT_REACH if straight_streak_reach_on else 0",
+    },
+    "straight_streak_cap": {
+        "label": "Không giữ hướng",
+        "module": "heading",
+        "constants": ["R_STRAIGHT_CAP", "MAX_STRAIGHT_CAP"],
+        "default_formula": "R_STRAIGHT_CAP if straight_streak_cap_on else 0",
     },
 }
 
@@ -169,19 +199,24 @@ ELEMENT_WEIGHT_KEY = {
     "R_STEP": "R_STEP",
     "collision": "R_COLLISION",
     "forward_clear": "R_FORWARD_CLEAR",
-    "goal_trend": "R_GOAL_CLOSER",
+    "wall_detected": "R_WALL_DETECT",
+    "wall_visible": "R_WALL_VISIBLE",
+    "goal_closer": "R_GOAL_CLOSER",
+    "goal_farther": "R_GOAL_FARTHER",
     "goal_reached": "R_GOAL_REACHED",
-    "cp_trend": "R_CP_CLOSER",
+    "cp_closer": "R_CP_CLOSER",
+    "cp_farther": "R_CP_FARTHER",
     "checkpoint": "R_CHECKPOINT_FIRST",
     "rotate": "R_ROTATE_IN_PLACE",
     "facing_clear": "R_FACING_CLEAR",
     "wasted_rotate": "R_WASTED_ROTATE",
-    "excess_rotate": "R_COLLISION",
+    "blocked_rotate": "R_BLOCKED_ROTATE",
+    "excess_rotate": "R_EXCESS_ROTATE",
     "visit_window": "R_VISIT_WINDOW",
     "visit_repeat": "R_VISIT_REPEAT",
     "ping_pong": "R_PING_PONG",
-    "straight_streak": "R_STRAIGHT",
-    "wall_detected": "R_WALL_DETECT",
+    "straight_streak_reach": "R_STRAIGHT_REACH",
+    "straight_streak_cap": "R_STRAIGHT_CAP",
 }
 
 # Ngưỡng (ẩn tên code trong UI — label riêng)
@@ -190,8 +225,9 @@ THRESHOLD_LABELS = {
     "MAX_REVISIT_STEPS": "Ngưỡng bước lặp ô",
     "MAX_CELL_REPEAT": "Ngưỡng quay lại",
     "MAX_PING_PONG_CYCLES": "Ngưỡng qua lại",
-    "MAX_PING_PONG_SPAN": "Ô mỗi chiều",
-    "MAX_STRAIGHT_STREAK": "Ngưỡng giữ hướng",
+    "MAX_PING_PONG_SPAN": "Số ô lặp",
+    "MAX_STRAIGHT_REACH": "Ngưỡng giữ hướng",
+    "MAX_STRAIGHT_CAP": "Ngưỡng không giữ hướng",
 }
 
 FORMULA_HELP = "Ghép reward + phép + − × ÷ ^ ( ). Ví dụ: 2 ^ Mỗi bước đi + Va chạm tường × 2"

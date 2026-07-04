@@ -5,7 +5,7 @@ import json
 import sys
 import threading
 import tkinter as tk
-from tkinter import ttk, scrolledtext, messagebox
+from tkinter import ttk, scrolledtext, messagebox, filedialog, simpledialog
 
 from bootstrap import robot_embbed_dir
 
@@ -35,10 +35,10 @@ def _load_robot_deploy_map():
         cfg = emb_main.MAP_CFG
     except Exception:
         return {
-            "width": 10,
-            "height": 10,
-            "start": (5, 0),
-            "goal": (5, 9),
+            "width": 9,
+            "height": 9,
+            "start": (4, 0),
+            "goal": (4, 8),
             "checkpoints": [],
             "walls": [],
         }
@@ -248,6 +248,16 @@ async def _force_rescan_gatt(client):
 class RobotMapCanvas:
     def __init__(self, parent):
         self.frame = ttk.Frame(parent)
+        
+        # Local toolbar inside canvas frame
+        toolbar = ttk.Frame(self.frame, padding=2)
+        toolbar.pack(fill=tk.X, side=tk.TOP)
+        
+        self.btn_add_cp = ttk.Button(toolbar, text="Thêm checkpoint", command=self.add_checkpoint)
+        self.btn_add_cp.pack(side=tk.LEFT, padx=4)
+        self.btn_remove_cp = ttk.Button(toolbar, text="Xóa checkpoint", command=self.remove_selected_checkpoint)
+        self.btn_remove_cp.pack(side=tk.LEFT, padx=4)
+        
         self.canvas = tk.Canvas(self.frame, bg="#1e1e2e", highlightthickness=0)
         self.canvas.pack(fill=tk.BOTH, expand=True)
         self.model = MonitorMapModel()
@@ -260,13 +270,27 @@ class RobotMapCanvas:
         )
         ttk.Label(self.frame, textvariable=self.info_var, anchor=tk.W).pack(fill=tk.X, pady=(4, 0))
         
+        self._selection = None
+        self._await_new_cp = False
+        self.on_config_changed_cb = None
+        
         self._cell = 44
         self._offset_x = 24
         self._offset_y = 24
         
         self._resize_after_id = None
         self.canvas.bind("<Configure>", self._on_resize_event)
+        self.canvas.bind("<Button-1>", self._on_canvas_click)
+        
+        # Focus & Key bindings
+        self.canvas.bind("<Button-1>", lambda e: self.canvas.focus_set(), add="+")
+        self.frame.bind("<Enter>", lambda e: self.canvas.focus_set())
+        self.canvas.bind("<Escape>", self._on_escape)
+        self.canvas.bind("<Delete>", self._on_delete_key)
+        self.canvas.bind("<BackSpace>", self._on_delete_key)
+        
         self.redraw()
+        self._update_tool_buttons()
 
     def _on_resize_event(self, event):
         if self._resize_after_id:
@@ -276,6 +300,199 @@ class RobotMapCanvas:
     def _throttled_redraw(self):
         self._resize_after_id = None
         self.redraw()
+
+    def _edge_lines(self, x, y, h):
+        px, py = self.cell_px(x, y, h)
+        return [
+            ("N", px, py, px + self._cell, py),
+            ("E", px + self._cell, py, px + self._cell, py + self._cell),
+            ("S", px, py + self._cell, px + self._cell, py + self._cell),
+            ("W", px, py, px, py + self._cell),
+        ]
+
+    def _edge_valid(self, x, y, d):
+        w, h = self.model.w, self.model.h
+        if not (0 <= x < w and 0 <= y < h):
+            return False
+        from RL_lib.grid import neighbor_xy, is_valid
+        nx, ny = neighbor_xy(x, y, d)
+        return is_valid(nx, ny, w, h)
+
+    def _pick_edge(self, cx, cy):
+        w, h = self.model.w, self.model.h
+        best = None
+        best_d = 999
+        edge_hit = max(8, min(18, self._cell // 4))
+        for y in range(h):
+            for x in range(w):
+                for d, x1, y1, x2, y2 in self._edge_lines(x, y, h):
+                    if not self._edge_valid(x, y, d):
+                        continue
+                    dseg = self._point_seg_dist(cx, cy, x1, y1, x2, y2)
+                    if dseg < best_d and dseg < edge_hit:
+                        best_d = dseg
+                        best = (x, y, d)
+        return best
+
+    @staticmethod
+    def _point_seg_dist(px, py, x1, y1, x2, y2):
+        dx, dy = x2 - x1, y2 - y1
+        if dx == dy == 0:
+            return ((px - x1) ** 2 + (py - y1) ** 2) ** 0.5
+        t = max(0, min(1, ((px - x1) * dx + (py - y1) * dy) / (dx * dx + dy * dy)))
+        qx, qy = x1 + t * dx, y1 + t * dy
+        return ((px - qx) ** 2 + (py - qy) ** 2) ** 0.5
+
+    def _special_at(self, x, y):
+        m = self.model
+        if (x, y) == m.start:
+            return "start"
+        if (x, y) == m.goal:
+            return "goal"
+        for i, cp in enumerate(m.checkpoints):
+            if (x, y) == cp:
+                return ("cp", i)
+        return None
+
+    def _occupied(self, x, y, ignore=None):
+        m = self.model
+        if ignore != "start" and (x, y) == m.start:
+            return True
+        if ignore != "goal" and (x, y) == m.goal:
+            return True
+        for i, cp in enumerate(m.checkpoints):
+            if ignore == ("cp", i):
+                continue
+            if (x, y) == cp:
+                return True
+        return False
+
+    def _selection_cell(self):
+        if not self._selection:
+            return None
+        kind = self._selection[0]
+        if kind == "start":
+            return self.model.start
+        if kind == "goal":
+            return self.model.goal
+        if kind == "cp":
+            i = self._selection[1]
+            if 0 <= i < len(self.model.checkpoints):
+                return self.model.checkpoints[i]
+        return None
+
+    def add_checkpoint(self):
+        if self.model.phase == "r":
+            return
+        if len(self.model.checkpoints) >= 3:
+            return
+        self._await_new_cp = True
+        self._selection = None
+        self._update_tool_buttons()
+        self.redraw()
+
+    def remove_selected_checkpoint(self):
+        if self.model.phase == "r":
+            return
+        if not self._selection or self._selection[0] != "cp":
+            return
+        idx = self._selection[1]
+        m = self.model
+        if 0 <= idx < len(m.checkpoints):
+            m.checkpoints.pop(idx)
+            self._clear_selection()
+            self._update_info()
+            self.redraw()
+            if self.on_config_changed_cb:
+                self.on_config_changed_cb(m.start, m.goal, m.checkpoints)
+
+    def _clear_selection(self):
+        self._selection = None
+        self._await_new_cp = False
+        self._update_tool_buttons()
+
+    def _update_tool_buttons(self):
+        if not hasattr(self, "btn_add_cp"):
+            return
+        cps = self.model.checkpoints
+        self.btn_add_cp.configure(state=tk.NORMAL if len(cps) < 3 else tk.DISABLED)
+        cp_selected = self._selection and self._selection[0] == "cp"
+        self.btn_remove_cp.configure(state=tk.NORMAL if cp_selected and cps else tk.DISABLED)
+
+    def _on_escape(self, _event=None):
+        self._clear_selection()
+        self.redraw()
+
+    def _on_delete_key(self, _event=None):
+        if self._selection and self._selection[0] == "cp":
+            self.remove_selected_checkpoint()
+
+    def _handle_cell_click(self, cell):
+        x, y = cell
+        m = self.model
+
+        if self._await_new_cp:
+            if self._occupied(x, y):
+                return
+            m.checkpoints.append((x, y))
+            self._await_new_cp = False
+            self._selection = ("cp", len(m.checkpoints) - 1)
+            self._update_tool_buttons()
+            self._update_info()
+            self.redraw()
+            if self.on_config_changed_cb:
+                self.on_config_changed_cb(m.start, m.goal, m.checkpoints)
+            return
+
+        if self._selection:
+            if cell == self._selection_cell():
+                self._clear_selection()
+                self.redraw()
+                return
+            if self._occupied(x, y, ignore=self._selection):
+                return
+            kind = self._selection[0]
+            if kind == "start":
+                m.start = (x, y)
+                m.x = x
+                m.y = y
+                self.path = [(x, y)]
+            elif kind == "goal":
+                m.goal = (x, y)
+            elif kind == "cp":
+                idx = self._selection[1]
+                if 0 <= idx < len(m.checkpoints):
+                    m.checkpoints[idx] = (x, y)
+            self._clear_selection()
+            self._update_info()
+            self.redraw()
+            if self.on_config_changed_cb:
+                self.on_config_changed_cb(m.start, m.goal, m.checkpoints)
+            return
+
+        special = self._special_at(x, y)
+        if special == "start":
+            self._selection = ("start",)
+        elif special == "goal":
+            self._selection = ("goal",)
+        elif isinstance(special, tuple) and special[0] == "cp":
+            self._selection = special
+        self._update_tool_buttons()
+        self.redraw()
+
+    def _on_canvas_click(self, event):
+        if self.model.phase == "r":
+            return
+        c = self.canvas
+        px, py = c.canvasx(event.x), c.canvasy(event.y)
+        w, h = self.model.w, self.model.h
+        
+
+        # 2. Cell click for selection/moving
+        cx = int((px - self._offset_x) // self._cell)
+        cy = int(h - 1 - (py - self._offset_y) // self._cell)
+        if 0 <= cx < w and 0 <= cy < h:
+            self._handle_cell_click((cx, cy))
 
     def pack(self, **kwargs):
         self.frame.pack(**kwargs)
@@ -312,6 +529,25 @@ class RobotMapCanvas:
     def cell_center(self, x, y, h):
         px, py = self.cell_px(x, y, h)
         return px + self._cell // 2, py + self._cell // 2
+
+    def _draw_edge_wall(self, d, px, py, cell, thick, blocked=False):
+        c = self.canvas
+        half = max(2, thick // 2)
+        inset = max(2, cell // 18)
+        x0, x1 = px + inset, px + cell - inset
+        y0, y1 = py + inset, py + cell - inset
+        if d == "N":
+            coords = (x0, py - half, x1, py + half)
+        elif d == "S":
+            coords = (x0, py + cell - half, x1, py + cell + half)
+        elif d == "W":
+            coords = (px - half, y0, px + half, y1)
+        else:  # E
+            coords = (px + cell - half, y0, px + cell + half, y1)
+        if blocked:
+            c.create_rectangle(*coords, fill="#e64566", outline="#ffccd5", width=1)
+        else:
+            c.create_rectangle(*coords, fill="#0a0a0f", outline="#313244", width=1)
 
     def apply_map_spec(self, spec):
         self.model.apply_map_spec(spec)
@@ -374,55 +610,89 @@ class RobotMapCanvas:
         self._update_layout()
         m = self.model
         w, h = m.w, m.h
+        cell = self._cell
         start, goal = m.start, m.goal
         cps = {tuple(cp) for cp in m.checkpoints}
         
-        # Chỉ vẽ các chi tiết start, goal, checkpoints, robot khi đã kết nối
-        connected = getattr(self, "connected", False)
-        visited_cps = set()
-        if connected:
-            visited_cps = {cp for cp in cps if cp in self.path or cp == (m.x, m.y)}
+        visited_cps = {cp for cp in cps if cp in self.path or cp == (m.x, m.y)}
+
+        blocked_thick = max(6, min(10, cell // 9))
+        open_w = max(2, min(3, cell // 18))
+        border_thick = max(6, min(9, cell // 10))
 
         # Draw grid cells
         for y in range(h):
             for x in range(w):
                 px, py = self.cell_px(x, y, h)
-                fill = "#ffffff"
-                if connected:
-                    if (x, y) == start:
-                        fill = "#a6e3a1"
-                    elif (x, y) == goal:
-                        fill = "#f38ba8"
-                    elif (x, y) in cps:
-                        if (x, y) in visited_cps:
-                            fill = "#89dceb"
-                        else:
-                            fill = "#f9e2af"
-                c.create_rectangle(px, py, px + self._cell, py + self._cell, fill=fill, outline="#45475a")
+                fill = "white"
+                if (x, y) == start:
+                    fill = "#a6e3a1"
+                elif (x, y) == goal:
+                    fill = "#f38ba8"
+                elif (x, y) in cps:
+                    if (x, y) in visited_cps:
+                        fill = "#89dceb"
+                    else:
+                        fill = "#f9e2af"
+                c.create_rectangle(px, py, px + cell, py + cell, fill=fill, outline="#45475a")
                 
-                # Draw black plus sign touching the square edges
-                mx = px + self._cell // 2
-                my = py + self._cell // 2
-                c.create_line(px, my, px + self._cell, my, fill="#000000", width=3)
-                c.create_line(mx, py, mx, py + self._cell, fill="#000000", width=3)
+                # Draw black cross: vertical and horizontal bars extending to cell edges, thickness = 1/10 of cell size
+                thick = cell / 10.0
+                cx = px + cell / 2.0
+                cy = py + cell / 2.0
+                
+                # Vertical bar
+                c.create_rectangle(
+                    cx - thick / 2.0, py, cx + thick / 2.0, py + cell,
+                    fill="black", outline=""
+                )
+                # Horizontal bar
+                c.create_rectangle(
+                    px, cy - thick / 2.0, px + cell, cy + thick / 2.0,
+                    fill="black", outline=""
+                )
+
+        sel_cell = self._selection_cell()
+        if sel_cell:
+            sx, sy = sel_cell
+            px, py = self.cell_px(sx, sy, h)
+            pad = max(3, cell // 14)
+            c.create_rectangle(
+                px + pad,
+                py + pad,
+                px + cell - pad,
+                py + cell - pad,
+                outline="#89b4fa",
+                width=3,
+                dash=(6, 4),
+            )
+
+        if self._await_new_cp:
+            c.create_text(
+                self.canvas.winfo_width() // 2,
+                max(16, self._offset_y // 2),
+                text="Bấm ô để đặt checkpoint mới (Esc: hủy)",
+                fill="#89b4fa",
+                font=("Segoe UI", 10, "bold"),
+            )
 
         # Draw coordinate labels on the outer axes
         for x in range(w):
-            cx = self._offset_x + x * self._cell + self._cell // 2
+            cx = self._offset_x + x * cell + cell // 2
             # Bottom label
-            cy_bot = self._offset_y + h * self._cell + 12
+            cy_bot = self._offset_y + h * cell + 12
             c.create_text(cx, cy_bot, text=str(x), fill="#cdd6f4", font=("Segoe UI", 8, "bold"))
             # Top label
             cy_top = self._offset_y - 12
             c.create_text(cx, cy_top, text=str(x), fill="#cdd6f4", font=("Segoe UI", 8, "bold"))
 
         for y in range(h):
-            cy = self._offset_y + (h - 1 - y) * self._cell + self._cell // 2
+            cy = self._offset_y + (h - 1 - y) * cell + cell // 2
             # Left label
             cx_left = self._offset_x - 12
             c.create_text(cx_left, cy, text=str(y), fill="#cdd6f4", font=("Segoe UI", 8, "bold"))
             # Right label
-            cx_right = self._offset_x + w * self._cell + 12
+            cx_right = self._offset_x + w * cell + 12
             c.create_text(cx_right, cy, text=str(y), fill="#cdd6f4", font=("Segoe UI", 8, "bold"))
 
         # Draw walls
@@ -430,28 +700,32 @@ class RobotMapCanvas:
             for x in range(w):
                 px, py = self.cell_px(x, y, h)
                 for d, x1, y1, x2, y2 in [
-                    ("N", px, py, px + self._cell, py),
-                    ("E", px + self._cell, py, px + self._cell, py + self._cell),
-                    ("S", px, py + self._cell, px + self._cell, py + self._cell),
-                    ("W", px, py, px, py + self._cell),
+                    ("N", px, py, px + cell, py),
+                    ("E", px + cell, py, px + cell, py + cell),
+                    ("S", px, py + cell, px + cell, py + cell),
+                    ("W", px, py, px, py + cell),
                 ]:
-                    is_wall = connected and ((x, y, d) in m.walls)
-                    color = "#f38ba8" if is_wall else "#585b70"
-                    width = 5 if is_wall else 2
-                    c.create_line(x1, y1, x2, y2, fill=color, width=width)
+                    if not self._edge_valid(x, y, d):
+                        self._draw_edge_wall(d, px, py, cell, border_thick, blocked=False)
+                        continue
+                    key = (x, y, d)
+                    if key in m.walls:
+                        self._draw_edge_wall(d, px, py, cell, blocked_thick, blocked=True)
+                    else:
+                        c.create_line(x1, y1, x2, y2, fill="#56586e", width=open_w)
 
-        if connected and self.path:
+        if self.path:
             pts = [self.cell_center(self.path[0][0], self.path[0][1], h)]
             for x, y in self.path[1:]:
                 pts.append(self.cell_center(x, y, h))
             for i in range(len(pts) - 1):
                 c.create_line(pts[i][0], pts[i][1], pts[i + 1][0], pts[i + 1][1], fill="#89b4fa", width=3)
 
-        if connected:
+        if m.x is not None and m.y is not None:
             cx, cy = self.cell_center(m.x, m.y, h)
-            r = self._cell // 4
+            r = cell // 4
             c.create_oval(cx - r, cy - r, cx + r, cy + r, fill="#cba6f7", outline="#cdd6f4", width=2)
-            arrow_len = max(8, self._cell // 4)
+            arrow_len = max(8, cell // 4)
             dir_offsets = {
                 "N": (0, -arrow_len),
                 "E": (arrow_len, 0),
@@ -492,7 +766,18 @@ class RobotMonitorApp:
         self._tx_buf = ""
         self._start_infer_event = threading.Event()
         self._stop_infer_event = threading.Event()
+        self._send_config_event = threading.Event()
+        self._send_reset_event = threading.Event()
+        self._pending_config = None
         self._infer_running = False
+        
+        # File upload state variables
+        self._upload_local_path = None
+        self._upload_remote_path = None
+        self._upload_file_event = threading.Event()
+        self._upload_ack_offset = -1
+        self._upload_done = False
+        
         self._build_ui()
 
     def _build_ui(self):
@@ -512,6 +797,8 @@ class RobotMonitorApp:
         self.btn_stop.pack(side=tk.LEFT, padx=2)
         ttk.Button(bar, text="Xóa log", command=self.clear_log).pack(side=tk.LEFT, padx=2)
         ttk.Button(bar, text="Chạy lại", command=self.reset_for_rerun).pack(side=tk.LEFT, padx=2)
+        self.btn_upload = ttk.Button(bar, text="Tải file lên", command=self.request_upload_file, state=tk.DISABLED)
+        self.btn_upload.pack(side=tk.LEFT, padx=2)
 
         self.infer_var = tk.StringVar(value="Inference: chưa chạy")
         ttk.Label(bar, textvariable=self.infer_var, width=28).pack(side=tk.LEFT, padx=(8, 0))
@@ -537,7 +824,9 @@ class RobotMonitorApp:
         self.log.configure(state=tk.DISABLED)
 
         map_frame = ttk.LabelFrame(paned, text="Robot map", padding=4)
+        
         self.map_view = RobotMapCanvas(map_frame)
+        self.map_view.on_config_changed_cb = self._on_map_config_changed
         self.map_view.pack(fill=tk.BOTH, expand=True)
 
         paned.add(log_frame, weight=1)
@@ -566,12 +855,20 @@ class RobotMonitorApp:
         self._start_infer_event.clear()
         self._infer_running = False
         self.map_view.reset_to_start()
+        self._send_reset_event.set()
         self._set_infer_status("Inference: sẵn sàng — bấm Start inference", running=False)
         self.status_var.set("Đã reset — đặt robot về ô start, bấm Start inference để chạy lại.")
         self.append_log("--- PC reset (start, path) — cho Start inference ---\n")
 
     def reset_path(self):
         self.map_view.reset_path()
+
+    def _on_map_config_changed(self, start, goal, checkpoints):
+        if not self._connected:
+            return
+        self._pending_config = (start, goal, checkpoints)
+        self._send_config_event.set()
+        self.append_log("Đã lên lịch gửi cấu hình mới tới robot: Start=%s, Goal=%s, CPs=%s\n" % (str(start), str(goal), str(checkpoints)))
 
     def toggle_connect(self):
         if self._connected:
@@ -612,9 +909,13 @@ class RobotMonitorApp:
             self.map_view.reset_to_start()
             self.btn_stop.configure(state=tk.DISABLED)
             self.btn_start.configure(state=tk.DISABLED)
+            if hasattr(self, 'btn_upload'):
+                self.btn_upload.configure(state=tk.DISABLED)
         else:
             self.btn_start.configure(state=tk.NORMAL)
             self.btn_stop.configure(state=tk.DISABLED)
+            if hasattr(self, 'btn_upload'):
+                self.btn_upload.configure(state=tk.NORMAL)
         self.map_view.redraw()
 
     def _set_infer_status(self, text, running=None):
@@ -674,6 +975,24 @@ class RobotMonitorApp:
         self._set_infer_status("Inference: đang gửi Stop...", running=None)
         self.status_var.set("Đã gửi lệnh Stop inference — chờ robot dừng...")
 
+    def request_upload_file(self):
+        if not self._connected:
+            messagebox.showwarning("BLE", "Kết nối robot trước.")
+            return
+            
+        local_path = filedialog.askopenfilename(
+            title="Chọn file nhị phân",
+            filetypes=[("Binary files", "*.bin"), ("All files", "*.*")]
+        )
+        if not local_path:
+            return
+            
+        self._upload_local_path = local_path
+        self._upload_remote_path = "modules/logics/Q_table/policy.bin"
+        self._upload_ack_offset = -1
+        self._upload_done = False
+        self._upload_file_event.set()
+
     def _on_tx_notify(self, _handle, data):
         try:
             chunk = bytes(data).decode("utf-8", errors="replace")
@@ -707,11 +1026,85 @@ class RobotMonitorApp:
                     continue
                 self.root.after(0, lambda m=meta: self.map_view.apply_map_spec(m))
             elif line.startswith("L:"):
-                text = line[2:] + "\n"
+                content = line[2:]
+                if content.startswith("F_ACK "):
+                    try:
+                        self._upload_ack_offset = int(content.split()[1])
+                    except Exception:
+                        pass
+                elif content.startswith("F_DONE "):
+                    self._upload_done = True
+                elif content.startswith("F_ERR: "):
+                    self._upload_ack_offset = -2
+                
+                text = content + "\n"
                 self.root.after(0, lambda t=text: self._handle_ble_log(t))
             else:
                 text = line + "\n"
                 self.root.after(0, lambda t=text: self._handle_ble_log(t))
+
+    async def _async_upload_file(self, client, local_path, remote_path):
+        try:
+            self.root.after(0, lambda: self.status_var.set("Đang đọc file cục bộ..."))
+            with open(local_path, "rb") as f:
+                data = f.read()
+            total_size = len(data)
+            
+            self.root.after(0, lambda: self.append_log(f"Bắt đầu tải file {local_path} -> {remote_path} ({total_size} bytes)\n"))
+            self._upload_ack_offset = -1
+            self._upload_done = False
+            
+            # Send start command
+            payload_start = f"F_START {total_size}".encode()
+            await self._write_rx(client, payload_start)
+            
+            # Wait for F_ACK 0
+            for _ in range(50):
+                if self._upload_ack_offset == 0:
+                    break
+                await asyncio.sleep(0.1)
+            else:
+                raise Exception("Robot không phản hồi lệnh khởi đầu truyền file (F_START timeout)")
+                
+            # Send data chunks in 20-byte packets
+            chunk_size = 20
+            batch_bytes = 100
+            offset = 0
+            while offset < total_size:
+                batch_limit = min(offset + batch_bytes, total_size)
+                self.root.after(0, lambda o=offset, t=total_size: self.status_var.set(f"Đang gửi: {o}/{t} bytes ({int(o/t*100)}%)"))
+                
+                while offset < batch_limit:
+                    chunk = data[offset : offset + chunk_size]
+                    await self._write_rx(client, chunk)
+                    offset += len(chunk)
+                    await asyncio.sleep(0.01)
+                
+                # Wait for ACK corresponding to this offset
+                for _ in range(100):
+                    if self._upload_ack_offset == -2:
+                        raise Exception("Robot báo lỗi trong quá trình nhận file (F_ERR)")
+                    if self._upload_ack_offset >= offset:
+                        break
+                    await asyncio.sleep(0.1)
+                else:
+                    raise Exception(f"Không nhận được ACK cho offset {offset} (timeout)")
+                    
+            # Wait for F_DONE
+            for _ in range(50):
+                if self._upload_done:
+                    break
+                await asyncio.sleep(0.1)
+            else:
+                raise Exception("Không nhận được xác nhận F_DONE từ robot (timeout)")
+                
+            self.root.after(0, lambda: self.status_var.set("Tải file lên robot thành công!"))
+            self.root.after(0, lambda: self.append_log(f"Tải file thành công lên robot: {remote_path}\n"))
+            
+        except Exception as exc:
+            self.root.after(0, lambda e=exc: self.status_var.set(f"Lỗi tải file: {e}"))
+            self.root.after(0, lambda e=exc: self.append_log(f"LỖI TẢI FILE: {e}\n"))
+            raise exc
 
     async def _write_rx(self, client, payload):
         if self._rx_char is None:
@@ -819,6 +1212,12 @@ class RobotMonitorApp:
                 self._client = client
                 self._rx_char = rx_char
                 self._connected = True
+                self._pending_config = (
+                    self.map_view.model.start,
+                    self.map_view.model.goal,
+                    self.map_view.model.checkpoints,
+                )
+                self._send_config_event.set()
                 self.root.after(0, lambda: self._on_connection_changed(True))
                 self.root.after(0, lambda: self._set_infer_status("Inference: idle — bấm Start inference", running=False))
                 self.root.after(
@@ -850,6 +1249,49 @@ class RobotMonitorApp:
                             )
                         except Exception as exc:
                             self.root.after(0, lambda e=exc: self.status_var.set("Loi gui Stop: %s" % e))
+
+                    if self._send_config_event.is_set():
+                        self._send_config_event.clear()
+                        cfg = self._pending_config
+                        if cfg:
+                            try:
+                                start, goal, cps = cfg
+                                sx, sy = start
+                                gx, gy = goal
+                                cp_parts = []
+                                for cp in cps:
+                                    cp_parts.append(f"{cp[0]} {cp[1]}")
+                                cp_str = " " + " ".join(cp_parts) if cp_parts else ""
+                                payload = f"C {sx} {sy} {gx} {gy}{cp_str}".encode()
+                                await self._write_rx(client, payload)
+                                self.root.after(
+                                    0,
+                                    lambda: self.status_var.set("Cấu hình Start/Goal/CPs đã gửi — chờ robot xác nhận..."),
+                                )
+                            except Exception as exc:
+                                self.root.after(0, lambda e=exc: self.status_var.set("Lỗi gửi cấu hình: %s" % e))
+
+                    if self._send_reset_event.is_set():
+                        self._send_reset_event.clear()
+                        try:
+                            await self._write_rx(client, b"R")
+                            self.root.after(
+                                0,
+                                lambda: self.status_var.set("Lệnh Reset đã gửi — robot đang reset map..."),
+                            )
+                        except Exception as exc:
+                            self.root.after(0, lambda e=exc: self.status_var.set("Lỗi gửi Reset: %s" % e))
+
+                    if self._upload_file_event.is_set():
+                        self._upload_file_event.clear()
+                        local_path = self._upload_local_path
+                        remote_path = self._upload_remote_path
+                        if local_path and remote_path:
+                            try:
+                                await self._async_upload_file(client, local_path, remote_path)
+                            except Exception as exc:
+                                self.root.after(0, lambda e=exc: self.status_var.set("Lỗi tải file: %s" % e))
+
                     await asyncio.sleep(0.15)
 
             except BleakCharacteristicNotFoundError as exc:

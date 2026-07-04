@@ -82,10 +82,19 @@ def save_map_json(spec, path=None, kind=None):
         spec["kind"] = kind
     k = spec.get("kind", "train")
     ensure_maps_dir(k)
+    
+    orig_name = spec.get("name", "map")
+    safe = re.sub(r"[^\w\-]+", "_", orig_name).strip("_") or "map"
+    for pref in ["map_train_", "map_infer_"]:
+        if safe.startswith(pref):
+            safe = safe[len(pref):]
+            
+    prefix = _KIND_PREFIX.get(k, "map_train_")
+    new_name = f"{prefix}{safe}"
+    spec["name"] = new_name
+    
     if path is None:
-        safe = re.sub(r"[^\w\-]+", "_", spec.get("name", "map")).strip("_") or "map"
-        prefix = _KIND_PREFIX.get(k, "map_train_")
-        path = os.path.join(maps_dir_for_kind(k), "%s%s.json" % (prefix, safe))
+        path = os.path.join(maps_dir_for_kind(k), f"{new_name}.json")
     with open(path, "w", encoding="utf-8") as f:
         json.dump(spec, f, indent=2)
     return path

@@ -99,6 +99,6 @@ def run(cfg):
 
     _log("SW: Episode finished. Waiting for new Start command...")
     try:
-        publish_idle()
+        publish_idle(bot)
     except Exception:
         pass

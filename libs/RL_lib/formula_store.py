@@ -76,6 +76,10 @@ _LEGACY_REWARD_LABELS = {
     "Vào lại ô cũ": "Quay lại ô",
     "Lặp ô (tổng)": "Lặp ô gần",
     "Lặp ô tổng": "Lặp ô gần",
+    "Lại gần đích": "Lại gần goal",
+    "Thay đổi khoảng cách tới Goal": "Lại gần goal",
+    "Thay đổi khoảng cách tới Checkpoint": "Lại gần checkpoint",
+    "Giữ nguyên hướng đi": "Giữ hướng n lần thì cộng",
 }
 
 
@@ -89,6 +93,39 @@ def migrate_formula_snapshot(data):
         weights.setdefault("visit_window", weights.pop("visit_total"))
     weights.setdefault("visit_window", 0.0)
     weights.setdefault("visit_repeat", 0.0)
+
+    # Handle goal_trend
+    if "goal_trend" in weights:
+        val = weights.pop("goal_trend")
+        weights.setdefault("goal_closer", val)
+        weights.setdefault("goal_farther", -val)
+    weights.setdefault("goal_closer", 0.0)
+    weights.setdefault("goal_farther", 0.0)
+
+    # Handle cp_trend
+    if "cp_trend" in weights:
+        val = weights.pop("cp_trend")
+        weights.setdefault("cp_closer", val)
+        weights.setdefault("cp_farther", -val)
+    weights.setdefault("cp_closer", 0.0)
+    weights.setdefault("cp_farther", 0.0)
+
+    # Handle straight_streak
+    if "straight_streak" in weights:
+        val = weights.pop("straight_streak")
+        weights.setdefault("straight_streak_reach", val)
+        weights.setdefault("straight_streak_cap", val)
+    weights.setdefault("straight_streak_reach", 0.0)
+    weights.setdefault("straight_streak_cap", 0.0)
+
+    # Handle wall_detected and wall_visible
+    weights.setdefault("wall_detected", 0.0)
+    weights.setdefault("wall_visible", 0.0)
+
+    # Handle rotate split
+    weights.setdefault("wasted_rotate", 0.0)
+    weights.setdefault("blocked_rotate", 0.0)
+
     out["element_weights"] = weights
 
     thresholds = dict(out.get("thresholds") or {})
@@ -101,6 +138,12 @@ def migrate_formula_snapshot(data):
     thresholds.setdefault("MAX_CELL_REPEAT", 3)
     thresholds.setdefault("MAX_PING_PONG_CYCLES", 1)
     thresholds.setdefault("MAX_PING_PONG_SPAN", 5)
+    if "MAX_STRAIGHT_STREAK" in thresholds:
+        val = thresholds.pop("MAX_STRAIGHT_STREAK")
+        thresholds.setdefault("MAX_STRAIGHT_REACH", val)
+        thresholds.setdefault("MAX_STRAIGHT_CAP", val)
+    thresholds.setdefault("MAX_STRAIGHT_REACH", 3)
+    thresholds.setdefault("MAX_STRAIGHT_CAP", 3)
     thresholds.pop("MAX_NODE_VISITS", None)
     thresholds.pop("MAX_NODE_REVISITS", None)
     out["thresholds"] = thresholds

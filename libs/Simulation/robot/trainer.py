@@ -91,14 +91,14 @@ def _maybe_save_best(q, train_sims, eval_sims, label, best_q, best_label, best_s
         ok, steps, fail = eval_greedy_maps(eval_sims, q)
         if ok and (best_tier < 2 or (best_tier == 2 and steps < best_steps)):
             names = ", ".join(s.get("name", "?") for s in eval_sims)
-            return copy_q_table(q), "%s → eval [%s] (%d worst steps)" % (label, names, steps), steps, 2
+            return copy_q_table(q), "%s -> eval [%s] (%d worst steps)" % (label, names, steps), steps, 2
         if not ok:
             pass
 
     ok, steps, fail = eval_greedy_maps(train_sims, q)
     if ok and best_tier < 2:
         if best_q is None or steps < best_steps:
-            return copy_q_table(q), "%s → all train (%d worst steps)" % (label, steps), steps, 1
+            return copy_q_table(q), "%s -> all train (%d worst steps)" % (label, steps), steps, 1
 
     return best_q, best_label, best_steps, best_tier
 
@@ -280,16 +280,17 @@ def train_multi(
         if reached_goal:
             n_goal += 1
             block_goals += 1
-            best_q, best_label, best_steps, best_tier = _maybe_save_best(
-                q,
-                train_sims,
-                eval_sims,
-                "episode %d" % ep_index,
-                best_q,
-                best_label,
-                best_steps,
-                best_tier,
-            )
+            if ep_index % 500 == 0 or ep_index == total_eps - 1:
+                best_q, best_label, best_steps, best_tier = _maybe_save_best(
+                    q,
+                    train_sims,
+                    eval_sims,
+                    "episode %d" % ep_index,
+                    best_q,
+                    best_label,
+                    best_steps,
+                    best_tier,
+                )
         if (ep_index + 1) % LOG_EVERY_EPISODES == 0:
             train_log.print_episode(block_start, block_map, block_goals)
         return True

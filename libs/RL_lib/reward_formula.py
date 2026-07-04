@@ -31,11 +31,16 @@ def normalize_student_ops(expr):
     return s
 
 
+_AST_CACHE = {}
+
+
 def safe_eval_formula(expr, variables):
     if not expr or not str(expr).strip():
         return 0.0
     normalized = normalize_student_ops(expr)
-    tree = ast.parse(normalized.strip(), mode="eval")
+    if normalized not in _AST_CACHE:
+        _AST_CACHE[normalized] = ast.parse(normalized.strip(), mode="eval")
+    tree = _AST_CACHE[normalized]
     return float(_eval_node(tree.body, variables))
 
 

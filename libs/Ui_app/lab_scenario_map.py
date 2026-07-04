@@ -28,16 +28,15 @@ class LabScenarioMap5:
         self.frame = ttk.LabelFrame(parent, text="Check State", padding=4)
         self.frame.pack(fill=tk.X)
 
+        self._selection = None
+        self._await_new_cp = False
+
         tools = ttk.Frame(self.frame)
         tools.pack(fill=tk.X, pady=(0, 4))
-        self._tool = tk.StringVar(value="robot")
-        for val, label in (
-            ("robot", "Robot"),
-            ("goal", "Goal"),
-            ("cp", "Checkpoint"),
-            ("wall", "Walls"),
-        ):
-            ttk.Radiobutton(tools, text=label, variable=self._tool, value=val).pack(side=tk.LEFT, padx=4)
+        self.btn_add_cp = ttk.Button(tools, text="Thêm checkpoint", command=self.add_checkpoint)
+        self.btn_add_cp.pack(side=tk.LEFT, padx=4)
+        self.btn_remove_cp = ttk.Button(tools, text="Xóa checkpoint", command=self.remove_selected_checkpoint)
+        self.btn_remove_cp.pack(side=tk.LEFT, padx=4)
         ttk.Button(tools, text="Reset map", command=self._reset).pack(side=tk.RIGHT, padx=4)
 
         map_wrap = ttk.Frame(self.frame)
@@ -71,18 +70,19 @@ class LabScenarioMap5:
             self._move_btns.append(btn)
         self._move_enabled = True
         self._key_actions = {
-            "w": "forward",
+            "s": "forward",
             "a": "rotate left",
             "d": "rotate right",
         }
 
-        ttk.Label(act_row, text="(W / A / D)", foreground="#6c7086").pack(side=tk.LEFT, padx=(8, 0))
+        ttk.Label(act_row, text="(A / S / D)", foreground="#6c7086").pack(side=tk.LEFT, padx=(8, 0))
 
         self._build_result_panel()
         self.set_result_display(state_rows=[], has_action=False)
 
         self._bind_keyboard()
         self.redraw()
+        self._update_tool_buttons()
 
     def _bind_keyboard(self):
         targets = [self.frame, self.canvas, self._act_row, self._state_box, self._reward_box]
@@ -90,6 +90,9 @@ class LabScenarioMap5:
             widget.bind("<KeyPress>", self._on_key_press)
         self.canvas.bind("<Button-1>", self._focus_map, add="+")
         self.frame.bind("<Enter>", self._focus_map)
+        self.canvas.bind("<Escape>", self._on_escape)
+        self.canvas.bind("<Delete>", self._on_delete_key)
+        self.canvas.bind("<BackSpace>", self._on_delete_key)
 
     def _focus_map(self, _event=None):
         try:
@@ -351,27 +354,184 @@ class LabScenarioMap5:
         qx, qy = x1 + t * dx, y1 + t * dy
         return ((px - qx) ** 2 + (py - qy) ** 2) ** 0.5
 
+    def add_checkpoint(self):
+        cps = self.world.sim_map.get("checkpoints") or []
+        if len(cps) >= 3:
+            return
+        self._await_new_cp = True
+        self._selection = None
+        self._update_tool_buttons()
+        self.redraw()
+
+    def remove_selected_checkpoint(self):
+        if not self._selection or self._selection[0] != "cp":
+            return
+        idx = self._selection[1]
+        sim = self.world.sim_map
+        cps = list(sim.get("checkpoints") or [])
+        if 0 <= idx < len(cps):
+            cps.pop(idx)
+            sim["checkpoints"] = cps
+            self.world.rmap["checkpoints"] = cps
+            self.world.sync_maps()
+            self._clear_selection()
+            self.redraw()
+            self._notify()
+
+    def _clear_selection(self):
+        self._selection = None
+        self._await_new_cp = False
+        self._update_tool_buttons()
+
+    def _update_tool_buttons(self):
+        if not hasattr(self, "btn_add_cp"):
+            return
+        cps = self.world.sim_map.get("checkpoints") or []
+        self.btn_add_cp.configure(state=tk.NORMAL if len(cps) < 3 else tk.DISABLED)
+        cp_selected = self._selection and self._selection[0] == "cp"
+        self.btn_remove_cp.configure(state=tk.NORMAL if cp_selected and cps else tk.DISABLED)
+
+    def _on_escape(self, _event=None):
+        self._clear_selection()
+        self.redraw()
+
+    def _on_delete_key(self, _event=None):
+        if self._selection and self._selection[0] == "cp":
+            self.remove_selected_checkpoint()
+
+    def _special_at(self, x, y):
+        sim = self.world.sim_map
+        if (x, y) == (self.world.robot["x"], self.world.robot["y"]):
+            return "robot"
+        if (x, y) == tuple(sim.get("goal") or (0, 0)):
+            return "goal"
+        cps = [tuple(p) for p in (sim.get("checkpoints") or [])]
+        for i, cp in enumerate(cps):
+            if (x, y) == cp:
+                return ("cp", i)
+        return None
+
+    def _occupied(self, x, y, ignore=None):
+        sim = self.world.sim_map
+        if ignore != "robot" and (x, y) == (self.world.robot["x"], self.world.robot["y"]):
+            return True
+        if ignore != "goal" and (x, y) == tuple(sim.get("goal") or (0, 0)):
+            return True
+        cps = [tuple(p) for p in (sim.get("checkpoints") or [])]
+        for i, cp in enumerate(cps):
+            if ignore == ("cp", i):
+                continue
+            if (x, y) == cp:
+                return True
+        return False
+
+    def _selection_cell(self):
+        if not self._selection:
+            return None
+        kind = self._selection[0]
+        if kind == "robot":
+            return (self.world.robot["x"], self.world.robot["y"])
+        if kind == "goal":
+            return tuple(self.world.sim_map.get("goal") or (0, 0))
+        if kind == "cp":
+            i = self._selection[1]
+            cps = [tuple(p) for p in (self.world.sim_map.get("checkpoints") or [])]
+            if 0 <= i < len(cps):
+                return cps[i]
+        return None
+
+    def _handle_cell_click(self, cell):
+        x, y = cell
+        sim = self.world.sim_map
+
+        if self._await_new_cp:
+            if self._occupied(x, y):
+                return
+            cps = list(sim.get("checkpoints") or [])
+            cps.append((x, y))
+            sim["checkpoints"] = cps
+            self.world.rmap["checkpoints"] = cps
+            self.world.sync_maps()
+            self._await_new_cp = False
+            self._selection = ("cp", len(cps) - 1)
+            self._update_tool_buttons()
+            self.redraw()
+            self._notify()
+            return
+
+        if self._selection:
+            if cell == self._selection_cell():
+                self._clear_selection()
+                self.redraw()
+                return
+            if self._occupied(x, y, ignore=self._selection):
+                return
+            kind = self._selection[0]
+            if kind == "robot":
+                self.world.place_robot(x, y)
+            elif kind == "goal":
+                self.world.place_goal(x, y)
+            elif kind == "cp":
+                idx = self._selection[1]
+                cps = list(sim.get("checkpoints") or [])
+                if 0 <= idx < len(cps):
+                    cps[idx] = (x, y)
+                    sim["checkpoints"] = cps
+                    self.world.rmap["checkpoints"] = cps
+                    self.world.sync_maps()
+            self._clear_selection()
+            self.redraw()
+            self._notify()
+            return
+
+        special = self._special_at(x, y)
+        if special == "robot":
+            self._selection = ("robot",)
+        elif special == "goal":
+            self._selection = ("goal",)
+        elif isinstance(special, tuple) and special[0] == "cp":
+            self._selection = special
+        self._update_tool_buttons()
+        self.redraw()
+
     def _on_click(self, event):
         c = self.canvas
         px, py = c.canvasx(event.x), c.canvasy(event.y)
-        tool = self._tool.get()
-        if tool == "wall":
-            edge = self._pick_edge(px, py)
-            if edge:
+        edge = self._pick_edge(px, py)
+        if edge:
+            w, h, _, _ = self._size()
+            nx, ny = neighbor_xy(edge[0], edge[1], edge[2])
+            if is_valid(nx, ny, w, h):
                 self.world.toggle_wall(*edge)
-        else:
-            cell = self._pick_cell(px, py)
-            if not cell:
+                self._clear_selection()
+                self.redraw()
+                self._notify()
                 return
-            x, y = cell
-            if tool == "robot":
-                self.world.place_robot(x, y)
-            elif tool == "goal":
-                self.world.place_goal(x, y)
-            elif tool == "cp":
-                self.world.place_checkpoint(x, y)
-        self.redraw()
+
+        cell = self._pick_cell(px, py)
+        if cell is None:
+            return
+        self._handle_cell_click(cell)
         self._notify()
+
+    def _draw_edge_wall(self, d, px, py, cell, thick, blocked=False):
+        c = self.canvas
+        half = max(2, thick // 2)
+        inset = max(2, cell // 18)
+        x0, x1 = px + inset, px + cell - inset
+        y0, y1 = py + inset, py + cell - inset
+        if d == "N":
+            coords = (x0, py - half, x1, py + half)
+        elif d == "S":
+            coords = (x0, py + cell - half, x1, py + cell + half)
+        elif d == "W":
+            coords = (px - half, y0, px + half, y1)
+        else:  # E
+            coords = (px + cell - half, y0, px + cell + half, y1)
+        if blocked:
+            c.create_rectangle(*coords, fill="#e64566", outline="#ffccd5", width=1)
+        else:
+            c.create_rectangle(*coords, fill="#0a0a0f", outline="#313244", width=1)
 
     def redraw(self):
         c = self.canvas
@@ -380,17 +540,25 @@ class LabScenarioMap5:
         w, h, cw, ch = self._size()
         vis_w = min(cw, _MAX_CANVAS_W)
         c.config(width=vis_w, height=ch, scrollregion=(0, 0, cw, ch))
+        start = tuple(sim.get("start") or (0, 0))
         goal = tuple(sim.get("goal") or (w - 1, h - 1))
         cps = [tuple(p) for p in (sim.get("checkpoints") or [])]
         walls = self.world.walls_set()
         rx, ry = self.world.robot["x"], self.world.robot["y"]
         rd = self.world.robot["direct"]
 
+        blocked_thick = max(6, min(10, CELL // 9))
+        open_w = max(2, min(3, CELL // 18))
+        border_thick = max(6, min(9, CELL // 10))
+
+        # Draw grid cells
         for y in range(h):
             for x in range(w):
                 px, py = self._cell_px(x, y)
                 fill = "#313244"
-                if (x, y) == goal:
+                if (x, y) == start:
+                    fill = "#a6e3a1"
+                elif (x, y) == goal:
                     fill = "#f38ba8"
                 elif (x, y) in cps:
                     try:
@@ -404,17 +572,44 @@ class LabScenarioMap5:
                         fill = "#f9e2af"
                 c.create_rectangle(px, py, px + CELL, py + CELL, fill=fill, outline="#45475a")
 
+        sel_cell = self._selection_cell()
+        if sel_cell:
+            sx, sy = sel_cell
+            px, py = self._cell_px(sx, sy)
+            pad = max(3, CELL // 14)
+            c.create_rectangle(
+                px + pad,
+                py + pad,
+                px + CELL - pad,
+                py + CELL - pad,
+                outline="#89b4fa",
+                width=3,
+                dash=(6, 4),
+            )
+
+        if self._await_new_cp:
+            c.create_text(
+                vis_w // 2,
+                MARGIN + CELL // 4,
+                text="Bấm ô để đặt checkpoint mới (Esc: hủy)",
+                fill="#89b4fa",
+                font=("", 9, "bold"),
+            )
+
+        # Draw walls
         for y in range(h):
             for x in range(w):
                 px, py = self._cell_px(x, y)
                 for d, x1, y1, x2, y2 in self._edge_lines(x, y):
                     nx, ny = neighbor_xy(x, y, d)
                     if not is_valid(nx, ny, w, h):
-                        c.create_line(x1, y1, x2, y2, fill="#11111b", width=3)
+                        self._draw_edge_wall(d, px, py, CELL, border_thick, blocked=False)
                         continue
                     key = (x, y, d)
                     if key in walls:
-                        c.create_line(x1, y1, x2, y2, fill="#f38ba8", width=4)
+                        self._draw_edge_wall(d, px, py, CELL, blocked_thick, blocked=True)
+                    else:
+                        c.create_line(x1, y1, x2, y2, fill="#56586e", width=open_w)
 
         rcx, rcy = self._cell_center(rx, ry)
         r = max(4, CELL // 5)

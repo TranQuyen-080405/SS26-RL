@@ -45,7 +45,8 @@ _THRESHOLD_FOR_EID = {
     "visit_window": "MAX_REVISIT_STEPS",
     "visit_repeat": "MAX_CELL_REPEAT",
     "ping_pong": ["MAX_PING_PONG_CYCLES", "MAX_PING_PONG_SPAN"],
-    "straight_streak": "MAX_STRAIGHT_STREAK",
+    "straight_streak_reach": "MAX_STRAIGHT_REACH",
+    "straight_streak_cap": "MAX_STRAIGHT_CAP",
 }
 
 # Giá trị mặc định weight theo cục reward (học sinh thấy tên tiếng Việt)
@@ -53,43 +54,54 @@ _DEFAULT_WEIGHTS = {
     "R_STEP": 0.0,
     "collision": 0.0,
     "forward_clear": 0.0,
-    "goal_trend": 0.0,
+    "wall_detected": 0.0,
+    "wall_visible": 0.0,
+    "goal_closer": 0.0,
+    "goal_farther": 0.0,
     "goal_reached": 0.0,
-    "cp_trend": 0.0,
+    "cp_closer": 0.0,
+    "cp_farther": 0.0,
     "checkpoint": 0.0,
     "rotate": 0.0,
     "facing_clear": 0.0,
     "wasted_rotate": 0.0,
+    "blocked_rotate": 0.0,
     "excess_rotate": 0.0,
     "visit_window": 0.0,
     "visit_repeat": 0.0,
     "ping_pong": 0.0,
-    "straight_streak": 0.0,
-    "wall_detected": 0.0,
+    "straight_streak_reach": 0.0,
+    "straight_streak_cap": 0.0,
 }
 
 _REWARD_DESCRIPTIONS = {
     "collision": "Robot va chạm tường",
     "forward_clear": "Tiến lên ô không có vật cản",
-    "goal_trend": "Thay đổi khoảng cách tới Goal",
+    "wall_detected": "Phát hiện có vật cản ngay trước mặt sau hành động",
+    "wall_visible": "Nhìn thấy tường ở bất kỳ hướng nào xung quanh robot",
+    "goal_closer": "Khoảng cách Manhattan tới đích giảm",
+    "goal_farther": "Khoảng cách Manhattan tới đích tăng",
     "goal_reached": "Đứng tại ô Goal",
-    "cp_trend": "Thay đổi khoảng cách tới Checkpoint",
+    "cp_closer": "Khoảng cách tới checkpoint chưa ăn giảm",
+    "cp_farther": "Khoảng cách tới checkpoint chưa ăn tăng",
     "checkpoint": "Đến Checkpoint lần đầu",
     "rotate": "Hành động xoay hướng",
     "facing_clear": "Hướng mặt về ô không vật cản sau khi xoay",
     "wasted_rotate": "Xoay hướng khi đường phía trước trống",
+    "blocked_rotate": "Xoay hướng khi đường phía trước bị chặn",
     "excess_rotate": "Số lần xoay liên tiếp vượt quá ngưỡng",
     "visit_window": "Vào lại cùng một ô trong vòng N bước gần nhất",
     "visit_repeat": "Số lần quay lại ô đã từng đi qua vượt ngưỡng (không tính lần đầu)",
     "ping_pong": "Đi qua-lại cùng một đoạn đường (palindrome); chỉnh Ô mỗi chiều cho đường dài 2–5 ô",
-    "straight_streak": "Số lần giữ nguyên hướng đi liên tiếp vượt quá ngưỡng",
-    "wall_detected": "Phát hiện có vật cản ngay trước mặt sau hành động",
+    "straight_streak_reach": "Số lần giữ nguyên hướng đi liên tiếp vượt quá ngưỡng",
+    "straight_streak_cap": "Số lần giữ nguyên hướng đi liên tiếp chưa vượt quá ngưỡng",
     "MAX_ROTATE_STREAK": "Ngưỡng xoay",
     "MAX_REVISIT_STEPS": "Số bước",
     "MAX_CELL_REPEAT": "Lần quay lại",
-    "MAX_PING_PONG_CYCLES": "Chu kỳ qua lại",
-    "MAX_PING_PONG_SPAN": "Số ô tối đa mỗi chiều (2 = hai ô, 5 = năm ô)",
-    "MAX_STRAIGHT_STREAK": "Ngưỡng giữ hướng",
+    "MAX_PING_PONG_CYCLES": "Số lần được phép đi lặp qua lại",
+    "MAX_PING_PONG_SPAN": "Số ô tối đa mỗi chiều tính được tính là lặp lại",
+    "MAX_STRAIGHT_REACH": "Ngưỡng giữ hướng",
+    "MAX_STRAIGHT_CAP": "Ngưỡng không giữ hướng",
 }
 
 
@@ -446,7 +458,7 @@ class LearnLabApp:
         ]
         if "obstacle" in enabled:
             state_rows.append(
-                "Tường nhìn thấy: trước=%d trái=%d phải=%d sau=%d" % (n, w, e, s)
+                "Tường nhìn thấy: N=%d W=%d E=%d S=%d" % (n, w, e, s)
             )
         if "goal" in enabled:
             state_rows.append("Trend goal: %+d" % snap["goal_trend"])
@@ -688,7 +700,8 @@ class LearnLabApp:
                 "MAX_CELL_REPEAT": 3,
                 "MAX_PING_PONG_CYCLES": 1,
                 "MAX_PING_PONG_SPAN": 5,
-                "MAX_STRAIGHT_STREAK": 3,
+                "MAX_STRAIGHT_REACH": 3,
+                "MAX_STRAIGHT_CAP": 3,
             }.get(k, var.get())))
         self.formula_builder.set_tokens(default_total_formula(set(self._module_vars.keys())))
         self.world.reset_scenario()

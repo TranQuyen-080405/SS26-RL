@@ -29,9 +29,22 @@ def execute_action_sim(robot, sim_map, action_name):
         rb.update_position(robot, nx, ny)
         rb.inject_distances_from_map(robot)
         rb.compute_trends_after_move(robot)
+        checkpoint_first_visited = None
+        for i, cp in enumerate(robot["robot_map"].get("checkpoints") or []):
+            if robot["x"] == cp[0] and robot["y"] == cp[1]:
+                vis = robot.get("cp_visited") or []
+                if i < len(vis):
+                    if not vis[i]:
+                        vis[i] = True
+                        checkpoint_first_visited = i
         rb.mark_moved(robot)
         rb.perceive_facing_from_sim(robot, sim_map)
-        return _finish_action(robot, {"success": True, "moved": True, "collision": False})
+        return _finish_action(robot, {
+            "success": True,
+            "moved": True,
+            "collision": False,
+            "checkpoint_first_visited": checkpoint_first_visited
+        })
 
     if action_name == "rotate left":
         rb.update_direction(robot, "left")

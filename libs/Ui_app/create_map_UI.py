@@ -48,15 +48,16 @@ class MapEditorApp:
 
         self._on_saved = on_saved
 
-        self.width = 10
-        self.height = 10
+        self.width = 5
+        self.height = 5
         self.walls = set()
         self.map_name = tk.StringVar(value="custom_01")
         self.kind = tk.StringVar(value="train")
+        self.kind.trace_add("write", self._on_kind_changed)
         self.start_x = tk.IntVar(value=0)
         self.start_y = tk.IntVar(value=0)
-        self.goal_x = tk.IntVar(value=9)
-        self.goal_y = tk.IntVar(value=9)
+        self.goal_x = tk.IntVar(value=4)
+        self.goal_y = tk.IntVar(value=4)
         self.checkpoints = []
         self._selection = None  # ('start',) | ('goal',) | ('cp', index)
         self._await_new_cp = False
@@ -71,6 +72,7 @@ class MapEditorApp:
         self._build_canvas()
         self._build_status()
         self.apply_size()
+        self._on_kind_changed()
         self.root.after_idle(self.redraw)
 
     def _build_toolbar(self):
@@ -78,16 +80,17 @@ class MapEditorApp:
         bar.pack(fill=tk.X)
 
         ttk.Label(bar, text="Width").grid(row=0, column=0, padx=(0, 4))
-        self.spin_w = ttk.Spinbox(bar, from_=3, to=40, width=4, command=self._noop)
+        self.spin_w = ttk.Spinbox(bar, from_=1, to=40, width=4, command=self._noop)
         self.spin_w.set(str(self.width))
         self.spin_w.grid(row=0, column=1, padx=(0, 12))
 
         ttk.Label(bar, text="Height").grid(row=0, column=2, padx=(0, 4))
-        self.spin_h = ttk.Spinbox(bar, from_=3, to=40, width=4)
+        self.spin_h = ttk.Spinbox(bar, from_=1, to=40, width=4)
         self.spin_h.set(str(self.height))
         self.spin_h.grid(row=0, column=3, padx=(0, 12))
 
-        ttk.Button(bar, text="Apply size", command=self.apply_size).grid(row=0, column=4, padx=4)
+        self.btn_apply_size = ttk.Button(bar, text="Apply size", command=self.apply_size)
+        self.btn_apply_size.grid(row=0, column=4, padx=4)
 
         ttk.Separator(bar, orient=tk.VERTICAL).grid(row=0, column=5, sticky="ns", padx=12)
 
@@ -196,8 +199,10 @@ class MapEditorApp:
         except ValueError:
             messagebox.showerror("Size", "Width / height phải là số nguyên.")
             return
-        if w < 3 or h < 3 or w > 40 or h > 40:
-            messagebox.showerror("Size", "Kích thước map: 3–40.")
+        k = self.kind.get()
+        max_val = 5 if k == "train" else 10
+        if w < 1 or h < 1 or w > max_val or h > max_val:
+            messagebox.showerror("Size", f"Kích thước map tối đa ở chế độ {k} là {max_val}x{max_val} (phải lớn hơn 0).")
             return
         self.width = w
         self.height = h
@@ -362,7 +367,6 @@ class MapEditorApp:
         self.spin_w.set(str(self.width))
         self.spin_h.set(str(self.height))
         self.map_name.set(spec.get("name", "custom"))
-        self.kind.set(spec.get("kind", "train"))
         self.start_x.set(spec["start"][0])
         self.start_y.set(spec["start"][1])
         self.goal_x.set(spec["goal"][0])
@@ -374,11 +378,44 @@ class MapEditorApp:
         self.redraw()
         self.status.set("Loaded: %s" % spec.get("name", "?"))
 
+    def _on_kind_changed(self, *args):
+        name = self.map_name.get()
+        k = self.kind.get()
+        max_val = 5 if k == "train" else 10
+        
+        self.spin_w.config(state="normal", from_=1, to=max_val)
+        self.spin_h.config(state="normal", from_=1, to=max_val)
+        self.btn_apply_size.config(state="normal")
+
+        if k == "train":
+            if name.startswith("map_infer_"):
+                self.map_name.set(name.replace("map_infer_", "map_train_", 1))
+        else:
+            if name.startswith("map_train_"):
+                self.map_name.set(name.replace("map_train_", "map_infer_", 1))
+
+        # Clamp current spinbox values if they exceed the new max_val
+        try:
+            w = int(self.spin_w.get())
+            if w > max_val:
+                self.spin_w.set(str(max_val))
+        except ValueError:
+            self.spin_w.set(str(max_val))
+        try:
+            h = int(self.spin_h.get())
+            if h > max_val:
+                self.spin_h.set(str(max_val))
+        except ValueError:
+            self.spin_h.set(str(max_val))
+            
+        self.apply_size()
+
     def save_json(self):
         spec = self.current_spec()
         try:
             path = save_map_json(spec, kind=self.kind.get())
             path = os.path.abspath(path)
+            self.map_name.set(spec["name"])
         except (OSError, ValueError, tk.TclError) as e:
             messagebox.showerror("Save", str(e))
             return
@@ -404,6 +441,12 @@ class MapEditorApp:
             return
         try:
             spec = load_map_json(path)
+            w = int(spec.get("width", 0))
+            h = int(spec.get("height", 0))
+            max_val = 5 if kind == "train" else 10
+            if w > max_val or h > max_val:
+                messagebox.showerror("Load Error", f"Bản đồ chế độ {kind} chỉ được phép tối đa là {max_val}x{max_val}!")
+                return
             self.load_spec(spec)
         except (OSError, ValueError, KeyError, json.JSONDecodeError) as e:
             messagebox.showerror("Load", str(e))
