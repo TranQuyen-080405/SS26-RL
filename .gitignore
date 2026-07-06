@@ -3,3 +3,5 @@
 __pycache__/
 *.py[cod]
 *$py.class
+libs/map/
+libs/reward_formula/
