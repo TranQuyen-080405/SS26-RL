@@ -354,7 +354,6 @@ class RlApp:
         frame = self.maps_frame
 
         self.map_hint = ttk.Label(frame, text="")
-        self.map_hint.pack(anchor=tk.W, pady=(0, 4))
 
         self.train_cfg_frame = ttk.LabelFrame(frame, text="Danh sách map train", padding=6)
         self.train_cfg_frame.columnconfigure(0, weight=1)
@@ -843,20 +842,27 @@ class RlApp:
             self.delay_group.set_enabled(False)
         self.maps_frame.grid(row=0, column=1, sticky="nsew")
 
+    def _set_map_hint(self, text):
+        text = (text or "").strip()
+        if text:
+            self.map_hint.configure(text=text)
+            if not self.map_hint.winfo_ismapped():
+                self.map_hint.pack(anchor=tk.W, pady=(0, px(4)))
+        else:
+            self.map_hint.pack_forget()
+
     def refresh_maps(self):
         kind = "train" if self.mode.get() == "train" else "infer"
         self._map_paths = list_map_files(kind)
         if self.mode.get() == "train":
             self._sync_train_rows_from_paths()
-            self.map_hint.config(
-                text="[ ] bật/tắt map | kéo ≡/tên đổi thứ tự | bấm Episodes sửa | Đơn map = 1 dòng đang chọn"
-            )
+            self._set_map_hint("")
             self.spin_ep.configure(state=tk.NORMAL if self.train_map_mode.get() == "random" else tk.DISABLED)
         else:
             self.map_list.delete(0, tk.END)
             for path in self._map_paths:
                 self.map_list.insert(tk.END, os.path.basename(path))
-            self.map_hint.config(text="Inference: chọn map. Map + Run để xem robot inference từng bước.")
+            self._set_map_hint("Inference: chọn map. Map + Run để xem robot inference từng bước.")
             self.spin_ep.configure(state=tk.DISABLED)
             if self._map_paths:
                 self.map_list.selection_set(0)

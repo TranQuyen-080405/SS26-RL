@@ -129,19 +129,24 @@ def _read_screen(root: tk.Misc) -> tuple[int, int]:
     return max(800, root.winfo_screenwidth()), max(600, root.winfo_screenheight())
 
 
+def btn_padding() -> tuple[int, int]:
+    """Padding nút ttk — compact."""
+    return (px(3), px(1))
+
+
 def _apply_ttk_defaults(root: tk.Misc) -> None:
     style = ttk.Style(root)
     try:
         style.theme_use("clam")
     except tk.TclError:
         pass
-    pad = (px(8), px(4))
+    pad = btn_padding()
     f = font(10)
+    f_btn = font(8)
     fb = font(10, weight="bold")
     for name in (
         ".",
         "TLabel",
-        "TButton",
         "TCheckbutton",
         "TRadiobutton",
         "TEntry",
@@ -154,12 +159,12 @@ def _apply_ttk_defaults(root: tk.Misc) -> None:
         except tk.TclError:
             pass
     try:
-        style.configure("TButton", padding=pad)
-        style.configure("TLabelframe", padding=px(8))
-        style.configure("Treeview", rowheight=px(32), font=font(10, family="Segoe UI"))
-        style.configure("Treeview.Heading", font=fb, padding=(px(6), px(4)))
-        style.configure("Train.Treeview", rowheight=px(32), font=font(10, family="Segoe UI"))
-        style.configure("Train.Treeview.Heading", font=fb, padding=(px(6), px(4)))
+        style.configure("TButton", font=f_btn, padding=pad)
+        style.configure("TLabelframe", padding=px(6))
+        style.configure("Treeview", rowheight=px(28), font=font(9, family="Segoe UI"))
+        style.configure("Treeview.Heading", font=fb, padding=(px(5), px(3)))
+        style.configure("Train.Treeview", rowheight=px(28), font=font(9, family="Segoe UI"))
+        style.configure("Train.Treeview.Heading", font=fb, padding=(px(5), px(3)))
     except tk.TclError:
         pass
 

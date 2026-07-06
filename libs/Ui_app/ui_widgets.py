@@ -27,11 +27,11 @@ def box_button(parent, text, command=None, role="secondary", **kwargs):
         activebackground=active,
         activeforeground=fg,
         relief=tk.RAISED,
-        bd=2,
-        padx=px(12),
-        pady=px(6),
+        bd=1,
+        padx=px(5),
+        pady=px(2),
         cursor="hand2",
-        font=font(10, weight="bold" if role in ("primary", "danger") else "normal"),
+        font=font(8, weight="bold" if role in ("primary", "danger") else "normal"),
     )
     opts.update(kwargs)
     return tk.Button(parent, **opts)
@@ -51,11 +51,11 @@ class SegmentGroup:
                 self.frame,
                 text=label,
                 relief=tk.RAISED,
-                bd=2,
-                padx=px(14),
-                pady=px(7),
+                bd=1,
+                padx=px(5),
+                pady=px(2),
                 cursor="hand2",
-                font=font(10),
+                font=font(8),
                 command=lambda v=value: self._select(v),
             )
             btn.pack(side=tk.LEFT, padx=_padx)
@@ -82,14 +82,14 @@ class SegmentGroup:
                     relief=tk.SUNKEN,
                     bg="#89b4fa",
                     fg="#11111b",
-                    font=font(10, weight="bold"),
+                    font=font(8, weight="bold"),
                 )
             else:
                 btn.configure(
                     relief=tk.RAISED,
                     bg="#45475a",
                     fg="#cdd6f4",
-                    font=font(10),
+                    font=font(8),
                 )
 
     def set_enabled(self, enabled):
@@ -102,7 +102,7 @@ class SegmentGroup:
 
     def refresh_scale(self):
         for btn, _ in self._buttons:
-            btn.configure(padx=px(14), pady=px(7))
+            btn.configure(padx=px(5), pady=px(2))
         self._paint()
 
 
@@ -124,8 +124,8 @@ def style_train_treeview(tree, root):
         style.theme_use("clam")
     except tk.TclError:
         pass
-    style.configure("Train.Treeview", rowheight=px(32), font=font(10, family="Segoe UI"))
-    style.configure("Train.Treeview.Heading", font=font(10, family="Segoe UI", weight="bold"), padding=(px(6), px(4)))
+    style.configure("Train.Treeview", rowheight=px(28), font=font(9, family="Segoe UI"))
+    style.configure("Train.Treeview.Heading", font=font(10, family="Segoe UI", weight="bold"), padding=(px(5), px(3)))
     style.map(
         "Train.Treeview",
         background=[("selected", "#585b70")],

@@ -37,13 +37,13 @@ class LabScenarioMap5:
         tools = ttk.Frame(self.frame)
         tools.pack(fill=tk.X, pady=(0, 4))
         self.btn_add_cp = ttk.Button(tools, text="Thêm checkpoint", command=self.add_checkpoint)
-        self.btn_add_cp.pack(side=tk.LEFT, padx=4)
+        self.btn_add_cp.pack(side=tk.LEFT, padx=scale_px(2))
         self.btn_remove_cp = ttk.Button(tools, text="Xóa checkpoint", command=self.remove_selected_checkpoint)
-        self.btn_remove_cp.pack(side=tk.LEFT, padx=4)
+        self.btn_remove_cp.pack(side=tk.LEFT, padx=scale_px(2))
         ttk.Button(tools, text="Reset CP", command=self._reset_cp_state).pack(
-            side=tk.RIGHT, padx=4
+            side=tk.RIGHT, padx=scale_px(2)
         )
-        ttk.Button(tools, text="Reset map", command=self._reset).pack(side=tk.RIGHT, padx=4)
+        ttk.Button(tools, text="Reset map", command=self._reset).pack(side=tk.RIGHT, padx=scale_px(2))
 
         self._map_wrap = ttk.Frame(self.frame)
         self._map_wrap.pack(fill=tk.X)
@@ -61,8 +61,8 @@ class LabScenarioMap5:
 
         act_row = ttk.Frame(self.frame)
         self._act_row = act_row
-        act_row.pack(fill=tk.X, pady=(4, 4))
-        ttk.Label(act_row, text="Move:").pack(side=tk.LEFT, padx=(0, 8))
+        act_row.pack(fill=tk.X, pady=(scale_px(2), scale_px(2)))
+        ttk.Label(act_row, text="Move:", font=font(9)).pack(side=tk.LEFT, padx=(0, scale_px(4)))
         self._move_btns = []
         for label, cmd in (
             ("Rotate Left", lambda: self._action("rotate left")),
@@ -70,7 +70,7 @@ class LabScenarioMap5:
             ("Rotate Right", lambda: self._action("rotate right")),
         ):
             btn = ttk.Button(act_row, text=label, command=cmd)
-            btn.pack(side=tk.LEFT, padx=3)
+            btn.pack(side=tk.LEFT, padx=scale_px(2))
             self._move_btns.append(btn)
         self._move_enabled = True
         self._key_actions = {
