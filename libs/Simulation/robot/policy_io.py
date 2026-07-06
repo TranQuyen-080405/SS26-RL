@@ -1,5 +1,6 @@
 """Load / export policy — PC only (.bin)."""
 
+import csv
 import os
 import struct
 
@@ -10,6 +11,7 @@ _REPO_ROOT = os.path.abspath(os.path.join(_LIBS, ".."))
 CHECKPOINTS_DIR = os.path.join(_REPO_ROOT, "checkpoints")
 DEFAULT_POLICY_BASE = "policy"
 DEFAULT_POLICY_BIN = os.path.join(CHECKPOINTS_DIR, "policy.bin")
+POLICY_CSV_COLUMNS = ("q_forward", "q_rotate_left", "q_rotate_right")
 
 
 def normalize_policy_base_name(name):
@@ -148,6 +150,16 @@ def export_policy(q_table, bin_path=None):
         flat.extend(row)
     with open(bin_path, "wb") as f:
         f.write(struct.pack("<%df" % len(flat), *flat))
+
+
+def export_policy_csv(q_table, csv_path):
+    """Export Q-table using the Kaggle submission schema: id + three Q-values."""
+    validate_q_table(q_table)
+    with open(csv_path, "w", newline="", encoding="utf-8") as f:
+        writer = csv.writer(f)
+        writer.writerow(("id",) + POLICY_CSV_COLUMNS)
+        for state_id, row in enumerate(q_table):
+            writer.writerow((state_id,) + tuple(row))
 
 
 def export_checkpoint(q_table, base_name):

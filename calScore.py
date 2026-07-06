@@ -1,115 +1,157 @@
+"""Kaggle custom metric chấm policy trên toàn bộ map inference.
+
+Submission CSV phải có 5184 dòng và các cột:
+    id,q_forward,q_rotate_left,q_rotate_right
+
+Khi đóng gói metric trên Kaggle, đặt thư mục ``libs`` cạnh file này; các map
+ẩn được đọc từ ``libs/map/infer/*.json``.
+"""
+
+import math
 import os
 import sys
+from pathlib import Path
 
-# =====================================================================
-# Cấu hình file policy mặc định (Bạn có thể sửa trực tiếp tên hoặc path ở đây)
-# Hoặc truyền qua đối số khi chạy: python calScore.py <tên_hoặc_đường_dẫn_policy>
-# =====================================================================
-POLICY_FILE = "policy.bin"
+import pandas as pd
+import pandas.api.types
 
-if len(sys.argv) > 1:
-    POLICY_FILE = sys.argv[1]
 
-# 1. Thiết lập sys.path để import thư viện hệ thống
-_LIBS = os.path.abspath(os.path.join(os.path.dirname(__file__), "libs"))
+class ParticipantVisibleError(Exception):
+    """Lỗi dữ liệu submission được phép hiển thị cho thí sinh."""
+
+
+_ROOT = os.path.dirname(os.path.abspath(globals().get("__file__", os.getcwd())))
+_LIBS = os.path.join(_ROOT, "libs")
 if _LIBS not in sys.path:
     sys.path.insert(0, _LIBS)
 
 from bootstrap import setup_paths
 setup_paths()
 
-from map.map_io import list_map_files, build_sim_map_from_file
-from Simulation.rl_runner import load_policy_for_infer, _robot_map_from_sim, _reset_at_start, _episode_at_goal, MAX_STEPS_INFER
-from robot import robot as rb
+from map.map_io import build_sim_map_from_file
+from RL_lib.rl_core import N_ROWS, get_policy
+from Simulation.rl_runner import (
+    MAX_STEPS_INFER,
+    _episode_at_goal,
+    _reset_at_start,
+    _robot_map_from_sim,
+)
 from robot import action as act
+from robot import robot as rb
 
-def calculate_map_score(sim_map, q_table, policy_name, map_name):
-    # Khởi tạo trạng thái robot và bản đồ mô phỏng
+
+POLICY_COLUMNS = ("q_forward", "q_rotate_left", "q_rotate_right")
+KAGGLE_INFER_MAP_DIR = Path(
+    "/kaggle/input/datasets/namphongnguynhu/maze-maps-csess26/map/infer"
+)
+
+
+def _list_infer_map_files():
+    """Dùng dataset Kaggle khi có; local thì dùng libs/map/infer."""
+    candidates = (
+        KAGGLE_INFER_MAP_DIR,
+        Path("/kaggle/input/maze-maps-csess26/map/infer"),
+        Path(_LIBS) / "map" / "infer",
+    )
+    for directory in candidates:
+        if directory.is_dir():
+            paths = sorted(str(path) for path in directory.glob("*.json"))
+            if paths:
+                return paths
+    raise RuntimeError(
+        "Không tìm thấy map inference trong dataset maze-maps-csess26 "
+        "hoặc libs/map/infer."
+    )
+
+
+def _submission_to_q_table(submission: pd.DataFrame, row_id_column_name: str):
+    if row_id_column_name not in submission.columns:
+        raise ParticipantVisibleError("Submission thiếu cột ID '%s'." % row_id_column_name)
+
+    policy = submission.drop(columns=[row_id_column_name])
+    if tuple(policy.columns) != POLICY_COLUMNS:
+        raise ParticipantVisibleError(
+            "Các cột policy phải đúng thứ tự: %s." % ", ".join(POLICY_COLUMNS)
+        )
+    if len(policy) != N_ROWS:
+        raise ParticipantVisibleError(
+            "Policy phải có đúng %d dòng, hiện có %d." % (N_ROWS, len(policy))
+        )
+
+    for column in POLICY_COLUMNS:
+        if not pandas.api.types.is_numeric_dtype(policy[column]):
+            raise ParticipantVisibleError("Cột '%s' phải chứa số." % column)
+
+    q_table = policy.astype(float).values.tolist()
+    if any(not math.isfinite(value) for row in q_table for value in row):
+        raise ParticipantVisibleError("Policy không được chứa NaN hoặc giá trị vô hạn.")
+    return q_table
+
+
+def calculate_map_score(sim_map, q_table):
+    """Chạy greedy policy trên một map và trả điểm của map đó."""
     rmap = _robot_map_from_sim(sim_map)
     bot = rb.make_robot(sim_map["start"][0], sim_map["start"][1], "N", rmap)
     _reset_at_start(bot, sim_map)
 
-    # Ghi nhận các checkpoint đã đi qua (bao gồm cả điểm bắt đầu nếu trùng)
     visited_cps = set()
-    if (bot["x"], bot["y"]) in sim_map.get("checkpoints", []):
+    checkpoints = set(tuple(cp) for cp in sim_map.get("checkpoints", []))
+    if (bot["x"], bot["y"]) in checkpoints:
         visited_cps.add((bot["x"], bot["y"]))
 
-    max_steps = MAX_STEPS_INFER
     collision_occurred = False
     goal_reached = False
     step_count = 0
 
-    for step in range(1, max_steps + 1):
+    for step in range(1, MAX_STEPS_INFER + 1):
         if _episode_at_goal(bot, sim_map):
             goal_reached = True
-            step_count = step - 1
             break
 
-        # Lấy trạng thái mã hóa và hành vi từ Q-table
-        s = rb.build_encoded_state(bot)
-        from RL_lib.rl_core import get_policy
-        a_name = get_policy(s, q_table)
-
-        # Thực thi hành động trên mô phỏng
-        result = act.execute_action_sim(bot, sim_map, a_name)
+        action_name = get_policy(rb.build_encoded_state(bot), q_table)
+        result = act.execute_action_sim(bot, sim_map, action_name)
         step_count = step
 
-        # Cập nhật checkpoint đã đi qua sau bước di chuyển
-        curr_pos = (bot["x"], bot["y"])
-        if curr_pos in sim_map.get("checkpoints", []):
-            visited_cps.add(curr_pos)
-
+        position = (bot["x"], bot["y"])
+        if position in checkpoints:
+            visited_cps.add(position)
         if result.get("collision"):
             collision_occurred = True
             break
-
         if _episode_at_goal(bot, sim_map):
             goal_reached = True
             break
 
-    # --- TÍNH ĐIỂM ---
-    score = 0
-    # 1. Chạm goal + 400 điểm
-    if goal_reached:
-        score += 400
-    # 2. Chạm checkpoint: mỗi checkpoint + 100 điểm
-    score += 100 * len(visited_cps)
-    # 3. Chạm collision - 100 điểm
-    if collision_occurred:
-        score -= 100
-    # 4. Mỗi action (forward/rotate) - 2 điểm
-    score -= 2 * step_count
+    return float(
+        (400 if goal_reached else 0)
+        + 100 * len(visited_cps)
+        - (100 if collision_occurred else 0)
+        - 2 * step_count
+    )
 
-    return score
 
-def main():
-    # Nạp policy
-    q, policy_path = load_policy_for_infer(POLICY_FILE)
-    if not q:
-        print(f"Error: Không tìm thấy policy file '{POLICY_FILE}'!")
-        return
+def score(solution: pd.DataFrame, submission: pd.DataFrame, row_id_column_name: str) -> float:
+    """Chạy policy nộp lên trên mọi map inference ẩn và trả tổng điểm."""
+    del solution
+    q_table = _submission_to_q_table(submission, row_id_column_name)
 
-    # Liệt kê tất cả các bản đồ inference
-    infer_paths = list_map_files("infer")
-    if not infer_paths:
-        print("Không tìm thấy bản đồ nào trong thư mục map/infer/")
-        return
+    infer_paths = _list_infer_map_files()
 
-    total_score = 0
-    for path in infer_paths:
-        sim_map = build_sim_map_from_file(path)
-        base_name = os.path.basename(path)
-        map_name = base_name.replace("map_infer_", "").replace(".json", "")
-        
-        map_score = calculate_map_score(sim_map, q, os.path.basename(policy_path), map_name)
-        total_score += map_score
-        
-        # In tên map và điểm số
-        print(f"map {map_name}: {map_score}")
 
-    print("=" * 46)
-    print(f"Total Score:   {total_score}")
-    print("=" * 46)
+    total = sum(
+        calculate_map_score(build_sim_map_from_file(path), q_table)
+        for path in infer_paths
+    )
+    if not math.isfinite(total):
+        raise RuntimeError("Điểm tính được không hợp lệ.")
+    return float(total)
+
+
+def main(policy_csv="policy.csv"):
+    """Chạy thử judge local bằng chính file CSV sẽ nộp Kaggle."""
+    submission = pd.read_csv(policy_csv)
+    print("Total Score:", score(pd.DataFrame(), submission, "id"))
+
 
 if __name__ == "__main__":
-    main()
+    main(sys.argv[1] if len(sys.argv) > 1 else "policy.csv")

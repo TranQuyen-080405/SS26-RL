@@ -8,7 +8,7 @@ import sys
 import queue
 import threading
 import tkinter as tk
-from tkinter import ttk, messagebox, scrolledtext
+from tkinter import ttk, messagebox, scrolledtext, filedialog
 
 _ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 _SIM = os.path.join(_ROOT, "Simulation")
@@ -166,6 +166,9 @@ class RlApp:
         box_button(row1, text="Delete policy", command=self._delete_selected_train_policy, role="secondary").pack(
             side=tk.LEFT, padx=(0, 4)
         )
+        box_button(row1, text="Xuất policy ra CSV", command=self._export_policy_to_csv, role="secondary").pack(
+            side=tk.LEFT, padx=(0, 4)
+        )
 
         row2 = ttk.Frame(self.ck_frame)
         row2.pack(fill=tk.X, pady=(6, 0))
@@ -199,11 +202,52 @@ class RlApp:
         box_button(
             self.infer_policy_frame, text="Delete policy", command=self._delete_selected_policy, role="secondary"
         ).pack(side=tk.LEFT, padx=(0, 4))
+        box_button(
+            self.infer_policy_frame, text="Xuất policy ra CSV", command=self._export_policy_to_csv, role="secondary"
+        ).pack(side=tk.LEFT, padx=(0, 4))
         ttk.Label(
             self.infer_policy_frame,
             text="Chọn file checkpoints/*.bin để inference",
         ).pack(side=tk.LEFT, padx=8)
         self.refresh_infer_policies()
+
+    def _export_policy_to_csv(self):
+        if self._is_busy():
+            messagebox.showinfo("Xuất policy", "Đang chạy train/inference — vui lòng bấm Stop hoặc đợi chạy xong.")
+            return
+
+        if self.mode.get() == "infer":
+            name = self.infer_policy_var.get().strip()
+        else:
+            name = self.checkpoint_var.get().strip()
+            if not name or name == "(mới)":
+                name = self.export_policy_var.get().strip()
+        if not name:
+            messagebox.showwarning("Xuất policy", "Chưa chọn policy để xuất.")
+            return
+
+        from robot.policy_io import load_policy_bin, policy_bin_path, export_policy_csv
+
+        bin_path = policy_bin_path(name)
+        if not os.path.isfile(bin_path):
+            messagebox.showerror("Xuất policy", "Không tìm thấy policy: %s" % bin_path)
+            return
+
+        base_name = os.path.splitext(os.path.basename(bin_path))[0]
+        csv_path = filedialog.asksaveasfilename(
+            parent=self.root,
+            title="Xuất policy dùng để nộp Kaggle",
+            defaultextension=".csv",
+            initialfile=base_name + ".csv",
+            filetypes=[("CSV files", "*.csv")],
+        )
+        if not csv_path:
+            return
+        try:
+            export_policy_csv(load_policy_bin(bin_path), csv_path)
+            messagebox.showinfo("Xuất policy", "Đã xuất file CSV:\n%s" % csv_path)
+        except Exception as exc:
+            messagebox.showerror("Xuất policy", "Không thể xuất CSV:\n%s" % exc)
 
     def _delete_selected_policy(self):
         if self._is_busy():
