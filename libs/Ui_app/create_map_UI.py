@@ -26,11 +26,8 @@ from map.map_io import (
     list_map_files,
 )
 from RL_lib.grid import DIRECTIONS, neighbor_xy, is_valid
-
-CELL_MIN = 36
-CELL_MAX = 80
-CANVAS_PAD = 28
-EDGE_HIT = 10
+from Ui_app.map_layout import apply_fixed_canvas, avail_from_wrap, fit_grid_layout
+from Ui_app.ui_scale import configure_window, init as init_ui_scale, px
 
 
 class MapEditorApp:
@@ -38,7 +35,8 @@ class MapEditorApp:
         if parent is None:
             self.root = tk.Tk()
             self.root.title("SS26 Map Editor")
-            self.root.minsize(720, 560)
+            init_ui_scale(self.root)
+            configure_window(self.root, width=1000, height=700, min_width=720, min_height=560)
             self.container = self.root
             self._standalone = True
         else:
@@ -63,9 +61,10 @@ class MapEditorApp:
         self._await_new_cp = False
         self._pos_label = tk.StringVar(value="")
         self._cell = 52
-        self._offset_x = CANVAS_PAD
-        self._offset_y = CANVAS_PAD
-        self._edge_hit = EDGE_HIT
+        self._offset_x = 0
+        self._offset_y = 0
+        self._edge_hit = 10
+        self._last_wrap_size = None
         self._resize_after_id = None
 
         self._build_toolbar()
@@ -119,21 +118,25 @@ class MapEditorApp:
         self._update_pos_label()
 
     def _build_canvas(self):
-        wrap = ttk.Frame(self.container, padding=8)
-        wrap.pack(fill=tk.BOTH, expand=True)
+        self._canvas_wrap = ttk.Frame(self.container, padding=px(8))
+        self._canvas_wrap.pack(fill=tk.BOTH, expand=True)
 
-        self.canvas = tk.Canvas(wrap, bg="#1e1e2e", highlightthickness=0)
+        self.canvas = tk.Canvas(self._canvas_wrap, bg="#1e1e2e", highlightthickness=0)
         self.canvas.pack(fill=tk.BOTH, expand=True)
         self.canvas.bind("<Button-1>", self.on_click)
-        self.canvas.bind("<Configure>", self._on_resize_event)
+        self._canvas_wrap.bind("<Configure>", self._on_resize_event)
         self.root.bind("<Escape>", self._on_escape)
         self.root.bind("<Delete>", self._on_delete_key)
         self.root.bind("<BackSpace>", self._on_delete_key)
 
     def _on_resize_event(self, event):
+        size = (event.width, event.height)
+        if size[0] < 2 or size[1] < 2 or size == self._last_wrap_size:
+            return
+        self._last_wrap_size = size
         if self._resize_after_id:
-            self.canvas.after_cancel(self._resize_after_id)
-        self._resize_after_id = self.canvas.after(50, self._throttled_redraw)
+            self._canvas_wrap.after_cancel(self._resize_after_id)
+        self._resize_after_id = self._canvas_wrap.after(50, self._throttled_redraw)
 
     def _throttled_redraw(self):
         self._resize_after_id = None
@@ -176,21 +179,14 @@ class MapEditorApp:
         return px, py
 
     def _update_layout(self):
-        """Scale ô map vừa canvas và căn giữa."""
-        c = self.canvas
-        c.update_idletasks()
-        cw = max(c.winfo_width(), 320)
-        ch = max(c.winfo_height(), 280)
-        avail_w = max(cw - 2 * CANVAS_PAD, self.width * CELL_MIN)
-        avail_h = max(ch - 2 * CANVAS_PAD, self.height * CELL_MIN)
-        cell = int(min(avail_w / self.width, avail_h / self.height, CELL_MAX))
-        self._cell = max(cell, CELL_MIN)
-        map_w = self.width * self._cell
-        map_h = self.height * self._cell
-        self._offset_x = max(CANVAS_PAD, (cw - map_w) // 2)
-        self._offset_y = max(CANVAS_PAD, (ch - map_h) // 2)
-        self._edge_hit = max(8, min(18, self._cell // 4))
-        c.config(scrollregion=(0, 0, cw, ch))
+        """Phóng map tối đa trong khung, căn giữa."""
+        aw, ah = avail_from_wrap(self._canvas_wrap, min_w=200, min_h=160)
+        cell, ox, oy, cw, ch = fit_grid_layout(self.width, self.height, aw, ah)
+        self._cell = cell
+        self._offset_x = ox
+        self._offset_y = oy
+        self._edge_hit = max(px(6), min(px(18), self._cell // 4))
+        apply_fixed_canvas(self.canvas, cw, ch)
         return cw, ch
 
     def apply_size(self):

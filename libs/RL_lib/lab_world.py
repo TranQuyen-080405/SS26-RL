@@ -124,6 +124,11 @@ class LabWorld5:
         self.robot = rb.make_robot(DEFAULT_START[0], DEFAULT_START[1], "N", self.rmap)
         self._reset_robot_state()
 
+    def reset_checkpoint_state(self):
+        """Đánh dấu lại checkpoint chưa ăn — giữ nguyên tường, vị trí CP và robot."""
+        rb.reset_cp_visited(self.robot, n_checkpoints(self.rmap))
+        self.robot["dist_cp_trend"] = [0, 0, 0]
+
     def do_action(self, action_name):
         could_fwd = can_move(self.sim_map, self.robot["x"], self.robot["y"], self.robot["direct"])
         result = act.execute_action_sim(self.robot, self.sim_map, action_name)

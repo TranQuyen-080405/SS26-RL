@@ -19,6 +19,7 @@ if _SIM not in sys.path:
 
 from map.map_io import list_map_files, build_sim_map_from_file, maps_dir_for_kind
 from Ui_app.map_view import SimMapCanvas
+from Ui_app.ui_scale import configure_window, entry_width, font, init as init_ui_scale, px, text_lines
 from Ui_app.ui_widgets import SegmentGroup, box_button, style_train_treeview, train_map_mark, train_row_tags
 
 
@@ -49,7 +50,8 @@ class RlApp:
         if parent is None:
             self.root = tk.Tk()
             self.root.title("SS26 RL — Train / Inference")
-            self.root.minsize(720, 560)
+            init_ui_scale(self.root)
+            configure_window(self.root, width=1200, height=720, min_width=720, min_height=560)
             self.container = self.root
             self._standalone = True
         else:
@@ -96,8 +98,8 @@ class RlApp:
         self.update_formula_name()
 
     def _build_toolbar(self):
-        bar = ttk.LabelFrame(self.container, text="Điều khiển chung", padding=8)
-        bar.pack(fill=tk.X, padx=8, pady=(8, 4))
+        bar = ttk.LabelFrame(self.container, text="Điều khiển chung", padding=px(8))
+        bar.pack(fill=tk.X, padx=px(8), pady=(px(8), px(4)))
 
         ttk.Label(bar, text="Mode").grid(row=0, column=0, padx=(0, 8), sticky=tk.W)
         self.mode_group = SegmentGroup(
@@ -118,7 +120,7 @@ class RlApp:
         self.view_group.grid(row=0, column=5, columnspan=2, sticky=tk.W, padx=(0, 12))
 
         ttk.Label(bar, text="Episodes").grid(row=0, column=7, padx=(0, 4))
-        self.spin_ep = ttk.Spinbox(bar, from_=100, to=200000, increment=100, width=8)
+        self.spin_ep = ttk.Spinbox(bar, from_=100, to=200000, increment=100, width=entry_width(8))
         self.spin_ep.set(str(self.episodes.get()))
         self.spin_ep.grid(row=0, column=8, padx=(0, 12))
 
@@ -137,7 +139,7 @@ class RlApp:
             bar,
             textvariable=self.formula_name_var,
             state="readonly",
-            width=48,
+            width=entry_width(48),
             postcommand=self.refresh_formula_list,
         )
         self.combo_formula.grid(row=1, column=2, columnspan=9, sticky=tk.W, pady=(8, 0))
@@ -151,7 +153,7 @@ class RlApp:
         self.combo_checkpoint = ttk.Combobox(
             row1,
             textvariable=self.checkpoint_var,
-            width=22,
+            width=entry_width(22),
             state="readonly",
         )
         self.combo_checkpoint.pack(side=tk.LEFT, padx=(0, 8))
@@ -169,7 +171,7 @@ class RlApp:
         self.combo_export_policy = ttk.Combobox(
             row2,
             textvariable=self.export_policy_var,
-            width=22,
+            width=entry_width(22),
         )
         self.combo_export_policy.pack(side=tk.LEFT, padx=(0, 4))
         ttk.Label(row2, text=".bin").pack(side=tk.LEFT, padx=(0, 8))
@@ -185,7 +187,7 @@ class RlApp:
         self.combo_infer_policy = ttk.Combobox(
             self.infer_policy_frame,
             textvariable=self.infer_policy_var,
-            width=28,
+            width=entry_width(28),
             state="readonly",
         )
         self.combo_infer_policy.pack(side=tk.LEFT, padx=(0, 8))
@@ -328,20 +330,24 @@ class RlApp:
 
     def _build_workspace(self):
         self.workspace = ttk.Frame(self.container)
-        self.workspace.pack(fill=tk.BOTH, expand=True, padx=8, pady=4)
+        self.workspace.pack(fill=tk.BOTH, expand=True, padx=px(8), pady=px(4))
 
-        self.log_frame = ttk.LabelFrame(self.workspace, text="Output", padding=8)
-        self.log = scrolledtext.ScrolledText(self.log_frame, height=16, state=tk.DISABLED, font=("Monospace", 10))
+        self.log_frame = ttk.LabelFrame(self.workspace, text="Output", padding=px(8))
+        self.log = scrolledtext.ScrolledText(
+            self.log_frame, height=text_lines(16), state=tk.DISABLED, font=font(10, family="Monospace")
+        )
         self.log.pack(fill=tk.BOTH, expand=True)
 
-        self.map_frame = ttk.LabelFrame(self.workspace, text="Map", padding=8)
+        self.map_frame = ttk.LabelFrame(self.workspace, text="Map", padding=px(8))
         self.map_view = SimMapCanvas(self.map_frame)
         self.map_view.pack(fill=tk.BOTH, expand=True)
 
-        self.maps_frame = ttk.LabelFrame(self.workspace, text="List map", padding=8)
+        self.maps_frame = ttk.LabelFrame(self.workspace, text="List map", padding=px(8))
 
-        self.workspace.columnconfigure(0, weight=3, minsize=360)
-        self.workspace.columnconfigure(1, weight=2, minsize=300)
+        _col0 = px(320)
+        _col1 = px(260)
+        self.workspace.columnconfigure(0, weight=3, minsize=_col0)
+        self.workspace.columnconfigure(1, weight=2, minsize=_col1)
         self.workspace.rowconfigure(0, weight=1)
 
     def _build_map_list(self):
@@ -352,8 +358,8 @@ class RlApp:
 
         self.train_cfg_frame = ttk.LabelFrame(frame, text="Danh sách map train", padding=6)
         self.train_cfg_frame.columnconfigure(0, weight=1)
-        self.train_cfg_frame.rowconfigure(1, weight=1, minsize=72)
-        self.train_cfg_frame.rowconfigure(2, weight=0, minsize=48)
+        self.train_cfg_frame.rowconfigure(1, weight=1, minsize=px(72))
+        self.train_cfg_frame.rowconfigure(2, weight=0, minsize=px(48))
 
         mode_row = ttk.Frame(self.train_cfg_frame)
         mode_row.grid(row=0, column=0, sticky="ew", pady=(0, 6))
@@ -375,7 +381,7 @@ class RlApp:
             tree_wrap,
             columns=("on", "ord", "name", "eps"),
             show="headings",
-            height=8,
+            height=text_lines(8),
             yscrollcommand=scroll_t.set,
             selectmode="browse",
         )
@@ -384,9 +390,9 @@ class RlApp:
         self.train_tree.heading("ord", text="≡")
         self.train_tree.heading("name", text="File map")
         self.train_tree.heading("eps", text="Episodes")
-        self.train_tree.column("ord", width=32, anchor=tk.CENTER, stretch=False)
-        self.train_tree.column("name", width=200, anchor=tk.W, stretch=True)
-        self.train_tree.column("eps", width=80, anchor=tk.CENTER, stretch=False)
+        self.train_tree.column("ord", width=px(32), anchor=tk.CENTER, stretch=False)
+        self.train_tree.column("name", width=px(200), anchor=tk.W, stretch=True)
+        self.train_tree.column("eps", width=px(80), anchor=tk.CENTER, stretch=False)
         self.train_tree.grid(row=0, column=0, sticky="nsew")
         scroll_t.grid(row=0, column=1, sticky="ns")
         self.train_tree.bind("<<TreeviewSelect>>", self._on_train_tree_select)
@@ -394,8 +400,8 @@ class RlApp:
         self.train_tree.bind("<ButtonRelease-1>", self._on_train_drag_release, add=True)
         self.train_tree.bind("<B1-Motion>", self._on_train_drag_motion, add=True)
 
-        btn_row = tk.Frame(self.train_cfg_frame, height=44)
-        btn_row.grid(row=2, column=0, sticky="ew", pady=(6, 0))
+        btn_row = tk.Frame(self.train_cfg_frame, height=px(44))
+        btn_row.grid(row=2, column=0, sticky="ew", pady=(px(6), 0))
         btn_row.grid_propagate(False)
         box_button(btn_row, text="Tất cả", command=self._train_select_all, role="accent").pack(
             side=tk.LEFT, padx=(0, 4), pady=4
@@ -413,7 +419,7 @@ class RlApp:
         scroll = ttk.Scrollbar(list_frame, orient=tk.VERTICAL)
         self.map_list = tk.Listbox(
             list_frame,
-            height=12,
+            height=text_lines(12),
             yscrollcommand=scroll.set,
             selectmode=tk.BROWSE,
             relief=tk.GROOVE,
@@ -421,22 +427,22 @@ class RlApp:
             highlightthickness=1,
             selectbackground="#89b4fa",
             selectforeground="#11111b",
-            font=("", 10),
+            font=font(10),
         )
         scroll.config(command=self.map_list.yview)
         self.map_list.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         scroll.pack(side=tk.RIGHT, fill=tk.Y)
         self.map_list.bind("<<ListboxSelect>>", self._on_map_select)
 
-        btn_row_infer = tk.Frame(self.infer_list_frame, height=44)
+        btn_row_infer = tk.Frame(self.infer_list_frame, height=px(44))
         btn_row_infer.pack(fill=tk.X, pady=(4, 0))
         box_button(btn_row_infer, text="Xóa map", command=self._delete_selected_infer_map, role="secondary").pack(
             side=tk.LEFT, pady=4
         )
 
     def _build_actions(self):
-        bar = ttk.LabelFrame(self.container, text="Train / Inference", padding=8)
-        bar.pack(side=tk.BOTTOM, fill=tk.X, padx=8, pady=(4, 8))
+        bar = ttk.LabelFrame(self.container, text="Train / Inference", padding=px(8))
+        bar.pack(side=tk.BOTTOM, fill=tk.X, padx=px(8), pady=(px(4), px(8)))
         self.btn_run = ttk.Button(bar, text="▶ Run", command=self.on_run)
         self.btn_run.pack(side=tk.LEFT, padx=(0, 8))
         self.btn_stop = ttk.Button(bar, text="■ Stop", command=self.on_stop, state=tk.DISABLED)
@@ -1396,6 +1402,52 @@ class RlApp:
             self.formula_name_var.set(name)
         except Exception:
             self.formula_name_var.set("Không xác định")
+
+    def refresh_ui_scale(self):
+        for grp in (self.mode_group, self.view_group, self.delay_group, self.train_mode_group):
+            try:
+                grp.refresh_scale()
+            except Exception:
+                pass
+        try:
+            style_train_treeview(self.train_tree, self.root)
+            self.train_tree.configure(height=text_lines(8))
+            self.train_tree.column("ord", width=px(32))
+            self.train_tree.column("name", width=px(200))
+            self.train_tree.column("eps", width=px(80))
+        except tk.TclError:
+            pass
+        try:
+            self.log.configure(height=text_lines(16), font=font(10, family="Monospace"))
+        except tk.TclError:
+            pass
+        try:
+            self.map_list.configure(height=text_lines(12), font=font(10))
+        except tk.TclError:
+            pass
+        try:
+            self.workspace.pack_configure(padx=px(8), pady=px(4))
+            self.workspace.columnconfigure(0, minsize=px(320))
+            self.workspace.columnconfigure(1, minsize=px(260))
+        except tk.TclError:
+            pass
+        try:
+            self.spin_ep.configure(width=entry_width(8))
+            self.combo_formula.configure(width=entry_width(48))
+            self.combo_checkpoint.configure(width=entry_width(22))
+            self.combo_export_policy.configure(width=entry_width(22))
+            self.combo_infer_policy.configure(width=entry_width(28))
+        except tk.TclError:
+            pass
+        try:
+            self.train_cfg_frame.rowconfigure(1, minsize=px(72))
+            self.train_cfg_frame.rowconfigure(2, minsize=px(48))
+        except tk.TclError:
+            pass
+        try:
+            self.map_view.redraw()
+        except Exception:
+            pass
 
     def run(self):
         if self._standalone:

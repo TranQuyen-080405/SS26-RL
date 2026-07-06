@@ -40,6 +40,7 @@ from RL_lib.formula_store import (
 from RL_lib.rl_core import N_ROWS
 from Ui_app.lab_scenario_map import LabScenarioMap5
 from Ui_app.formula_builder import FormulaBuilder, module_chip_style, reward_eids_in_formula
+from Ui_app.ui_scale import entry_width, font, px
 
 _THRESHOLD_FOR_EID = {
     "excess_rotate": "MAX_ROTATE_STREAK",
@@ -127,6 +128,8 @@ class LearnLabApp:
         self._save_after_id = None
         self._loading = False
         self._loaded_formula_name = None
+        self._scaled_font_widgets = []
+        self._scaled_spinboxes = []
 
         self._build_ui()
         self._loading = True
@@ -141,11 +144,39 @@ class LearnLabApp:
 
     def _build_ui(self):
         main_layout = ttk.Frame(self.container)
-        main_layout.pack(fill=tk.BOTH, expand=True, padx=6, pady=6)
-        left = ttk.Frame(main_layout)
-        left.pack(side=tk.LEFT, fill=tk.Y, padx=(0, 8))
-        right = ttk.Frame(main_layout)
-        right.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        main_layout.pack(fill=tk.BOTH, expand=True, padx=px(6), pady=px(6))
+        self._main_layout = main_layout
+
+        cols = ttk.Frame(main_layout)
+        cols.pack(fill=tk.BOTH, expand=True)
+        cols.columnconfigure(0, weight=1, uniform="lab_cols")
+        cols.columnconfigure(1, weight=3, uniform="lab_cols")
+        cols.rowconfigure(0, weight=1)
+        self._cols = cols
+        self._cols_resize_after = None
+
+        left_outer = ttk.Frame(cols)
+        left_outer.grid(row=0, column=0, sticky="nsew", padx=(0, px(4)))
+        left_scroll = tk.Canvas(left_outer, highlightthickness=0, borderwidth=0)
+        left_sb = ttk.Scrollbar(left_outer, orient=tk.VERTICAL, command=left_scroll.yview)
+        left_scroll.configure(yscrollcommand=left_sb.set)
+        left_sb.pack(side=tk.RIGHT, fill=tk.Y)
+        left_scroll.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        left = ttk.Frame(left_scroll)
+        self._left_scroll = left_scroll
+        self._left_win = left_scroll.create_window((0, 0), window=left, anchor=tk.NW)
+
+        def _on_left_inner_configure(_event):
+            left_scroll.configure(scrollregion=left_scroll.bbox("all"))
+
+        def _on_left_canvas_configure(event):
+            left_scroll.itemconfigure(self._left_win, width=event.width)
+
+        left.bind("<Configure>", _on_left_inner_configure)
+        left_scroll.bind("<Configure>", _on_left_canvas_configure)
+
+        right = ttk.Frame(cols)
+        right.grid(row=0, column=1, sticky="nsew", padx=(px(4), 0))
 
         self.apply_status = tk.StringVar(
             value="Bấm 'Lưu công thức' để lưu file JSON và áp dụng cho Train"
@@ -153,7 +184,47 @@ class LearnLabApp:
         self.export_text = None
 
         self.scenario_map = LabScenarioMap5(left, self.world, on_change=self._on_scenario_event)
+        self._bind_left_wheel(left)
         self._build_reward_config(right)
+        cols.bind("<Configure>", self._on_lab_cols_configure)
+        self.root.after_idle(self._redraw_lab_map)
+
+    def _bind_left_wheel(self, widget):
+        if getattr(widget, "_lab_wheel_tag", False):
+            return
+        widget._lab_wheel_tag = True
+
+        def _on_wheel(event):
+            c = self._left_scroll
+            if event.delta:
+                c.yview_scroll(int(-event.delta / 120), "units")
+            elif event.num == 4:
+                c.yview_scroll(-1, "units")
+            elif event.num == 5:
+                c.yview_scroll(1, "units")
+            return "break"
+
+        for seq in ("<MouseWheel>", "<Button-4>", "<Button-5>"):
+            widget.bind(seq, _on_wheel, add="+")
+        for child in widget.winfo_children():
+            self._bind_left_wheel(child)
+
+    def _on_lab_cols_configure(self, event=None):
+        if event is not None and event.widget is not self._cols:
+            return
+        if self._cols_resize_after is not None:
+            try:
+                self.root.after_cancel(self._cols_resize_after)
+            except tk.TclError:
+                pass
+        self._cols_resize_after = self.root.after(80, self._redraw_lab_map)
+
+    def _redraw_lab_map(self):
+        self._cols_resize_after = None
+        try:
+            self.scenario_map.redraw()
+        except (tk.TclError, AttributeError):
+            pass
 
         # exp = ttk.LabelFrame(self.container, text="Xuất cấu hình", padding=4)
         # exp.pack(fill=tk.X, padx=6, pady=(0, 6))
@@ -173,11 +244,13 @@ class LearnLabApp:
         grid.columnconfigure(0, weight=1)
         grid.columnconfigure(1, weight=1)
         col = row = 0
+        self._scaled_font_widgets = []
+        self._scaled_spinboxes = []
         for mod in STATE_MODULES:
             var = tk.BooleanVar(value=True)
             self._module_vars[mod["id"]] = var
             chip = module_chip_style(mod["id"])
-            tk.Checkbutton(
+            cb = tk.Checkbutton(
                 grid,
                 text=mod["label"],
                 variable=var,
@@ -187,13 +260,15 @@ class LearnLabApp:
                 activebackground=chip.get("active", chip["bg"]),
                 activeforeground=chip["fg"],
                 selectcolor="#ffffff",
-                padx=6,
-                pady=2,
-                font=("", 9, "bold"),
+                padx=px(6),
+                pady=px(2),
+                font=font(9, weight="bold"),
                 anchor=tk.W,
                 relief=tk.FLAT,
                 bd=0,
-            ).grid(row=row, column=col, sticky=tk.W + tk.E, padx=4, pady=4)
+            )
+            cb.grid(row=row, column=col, sticky=tk.W + tk.E, padx=4, pady=4)
+            self._scaled_font_widgets.append((cb, 9, "bold"))
             col += 1
             if col >= 2:
                 col, row = 0, row + 1
@@ -212,7 +287,7 @@ class LearnLabApp:
         self.formula_combo = ttk.Combobox(
             formula_bar,
             textvariable=self.formula_pick_var,
-            width=28,
+            width=entry_width(28),
             state="readonly",
         )
         self.formula_combo.pack(side=tk.LEFT, padx=(0, 6))
@@ -267,28 +342,34 @@ class LearnLabApp:
             chip = module_chip_style(mod)
             row = tk.Frame(self._weights_container, bg=chip["bg"], padx=6, pady=4)
             self._weight_rows[eid] = row
-            tk.Label(
+            name_lbl = tk.Label(
                 row,
                 text=meta["label"],
                 bg=chip["bg"],
                 fg=chip["fg"],
-                font=("", 9, "bold"),
+                font=font(9, weight="bold"),
                 anchor=tk.W,
-                width=28,
-            ).pack(side=tk.LEFT)
+                width=entry_width(28),
+            )
+            name_lbl.pack(side=tk.LEFT)
+            self._scaled_font_widgets.append((name_lbl, 9, "bold"))
             var = tk.StringVar(value=str(_DEFAULT_WEIGHTS.get(eid, 0)))
             self._weight_vars[eid] = var
-            ttk.Spinbox(row, from_=-500, to=500, width=8, textvariable=var).pack(side=tk.LEFT, padx=4)
+            w_spin = ttk.Spinbox(row, from_=-500, to=500, width=entry_width(8), textvariable=var)
+            w_spin.pack(side=tk.LEFT, padx=px(4))
+            self._scaled_spinboxes.append((w_spin, 8))
             var.trace_add("write", lambda *_: self._on_weight_edited())
             desc = _REWARD_DESCRIPTIONS.get(eid, "")
-            tk.Label(
+            desc_lbl = tk.Label(
                 row,
                 text="—  " + desc,
                 bg=chip["bg"],
                 fg=chip["fg"],
-                font=("", 9, "italic"),
+                font=font(9, weight="italic"),
                 anchor=tk.W,
-            ).pack(side=tk.LEFT, padx=(12, 0))
+            )
+            desc_lbl.pack(side=tk.LEFT, padx=(12, 0))
+            self._scaled_font_widgets.append((desc_lbl, 9, "italic"))
 
         for eid, tk_keys in _THRESHOLD_FOR_EID.items():
             keys = tk_keys if isinstance(tk_keys, list) else [tk_keys]
@@ -299,28 +380,34 @@ class LearnLabApp:
                 chip = module_chip_style(mod)
                 tr = tk.Frame(self._weights_container, bg=chip["bg"], padx=6, pady=4)
                 self._threshold_rows[tk_key] = tr
-                tk.Label(
+                th_lbl = tk.Label(
                     tr,
                     text=THRESHOLD_LABELS[tk_key],
                     bg=chip["bg"],
                     fg=chip["fg"],
-                    font=("", 9),
+                    font=font(9),
                     anchor=tk.W,
-                    width=28,
-                ).pack(side=tk.LEFT)
+                    width=entry_width(28),
+                )
+                th_lbl.pack(side=tk.LEFT)
+                self._scaled_font_widgets.append((th_lbl, 9, "normal"))
                 tv = tk.StringVar(value="4")
                 self._threshold_vars[tk_key] = tv
-                ttk.Spinbox(tr, from_=0, to=50, width=8, textvariable=tv).pack(side=tk.LEFT, padx=4)
+                t_spin = ttk.Spinbox(tr, from_=0, to=50, width=entry_width(8), textvariable=tv)
+                t_spin.pack(side=tk.LEFT, padx=px(4))
+                self._scaled_spinboxes.append((t_spin, 8))
                 tv.trace_add("write", lambda *_: self._on_weight_edited())
                 desc = _REWARD_DESCRIPTIONS.get(tk_key, "")
-                tk.Label(
+                th_desc = tk.Label(
                     tr,
                     text="—  " + desc,
                     bg=chip["bg"],
                     fg=chip["fg"],
-                    font=("", 9, "italic"),
+                    font=font(9, weight="italic"),
                     anchor=tk.W,
-                ).pack(side=tk.LEFT, padx=(12, 0))
+                )
+                th_desc.pack(side=tk.LEFT, padx=(12, 0))
+                self._scaled_font_widgets.append((th_desc, 9, "italic"))
 
         self._bind_reward_wheel_tree(self._reward_scroll_canvas)
 
@@ -737,6 +824,56 @@ class LearnLabApp:
         self._on_modules_changed()
         self._loaded_formula_name = ""
         reward_config.set_formula_name("")
+
+    def refresh_ui_scale(self):
+        try:
+            self._main_layout.pack_configure(padx=px(6), pady=px(6))
+        except (tk.TclError, AttributeError):
+            pass
+        for w, sz, wt in self._scaled_font_widgets:
+            try:
+                opts = {"font": font(sz, weight=wt)}
+                if isinstance(w, tk.Checkbutton):
+                    opts["padx"] = px(6)
+                    opts["pady"] = px(2)
+                w.configure(**opts)
+            except tk.TclError:
+                pass
+        for spin, cw in self._scaled_spinboxes:
+            try:
+                spin.configure(width=entry_width(cw))
+            except tk.TclError:
+                pass
+        for row in self._weight_rows.values():
+            for child in row.winfo_children():
+                if isinstance(child, tk.Label):
+                    try:
+                        wval = child.cget("width")
+                        if wval and int(wval) > 1:
+                            child.configure(width=entry_width(28))
+                    except (tk.TclError, ValueError):
+                        pass
+        for tr in self._threshold_rows.values():
+            for child in tr.winfo_children():
+                if isinstance(child, tk.Label):
+                    try:
+                        wval = child.cget("width")
+                        if wval and int(wval) > 1:
+                            child.configure(width=entry_width(28))
+                    except (tk.TclError, ValueError):
+                        pass
+        try:
+            self.formula_combo.configure(width=entry_width(28))
+        except tk.TclError:
+            pass
+        try:
+            self.formula_builder.refresh_scale()
+        except Exception:
+            pass
+        try:
+            self.scenario_map.redraw()
+        except Exception:
+            pass
 
     def run(self):
         if self._standalone:

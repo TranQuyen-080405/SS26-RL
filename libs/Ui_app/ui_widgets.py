@@ -3,6 +3,8 @@
 import tkinter as tk
 from tkinter import ttk
 
+from Ui_app.ui_scale import font, px
+
 BOX_ON = "[✓]"
 BOX_OFF = "[ ]"
 
@@ -26,10 +28,10 @@ def box_button(parent, text, command=None, role="secondary", **kwargs):
         activeforeground=fg,
         relief=tk.RAISED,
         bd=2,
-        padx=12,
-        pady=6,
+        padx=px(12),
+        pady=px(6),
         cursor="hand2",
-        font=("", 10, "bold" if role in ("primary", "danger") else "normal"),
+        font=font(10, weight="bold" if role in ("primary", "danger") else "normal"),
     )
     opts.update(kwargs)
     return tk.Button(parent, **opts)
@@ -43,19 +45,20 @@ class SegmentGroup:
         self.variable = variable
         self.command = command
         self._buttons = []
+        _padx = px(padx)
         for label, value in options:
             btn = tk.Button(
                 self.frame,
                 text=label,
                 relief=tk.RAISED,
                 bd=2,
-                padx=14,
-                pady=7,
+                padx=px(14),
+                pady=px(7),
                 cursor="hand2",
-                font=("", 10),
+                font=font(10),
                 command=lambda v=value: self._select(v),
             )
-            btn.pack(side=tk.LEFT, padx=padx)
+            btn.pack(side=tk.LEFT, padx=_padx)
             self._buttons.append((btn, value))
         variable.trace_add("write", lambda *_: self._paint())
         self._paint()
@@ -79,14 +82,14 @@ class SegmentGroup:
                     relief=tk.SUNKEN,
                     bg="#89b4fa",
                     fg="#11111b",
-                    font=("", 10, "bold"),
+                    font=font(10, weight="bold"),
                 )
             else:
                 btn.configure(
                     relief=tk.RAISED,
                     bg="#45475a",
                     fg="#cdd6f4",
-                    font=("", 10, "normal"),
+                    font=font(10),
                 )
 
     def set_enabled(self, enabled):
@@ -97,10 +100,16 @@ class SegmentGroup:
             self._paint()
 
 
+    def refresh_scale(self):
+        for btn, _ in self._buttons:
+            btn.configure(padx=px(14), pady=px(7))
+        self._paint()
+
+
 def setup_train_tree_boxes(tree):
     """Cột chọn map train — ô vuông [✓] / [ ] thay vì tick tròn."""
     tree.heading("on", text="Chọn")
-    tree.column("on", width=48, anchor=tk.CENTER, stretch=False)
+    tree.column("on", width=px(48), anchor=tk.CENTER, stretch=False)
     tree.tag_configure("map_on", foreground="#a6e3a1")
     tree.tag_configure("map_off", foreground="#9399b2")
     tree.tag_configure("row_a", background="#2a2a3c")
@@ -115,8 +124,8 @@ def style_train_treeview(tree, root):
         style.theme_use("clam")
     except tk.TclError:
         pass
-    style.configure("Train.Treeview", rowheight=32, font=("Segoe UI", 10))
-    style.configure("Train.Treeview.Heading", font=("Segoe UI", 10, "bold"), padding=(6, 4))
+    style.configure("Train.Treeview", rowheight=px(32), font=font(10, family="Segoe UI"))
+    style.configure("Train.Treeview.Heading", font=font(10, family="Segoe UI", weight="bold"), padding=(px(6), px(4)))
     style.map(
         "Train.Treeview",
         background=[("selected", "#585b70")],

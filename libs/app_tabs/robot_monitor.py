@@ -8,6 +8,8 @@ import tkinter as tk
 from tkinter import ttk, scrolledtext, messagebox, filedialog, simpledialog
 
 from bootstrap import robot_embbed_dir
+from Ui_app.map_layout import apply_fixed_canvas, avail_from_wrap, fit_grid_layout
+from Ui_app.ui_scale import configure_window, entry_width, font, init as init_ui_scale, px
 
 try:
     from bleak import BleakClient, BleakScanner
@@ -257,8 +259,10 @@ class RobotMapCanvas:
         self.btn_add_cp.pack(side=tk.LEFT, padx=4)
         self.btn_remove_cp = ttk.Button(toolbar, text="Xóa checkpoint", command=self.remove_selected_checkpoint)
         self.btn_remove_cp.pack(side=tk.LEFT, padx=4)
-        
-        self.canvas = tk.Canvas(self.frame, bg="#1e1e2e", highlightthickness=0)
+
+        self._map_wrap = ttk.Frame(self.frame)
+        self._map_wrap.pack(fill=tk.BOTH, expand=True)
+        self.canvas = tk.Canvas(self._map_wrap, bg="#1e1e2e", highlightthickness=0)
         self.canvas.pack(fill=tk.BOTH, expand=True)
         self.model = MonitorMapModel()
         self.connected = False
@@ -274,12 +278,13 @@ class RobotMapCanvas:
         self._await_new_cp = False
         self.on_config_changed_cb = None
         
-        self._cell = 44
-        self._offset_x = 24
-        self._offset_y = 24
-        
+        self._cell = px(44)
+        self._offset_x = 0
+        self._offset_y = 0
+
         self._resize_after_id = None
-        self.canvas.bind("<Configure>", self._on_resize_event)
+        self._last_wrap_size = None
+        self._map_wrap.bind("<Configure>", self._on_resize_event)
         self.canvas.bind("<Button-1>", self._on_canvas_click)
         
         # Focus & Key bindings
@@ -293,9 +298,13 @@ class RobotMapCanvas:
         self._update_tool_buttons()
 
     def _on_resize_event(self, event):
+        size = (event.width, event.height)
+        if size[0] < 2 or size[1] < 2 or size == self._last_wrap_size:
+            return
+        self._last_wrap_size = size
         if self._resize_after_id:
-            self.canvas.after_cancel(self._resize_after_id)
-        self._resize_after_id = self.canvas.after(50, self._throttled_redraw)
+            self._map_wrap.after_cancel(self._resize_after_id)
+        self._resize_after_id = self._map_wrap.after(50, self._throttled_redraw)
 
     def _throttled_redraw(self):
         self._resize_after_id = None
@@ -322,7 +331,7 @@ class RobotMapCanvas:
         w, h = self.model.w, self.model.h
         best = None
         best_d = 999
-        edge_hit = max(8, min(18, self._cell // 4))
+        edge_hit = max(px(6), min(px(18), self._cell // 4))
         for y in range(h):
             for x in range(w):
                 for d, x1, y1, x2, y2 in self._edge_lines(x, y, h):
@@ -498,28 +507,13 @@ class RobotMapCanvas:
         self.frame.pack(**kwargs)
 
     def _update_layout(self):
-        c = self.canvas
         w, h = self.model.w, self.model.h
-        cw = max(c.winfo_width(), 320)
-        ch = max(c.winfo_height(), 280)
-        if cw <= 1 or ch <= 1:
-            c.update_idletasks()
-            cw = max(c.winfo_width(), 320)
-            ch = max(c.winfo_height(), 280)
-
-        canvas_pad = 28
-        cell_min = 36
-        cell_max = 80
-
-        avail_w = max(cw - 2 * canvas_pad, w * cell_min)
-        avail_h = max(ch - 2 * canvas_pad, h * cell_min)
-        cell = int(min(avail_w / w, avail_h / h, cell_max))
-        self._cell = max(cell, cell_min)
-        map_w = w * self._cell
-        map_h = h * self._cell
-        self._offset_x = max(canvas_pad, (cw - map_w) // 2)
-        self._offset_y = max(canvas_pad, (ch - map_h) // 2)
-        c.config(scrollregion=(0, 0, cw, ch))
+        aw, ah = avail_from_wrap(self._map_wrap, min_w=200, min_h=160)
+        cell, ox, oy, cw, ch = fit_grid_layout(w, h, aw, ah)
+        self._cell = cell
+        self._offset_x = ox
+        self._offset_y = oy
+        apply_fixed_canvas(self.canvas, cw, ch)
 
     def cell_px(self, x, y, h):
         px = self._offset_x + x * self._cell
@@ -741,8 +735,8 @@ class RobotMonitorApp:
         if parent is None:
             self.root = tk.Tk()
             self.root.title("SS26 Robot Monitor — BLE")
-            self.root.geometry("1100x640")
-            self.root.minsize(800, 480)
+            init_ui_scale(self.root)
+            configure_window(self.root, width=1100, height=640, min_width=800, min_height=480)
             self.container = self.root
             self._standalone = True
         else:
@@ -786,7 +780,7 @@ class RobotMonitorApp:
 
         ttk.Label(bar, text="Nhập tên:").pack(side=tk.LEFT, padx=(0, 4))
         self.ble_name_var = tk.StringVar(value="Robot")
-        self.entry_ble_name = ttk.Entry(bar, textvariable=self.ble_name_var, width=15)
+        self.entry_ble_name = ttk.Entry(bar, textvariable=self.ble_name_var, width=entry_width(15))
         self.entry_ble_name.pack(side=tk.LEFT, padx=(0, 8))
 
         self.btn_connect = ttk.Button(bar, text="Kết nối", command=self.toggle_connect)
@@ -801,7 +795,7 @@ class RobotMonitorApp:
         self.btn_upload.pack(side=tk.LEFT, padx=2)
 
         self.infer_var = tk.StringVar(value="Inference: chưa chạy")
-        ttk.Label(bar, textvariable=self.infer_var, width=28).pack(side=tk.LEFT, padx=(8, 0))
+        ttk.Label(bar, textvariable=self.infer_var, width=entry_width(28)).pack(side=tk.LEFT, padx=(px(8), 0))
 
         self.status_var = tk.StringVar(
             value="Nhập tên BLE → Kết nối → Start inference."
@@ -815,7 +809,7 @@ class RobotMonitorApp:
         self.log = scrolledtext.ScrolledText(
             log_frame,
             wrap=tk.WORD,
-            font=("Consolas", 10),
+            font=font(10, family="Consolas"),
             bg="#11111b",
             fg="#cdd6f4",
             insertbackground="#cdd6f4",
