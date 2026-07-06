@@ -10,7 +10,7 @@ ACTIONS = ("forward", "rotate left", "rotate right")
 HEADING_IDX = {"N": 0, "W": 1, "E": 2, "S": 3}
 TREND_SLOTS = 1 + N_CP_MAX
 TREND_COMBOS = 3 ** TREND_SLOTS
-N_ROWS = 16 * TREND_COMBOS * 4
+N_ROWS = 16 * 2 * TREND_COMBOS * 4
 
 
 def dist_trend(prev_dist, current_dist):
@@ -35,7 +35,7 @@ def _pad_cp_trends(dist_cp_trends):
     return out
 
 
-def encode_state(obstacle_nwes, dist_goal_trend, dist_cp_trends, heading):
+def encode_state(obstacle_nwes, dist_goal_trend, dist_cp_trends, heading, visited_before=0):
     bits = obstacle_bits(obstacle_nwes)
     trends = [dist_goal_trend] + _pad_cp_trends(dist_cp_trends)
     packed = 0
@@ -43,7 +43,13 @@ def encode_state(obstacle_nwes, dist_goal_trend, dist_cp_trends, heading):
         packed += (t + 1) * (3 ** i)
     if heading not in HEADING_IDX:
         heading = "N"
-    return bits * TREND_COMBOS * 4 + packed * 4 + HEADING_IDX[heading]
+    visited = 1 if visited_before else 0
+    return (
+        bits * (2 * TREND_COMBOS * 4)
+        + visited * (TREND_COMBOS * 4)
+        + packed * 4
+        + HEADING_IDX[heading]
+    )
 
 
 def get_policy(encoded_state, q_table, actions=ACTIONS):

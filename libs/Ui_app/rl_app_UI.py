@@ -21,6 +21,7 @@ from map.map_io import list_map_files, build_sim_map_from_file, maps_dir_for_kin
 from Ui_app.map_view import SimMapCanvas
 from Ui_app.ui_scale import configure_window, entry_width, font, init as init_ui_scale, px, text_lines
 from Ui_app.ui_widgets import SegmentGroup, box_button, style_train_treeview, train_map_mark, train_row_tags
+import train_log
 
 
 class TextRedirector:
@@ -68,6 +69,7 @@ class RlApp:
         self.infer_policy_var = tk.StringVar(value="policy.bin")
         self._running = False
         self._stop_requested = False
+        self._paused = False
         self._map_paths = []
         self._train_rows = []
         self._anim_after_id = None
@@ -332,9 +334,13 @@ class RlApp:
         self.workspace = ttk.Frame(self.container)
         self.workspace.pack(fill=tk.BOTH, expand=True, padx=px(8), pady=px(4))
 
-        self.log_frame = ttk.LabelFrame(self.workspace, text="Output", padding=px(8))
+        self.log_frame = ttk.LabelFrame(self.workspace, text="Log", padding=px(8))
         self.log = scrolledtext.ScrolledText(
-            self.log_frame, height=text_lines(16), state=tk.DISABLED, font=font(10, family="Monospace")
+            self.log_frame,
+            height=text_lines(16),
+            state=tk.DISABLED,
+            font=font(9, family="Monospace"),
+            wrap=tk.NONE,
         )
         self.log.pack(fill=tk.BOTH, expand=True)
 
@@ -344,10 +350,12 @@ class RlApp:
 
         self.maps_frame = ttk.LabelFrame(self.workspace, text="List map", padding=px(8))
 
-        _col0 = px(320)
-        _col1 = px(260)
-        self.workspace.columnconfigure(0, weight=3, minsize=_col0)
-        self.workspace.columnconfigure(1, weight=2, minsize=_col1)
+        self._side_col_minsize = px(190)
+        self._log_col_minsize = px(500)
+        self._map_col_minsize = px(260)
+        self.workspace.columnconfigure(0, weight=5, minsize=self._log_col_minsize)
+        self.workspace.columnconfigure(1, weight=2, minsize=self._map_col_minsize)
+        self.workspace.columnconfigure(2, weight=1, minsize=self._side_col_minsize)
         self.workspace.rowconfigure(0, weight=1)
 
     def _build_map_list(self):
@@ -444,6 +452,8 @@ class RlApp:
         bar.pack(side=tk.BOTTOM, fill=tk.X, padx=px(8), pady=(px(4), px(8)))
         self.btn_run = ttk.Button(bar, text="▶ Run", command=self.on_run)
         self.btn_run.pack(side=tk.LEFT, padx=(0, 8))
+        self.btn_pause = ttk.Button(bar, text="⏸ Pause", command=self.on_pause, state=tk.DISABLED)
+        self.btn_pause.pack(side=tk.LEFT, padx=(0, 8))
         self.btn_stop = ttk.Button(bar, text="■ Stop", command=self.on_stop, state=tk.DISABLED)
         self.btn_stop.pack(side=tk.LEFT)
         ttk.Button(bar, text="Refresh map", command=self.refresh_map_view).pack(side=tk.LEFT, padx=(8, 0))
@@ -757,12 +767,49 @@ class RlApp:
         self.log.delete("1.0", tk.END)
         self.log.configure(state=tk.DISABLED)
 
+    def _append_log_text(self, text):
+        if not text:
+            return
+        if not text.endswith("\n"):
+            text += "\n"
+        self.log.configure(state=tk.NORMAL)
+        at_bottom = self.log.yview()[1] >= 0.98
+        self.log.insert(tk.END, text)
+        if at_bottom:
+            self.log.see(tk.END)
+        self.log.configure(state=tk.DISABLED)
+
+    def _format_step_log(self, entry):
+        return (
+            train_log.format_step_log_line(
+                entry.get("step", 0),
+                entry.get("x", 0),
+                entry.get("y", 0),
+                entry.get("direct", "?"),
+                entry.get("s", 0),
+                entry.get("action", "?"),
+                reward=entry.get("reward"),
+            )
+            + "\n"
+        )
+
+    def _append_step_log(self, entry):
+        line = self._format_step_log(entry)
+        self.log.configure(state=tk.NORMAL)
+        at_bottom = self.log.yview()[1] >= 0.98
+        self.log.insert(tk.END, line)
+        if at_bottom:
+            self.log.see(tk.END)
+        self.log.configure(state=tk.DISABLED)
+
     def _begin_run(self):
         self._running = True
         self._stop_requested = False
+        self._paused = False
         self._locked_view = self.view.get()
         self._locked_mode = self.mode.get()
-        self.btn_run.configure(state=tk.DISABLED)
+        self.btn_run.configure(state=tk.DISABLED, text="▶ Run")
+        self.btn_pause.configure(state=tk.NORMAL)
         self.btn_stop.configure(state=tk.NORMAL)
         self.view_group.set_enabled(False)
         self.mode_group.set_enabled(False)
@@ -770,12 +817,39 @@ class RlApp:
     def _end_run(self):
         self._running = False
         self._stop_requested = False
+        self._paused = False
         self._locked_view = None
         self._locked_mode = None
-        self.btn_run.configure(state=tk.NORMAL)
+        self.btn_run.configure(state=tk.NORMAL, text="▶ Run")
+        self.btn_pause.configure(state=tk.DISABLED)
         self.btn_stop.configure(state=tk.DISABLED)
         self.view_group.set_enabled(True)
         self.mode_group.set_enabled(True)
+
+    def _set_paused_ui(self, paused):
+        self._paused = paused
+        if paused:
+            self.btn_run.configure(state=tk.NORMAL, text="▶ Continue")
+            self.btn_pause.configure(state=tk.DISABLED)
+            self.status.set("Paused")
+            if self.view.get() == "map":
+                if self.mode.get() == "train":
+                    self.map_view.set_status("Train tạm dừng — bấm Continue để chạy tiếp")
+                else:
+                    self.map_view.set_status("Inference tạm dừng — bấm Continue để chạy tiếp")
+        else:
+            self.btn_run.configure(state=tk.DISABLED, text="▶ Run")
+            self.btn_pause.configure(state=tk.NORMAL)
+            if self.mode.get() == "train":
+                self.status.set("Training..." if self.view.get() == "map" else "Running...")
+            else:
+                self.status.set("Playing..." if self.view.get() == "map" else "Running...")
+
+    def _pause_gate(self):
+        import time
+
+        while self._paused and not self._stop_requested:
+            time.sleep(0.05)
 
     def _on_view_change(self):
         if self._running and self._locked_view and self.view.get() != self._locked_view:
@@ -833,14 +907,17 @@ class RlApp:
         is_map = self.view.get() == "map"
         self.log_frame.grid_remove()
         self.map_frame.grid_remove()
+        self.maps_frame.grid_remove()
         if is_map:
-            self.map_frame.grid(row=0, column=0, sticky="nsew", padx=(0, 6))
+            self.log_frame.grid(row=0, column=0, sticky="nsew", padx=(0, px(4)))
+            self.map_frame.grid(row=0, column=1, sticky="nsew", padx=px(4))
+            self.maps_frame.grid(row=0, column=2, sticky="nsew", padx=(px(4), 0))
             self.delay_group.set_enabled(True)
             self._preview_map_from_selection()
         else:
-            self.log_frame.grid(row=0, column=0, sticky="nsew", padx=(0, 6))
+            self.log_frame.grid(row=0, column=0, columnspan=2, sticky="nsew", padx=(0, px(6)))
+            self.maps_frame.grid(row=0, column=2, sticky="nsew")
             self.delay_group.set_enabled(False)
-        self.maps_frame.grid(row=0, column=1, sticky="nsew")
 
     def _set_map_hint(self, text):
         text = (text or "").strip()
@@ -973,6 +1050,9 @@ class RlApp:
             messagebox.showerror("Lỗi", f"Lỗi khi xóa file: {str(e)}")
 
     def on_run(self):
+        if self._running and self._paused:
+            self._set_paused_ui(False)
+            return
         if self._running:
             return
 
@@ -1023,6 +1103,15 @@ class RlApp:
         if self._current_sync_evt is not None:
             self._current_sync_evt.set()
 
+    def _release_sync_event(self, evt):
+        if self._stop_requested:
+            evt.set()
+            return
+        if self._paused:
+            self._sync_after_id = self.root.after(50, lambda e=evt: self._release_sync_event(e))
+            return
+        evt.set()
+
     def _process_ui_queue(self):
         while not self._ui_queue.empty():
             try:
@@ -1042,11 +1131,11 @@ class RlApp:
                 def _release_delayed():
                     self._sync_after_id = None
                     self._sync_after_evt = None
-                    evt.set()
+                    self._release_sync_event(evt)
 
                 self._sync_after_id = self.root.after(delay_ms, _release_delayed)
             else:
-                evt.set()
+                self._release_sync_event(evt)
 
             self._ui_queue.task_done()
 
@@ -1054,6 +1143,9 @@ class RlApp:
 
     def _ui_sync(self, fn):
         """Chạy fn trên main thread và chờ xong (dùng từ thread train)."""
+        if self._stop_requested:
+            return
+        self._pause_gate()
         if self._stop_requested:
             return
         evt = threading.Event()
@@ -1065,6 +1157,9 @@ class RlApp:
             self._current_sync_evt = None
 
     def _ui_sync_after_delay(self, fn, delay_ms):
+        if self._stop_requested:
+            return
+        self._pause_gate()
         if self._stop_requested:
             return
         evt = threading.Event()
@@ -1082,12 +1177,20 @@ class RlApp:
     def _should_stop_train(self):
         return self._stop_requested
 
+    def on_pause(self):
+        if not self._running or self._paused or self._stop_requested:
+            return
+        self._set_paused_ui(True)
+
     def on_stop(self):
         if not self._running:
             return
         self._stop_requested = True
+        self._paused = False
         self._cancel_pending_ui_sync()
         self.btn_stop.configure(state=tk.DISABLED)
+        self.btn_pause.configure(state=tk.DISABLED)
+        self.btn_run.configure(state=tk.DISABLED, text="▶ Run")
         if self.mode.get() == "train":
             self.status.set("Stopping...")
             if self.view.get() == "map":
@@ -1136,6 +1239,10 @@ class RlApp:
                     "Episode %d/%d | map: %s | ε=%.3f" % (ep + 1, total, name, eps)
                 )
                 self.status.set("Training episode %d/%d" % (ep + 1, total))
+                self._append_log_text(
+                    "--- episode %d/%d | map: %s | eps=%.3f ---\n%s"
+                    % (ep + 1, total, name, eps, train_log.format_step_log_header())
+                )
 
             self._ui_sync(show)
 
@@ -1146,6 +1253,7 @@ class RlApp:
 
             def show():
                 self.map_view.show_step(entry)
+                self._append_step_log(entry)
 
             self._ui_sync_after_delay(show, delay)
 
@@ -1172,6 +1280,7 @@ class RlApp:
                 result = rl_runner.run_train(
                     n_episodes=n_ep,
                     should_stop=self._should_stop_train,
+                    pause_gate=self._pause_gate,
                     checkpoint=self._train_checkpoint_spec(),
                     train_map_mode=mode,
                     train_sims=sims,
@@ -1219,6 +1328,7 @@ class RlApp:
                     on_step=on_step,
                     step_wait=None,
                     should_stop=self._should_stop_train,
+                    pause_gate=self._pause_gate,
                     checkpoint=self._train_checkpoint_spec(),
                     train_map_mode=mode,
                     train_sims=sims,
@@ -1251,7 +1361,7 @@ class RlApp:
             sys.stdout = TextRedirector(self.log, self.root)
             try:
                 rl_runner.run_infer_episode_for_map(
-                    map_path, verbose=True, policy_bin=policy_bin
+                    map_path, verbose=True, policy_bin=policy_bin, pause_gate=self._pause_gate
                 )
             except Exception as exc:
                 print("ERROR:", exc)
@@ -1278,7 +1388,7 @@ class RlApp:
             sys.stdout = TextRedirector(self.log, self.root)
             try:
                 sim, outcome = rl_runner.run_infer_episode_for_map(
-                    map_path, verbose=True, policy_bin=policy_bin
+                    map_path, verbose=False, policy_bin=policy_bin, pause_gate=self._pause_gate
                 )
                 self._ui_async(lambda s=sim, o=outcome: self._start_animation(s, o))
             except Exception as exc:
@@ -1300,6 +1410,20 @@ class RlApp:
         self.map_view.load_sim_map(sim_map)
         self.map_view.reset_path()
         self.status.set("Playing...")
+        cps = sim_map.get("checkpoints") or []
+        cp_txt = ("  cp %s" % (cps,)) if cps else ""
+        self._append_log_text(
+            "infer %s %dx%d  start %s  goal %s%s\n%s"
+            % (
+                sim_map.get("name", "?"),
+                sim_map["width"],
+                sim_map["height"],
+                sim_map.get("start"),
+                sim_map.get("goal"),
+                cp_txt,
+                train_log.format_step_log_header(),
+            )
+        )
         log = outcome.get("log") or []
         self._play_steps(log, 0, outcome, delay)
 
@@ -1308,6 +1432,11 @@ class RlApp:
             self.map_view.set_status("Đã dừng inference")
             self.status.set("Stopped")
             self._end_run()
+            return
+        if self._paused:
+            self._anim_after_id = self.root.after(
+                50, lambda: self._play_steps(log, index, outcome, delay)
+            )
             return
         if index >= len(log):
             status = outcome.get("status", "?")
@@ -1320,11 +1449,13 @@ class RlApp:
                 msg = "Kết thúc: %s (%d bước)" % (status, steps)
             self.map_view.set_status(msg)
             self.status.set("Done — " + msg)
+            self._append_log_text("result: %s" % msg)
             self._end_run()
             return
 
         entry = log[index]
         self.map_view.show_step(entry)
+        self._append_step_log(entry)
         self._anim_after_id = self.root.after(delay, lambda: self._play_steps(log, index + 1, outcome, delay))
 
     def _run_done(self):
@@ -1424,7 +1555,7 @@ class RlApp:
         except tk.TclError:
             pass
         try:
-            self.log.configure(height=text_lines(16), font=font(10, family="Monospace"))
+            self.log.configure(height=text_lines(16), font=font(9, family="Monospace"))
         except tk.TclError:
             pass
         try:
@@ -1433,8 +1564,12 @@ class RlApp:
             pass
         try:
             self.workspace.pack_configure(padx=px(8), pady=px(4))
-            self.workspace.columnconfigure(0, minsize=px(320))
-            self.workspace.columnconfigure(1, minsize=px(260))
+            side = getattr(self, "_side_col_minsize", px(190))
+            log_w = getattr(self, "_log_col_minsize", px(500))
+            center = getattr(self, "_map_col_minsize", px(260))
+            self.workspace.columnconfigure(0, minsize=log_w)
+            self.workspace.columnconfigure(1, minsize=center)
+            self.workspace.columnconfigure(2, minsize=side)
         except tk.TclError:
             pass
         try:

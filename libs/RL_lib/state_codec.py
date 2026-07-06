@@ -19,7 +19,9 @@ def decode_state(encoded):
     hi = encoded % 4
     rest = encoded // 4
     packed = rest % TREND_COMBOS
-    bits = rest // TREND_COMBOS
+    rest2 = rest // TREND_COMBOS
+    visited_before = rest2 % 2
+    bits = rest2 // 2
     trends = []
     p = packed
     for _ in range(TREND_SLOTS):
@@ -32,13 +34,20 @@ def decode_state(encoded):
         "dist_goal_trend": trends[0],
         "dist_cp_trends": trends[1:],
         "heading": _IDX_HEADING.get(hi, "N"),
+        "visited_before": visited_before,
         "obstacle_bits": bits,
         "packed_trends": packed,
     }
 
 
-def build_state(obstacle_nwes, dist_goal_trend, dist_cp_trends, heading):
-    s = encode_state(obstacle_nwes, dist_goal_trend, dist_cp_trends, heading)
+def build_state(obstacle_nwes, dist_goal_trend, dist_cp_trends, heading, visited_before=0):
+    s = encode_state(
+        obstacle_nwes,
+        dist_goal_trend,
+        dist_cp_trends,
+        heading,
+        visited_before=visited_before,
+    )
     dec = decode_state(s)
     dec["s"] = s
     return dec
@@ -52,7 +61,7 @@ def policy_preview(encoded, q_table):
     return {"action": action, "q_forward": row[0], "q_left": row[1], "q_right": row[2]}
 
 
-def export_state_snippet(obstacle_nwes, dist_goal_trend, dist_cp_trends, heading, s):
+def export_state_snippet(obstacle_nwes, dist_goal_trend, dist_cp_trends, heading, s, visited_before=0):
     cp = list(dist_cp_trends) + [0] * N_CP_MAX
     cp = cp[:N_CP_MAX]
     lines = [
@@ -62,9 +71,10 @@ def export_state_snippet(obstacle_nwes, dist_goal_trend, dist_cp_trends, heading
         "DIST_GOAL_TREND = %d  # -1 xa | 0 giữ | 1 gần" % dist_goal_trend,
         "DIST_CP_TRENDS = %s" % (cp,),
         'HEADING = "%s"' % heading,
+        "VISITED_BEFORE = %d  # 0: ô mới | 1: ô đã từng ghé trước đó" % (1 if visited_before else 0),
         "",
         "# from modules.logics.rl_core import encode_state",
-        "# s = encode_state(OBSTACLE_NWES, DIST_GOAL_TREND, DIST_CP_TRENDS, HEADING)",
+        "# s = encode_state(OBSTACLE_NWES, DIST_GOAL_TREND, DIST_CP_TRENDS, HEADING, VISITED_BEFORE)",
         "# s == %d  (N_ROWS=%d)" % (s, N_ROWS),
     ]
     return "\n".join(lines)

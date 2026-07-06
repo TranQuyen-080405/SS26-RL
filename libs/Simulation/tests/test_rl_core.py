@@ -20,6 +20,12 @@ def test_encode_range():
     assert 0 <= s2 < N_ROWS
 
 
+def test_encode_visited_bit_changes_state():
+    s_new = encode_state((0, 0, 0, 0), 0, [0, 0, 0], "N", visited_before=0)
+    s_revisit = encode_state((0, 0, 0, 0), 0, [0, 0, 0], "N", visited_before=1)
+    assert s_new != s_revisit
+
+
 def test_get_policy():
     q = [[1.0, 0.0, 0.0]] * N_ROWS
     q[0] = [0.0, 2.0, 0.0]
@@ -29,5 +35,6 @@ def test_get_policy():
 if __name__ == "__main__":
     test_dist_trend()
     test_encode_range()
+    test_encode_visited_bit_changes_state()
     test_get_policy()
     print("ok")

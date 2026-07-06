@@ -98,14 +98,14 @@ _REWARD_DESCRIPTIONS = {
     "visit_repeat": "Số lần quay lại ô đã từng đi qua vượt ngưỡng (không tính lần đầu)",
     "ping_pong": "Đi qua-lại cùng một đoạn đường (palindrome); chỉnh Ô mỗi chiều cho đường dài 2–5 ô",
     "straight_streak_reach": "Số lần giữ nguyên hướng đi liên tiếp vượt quá ngưỡng",
-    "straight_streak_cap": "Số lần giữ nguyên hướng đi liên tiếp chưa vượt quá ngưỡng",
+    "straight_streak_cap": "Số lần giữ nguyên hướng đi liên tiếp còn ngắn (<= ngưỡng)",
     "MAX_ROTATE_STREAK": "Ngưỡng xoay",
     "MAX_REVISIT_STEPS": "Số bước",
     "MAX_CELL_REPEAT": "Lần quay lại",
     "MAX_PING_PONG_CYCLES": "Số lần được phép đi lặp qua lại",
     "MAX_PING_PONG_SPAN": "Số ô tối đa mỗi chiều tính được tính là lặp lại",
     "MAX_STRAIGHT_REACH": "Ngưỡng giữ hướng",
-    "MAX_STRAIGHT_CAP": "Ngưỡng không giữ hướng",
+    "MAX_STRAIGHT_CAP": "Ngưỡng giữ hướng ngắn",
 }
 
 

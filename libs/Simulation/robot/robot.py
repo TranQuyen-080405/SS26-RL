@@ -127,7 +127,7 @@ def update_straight_streak(robot, result):
 
 def reset_explore_tracking(robot):
     """Reset đếm lặp ô / ping-pong đầu episode."""
-    robot["node_visits"] = {}
+    robot["node_visits"] = {(robot["x"], robot["y"]): 1}
     robot["pos_history"] = [(robot["x"], robot["y"])]
     robot["ping_pong_count"] = 0
     robot["_ping_pong_hist_len"] = 1
@@ -146,6 +146,12 @@ def update_explore_on_move(robot):
     hist.append(key)
     if len(hist) > 128:
         del hist[:-128]
+
+
+def current_cell_visited_before(robot):
+    """1 nếu ô hiện tại đã từng vào trước đó trong episode; ngược lại 0."""
+    visits = (robot.get("node_visits") or {}).get((robot["x"], robot["y"]), 0)
+    return 1 if visits > 1 else 0
 
 
 def bump_ping_pong_count(robot, max_cells_per_leg):
@@ -176,12 +182,15 @@ def build_encoded_state(robot):
     if node is None:
         return 0
     obs = get_obstacle_nwes(node)
-    return encode_state(
+    visited_before = current_cell_visited_before(robot)
+    encoded = encode_state(
         obs,
         robot["dist_goal_trend"],
         robot["dist_cp_trend"],
         robot["direct"],
+        visited_before=visited_before,
     )
+    return encoded
 
 
 def perceive_edge(robot, is_blocked):

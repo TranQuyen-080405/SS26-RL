@@ -2,7 +2,7 @@
 
 
 def run(cfg):
-    from modules.logics.robot_map import init_robot_map, apply_walls_from_spec
+    from modules.logics.robot_map import init_robot_map
     from modules.logics.robot_state import make_robot, inject_distances_from_map, is_at_goal, clear_obstacle_memory
     from modules.logics.policy_io import load_policy_bin, loaded_name
     from modules.logics.action import run_policy_step
@@ -34,7 +34,6 @@ def run(cfg):
     s = cfg["start"]
     _log("SW: Initializing local robot map %dx%d starting at %s" % (w, h, s))
     rmap = init_robot_map(w, h, goal=cfg["goal"], checkpoints=cfg["checkpoints"], start=s)
-    apply_walls_from_spec(rmap, cfg["walls"])
     bot = make_robot(s[0], s[1], "N", rmap)
     clear_obstacle_memory(bot)
     inject_distances_from_map(bot)

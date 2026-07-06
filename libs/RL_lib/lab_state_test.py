@@ -69,7 +69,7 @@ def build_sim_map(*, at_goal=False, at_checkpoint=False):
     return init_sim_map(10, 10, goal=goal, checkpoints=cps, start=(0, 0))
 
 
-def encode_for_lab(obs_nwes, goal_trend, cp_trends, heading, enabled_modules=None):
+def encode_for_lab(obs_nwes, goal_trend, cp_trends, heading, enabled_modules=None, visited_before=0):
     """Ghép s chỉ với các module state đang bật."""
     from RL_lib.state_codec import build_state
 
@@ -86,7 +86,7 @@ def encode_for_lab(obs_nwes, goal_trend, cp_trends, heading, enabled_modules=Non
         cps = [0, 0, 0]
     if "heading" not in enabled:
         hd = "N"
-    return build_state(obs, gt, cps, hd)
+    return build_state(obs, gt, cps, hd, visited_before=visited_before)
 
 
 def run_state_test(

@@ -160,13 +160,15 @@ class LabWorld5:
         gt = self.robot.get("dist_goal_trend", 0)
         cps = list(self.robot.get("dist_cp_trend", [0, 0, 0])[:3])
         hd = self.robot["direct"]
-        dec = encode_for_lab(obs, gt, cps, hd, enabled)
+        visited_before = rb.current_cell_visited_before(self.robot)
+        dec = encode_for_lab(obs, gt, cps, hd, enabled, visited_before=visited_before)
         return {
             "s": dec["s"],
             "obs": dec["obstacle_nwes"],
             "goal_trend": dec["dist_goal_trend"],
             "cp_trends": dec["dist_cp_trends"],
             "heading": dec["heading"],
+            "visited_before": dec.get("visited_before", 0),
             "pos": (self.robot["x"], self.robot["y"]),
         }
 

@@ -18,8 +18,8 @@ STATE_MODULES = (
         "id": "obstacle",
         "label": "Obstacle",
         "in_encode": True,
-        "encode_fields": ["obstacle_nwes"],
-        "desc": "4 bit tường quanh robot trong state — liên quan va tường / forward.",
+        "encode_fields": ["obstacle_nwes", "visited_before"],
+        "desc": "4 bit tường quanh robot + 1 bit ô hiện tại đã từng ghé trước đó.",
     },
     {
         "id": "goal",
@@ -191,7 +191,7 @@ REWARD_ELEMENTS = {
         "default_formula": "R_STRAIGHT_REACH if straight_streak_reach_on else 0",
     },
     "straight_streak_cap": {
-        "label": "Không giữ hướng",
+        "label": "Giữ hướng ngắn",
         "module": "heading",
         "constants": ["R_STRAIGHT_CAP", "MAX_STRAIGHT_CAP"],
         "default_formula": "R_STRAIGHT_CAP if straight_streak_cap_on else 0",
@@ -234,7 +234,7 @@ THRESHOLD_LABELS = {
     "MAX_PING_PONG_CYCLES": "Ngưỡng qua lại",
     "MAX_PING_PONG_SPAN": "Số ô lặp",
     "MAX_STRAIGHT_REACH": "Ngưỡng giữ hướng",
-    "MAX_STRAIGHT_CAP": "Ngưỡng không giữ hướng",
+    "MAX_STRAIGHT_CAP": "Ngưỡng giữ hướng ngắn",
 }
 
 FORMULA_HELP = "Ghép reward + phép + − × ÷ ^ ( ). Ví dụ: 2 ^ Mỗi bước đi + Va chạm tường × 2"

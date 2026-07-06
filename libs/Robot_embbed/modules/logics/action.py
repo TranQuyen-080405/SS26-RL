@@ -16,6 +16,7 @@ from modules.logics.robot_state import (
     update_direction, update_position,
     snapshot_dist_before_move, inject_distances_from_map,
     compute_trends_after_move, mark_moved,
+    mark_current_cell_visit,
     build_encoded_state, perceive_edge,
     update_rotate_streak, update_straight_streak, clear_move_trends,
 )
@@ -158,6 +159,7 @@ def _commit_forward(bot):
             if i < len(vis):
                 vis[i] = True
                 _log("SW: Checkpoint %d (%d,%d) visited" % (i, cx, cy))
+    mark_current_cell_visit(bot)
     mark_moved(bot)
 
 

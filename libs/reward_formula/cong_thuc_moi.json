@@ -1,0 +1,47 @@
+{
+  "version": 1,
+  "enabled_modules": [
+    "checkpoint",
+    "explore_penalty",
+    "goal",
+    "heading",
+    "obstacle",
+    "rotation",
+    "step"
+  ],
+  "total_formula": "Đến đích +  Lại gần goal +  Lặp ô gần +  Quay lại ô +  Tiến lên thành công +  Xoay tại chỗ liên tục +  Va chạm tường +  Đi qua đi lại liên tục +  Xoay sang hướng thông thoáng +  Mỗi bước đi",
+  "element_weights": {
+    "R_STEP": -2.0,
+    "collision": -100,
+    "forward_clear": 8.0,
+    "wall_detected": 0.0,
+    "wall_visible": 0.0,
+    "wall_on_entry": 0.0,
+    "goal_closer": 6.0,
+    "goal_farther": -6.0,
+    "goal_reached": 200.0,
+    "cp_closer": 6.0,
+    "cp_farther": -6.0,
+    "checkpoint": 80.0,
+    "rotate": -5.0,
+    "facing_clear": 4.0,
+    "wasted_rotate": -15.0,
+    "blocked_rotate": 0.0,
+    "excess_rotate": -40,
+    "visit_window": -10,
+    "visit_repeat": -25.0,
+    "ping_pong": -30.0,
+    "straight_streak_reach": 2.0,
+    "straight_streak_cap": 2.0
+  },
+  "thresholds": {
+    "MAX_ROTATE_STREAK": 4,
+    "MAX_REVISIT_STEPS": 5,
+    "MAX_CELL_REPEAT": 3,
+    "MAX_PING_PONG_CYCLES": 1,
+    "MAX_PING_PONG_SPAN": 5,
+    "MAX_STRAIGHT_REACH": 3,
+    "MAX_STRAIGHT_CAP": 3
+  },
+  "name": "cong_thuc_moi"
+}
