@@ -8,8 +8,8 @@ import os
 import re
 
 _SIM_MAP_DIR = os.path.dirname(os.path.abspath(__file__))
-_LIBS_ROOT = os.path.abspath(os.path.join(_SIM_MAP_DIR, "..", ".."))
-MAP_ROOT = os.path.join(_LIBS_ROOT, "map")
+_REPO_ROOT = os.path.abspath(os.path.join(_SIM_MAP_DIR, "..", "..", ".."))
+MAP_ROOT = os.path.join(_REPO_ROOT, "map")
 TRAIN_MAPS_DIR = os.path.join(MAP_ROOT, "train")
 INFER_MAPS_DIR = os.path.join(MAP_ROOT, "infer")
 # Tương thích import cũ
@@ -153,3 +153,22 @@ def list_map_files(kind=None):
     if kind == "infer":
         return _json_in_dir(INFER_MAPS_DIR)
     return _json_in_dir(TRAIN_MAPS_DIR) + _json_in_dir(INFER_MAPS_DIR)
+
+
+def maps_storage_snapshot():
+    """Fingerprint thư mục map/train + map/infer — dùng phát hiện thay đổi file."""
+    out = []
+    for kind in ("train", "infer"):
+        directory = maps_dir_for_kind(kind)
+        entries = []
+        if os.path.isdir(directory):
+            for name in sorted(os.listdir(directory)):
+                if not name.lower().endswith(".json"):
+                    continue
+                path = os.path.join(directory, name)
+                try:
+                    entries.append((name, os.path.getmtime(path), os.path.getsize(path)))
+                except OSError:
+                    entries.append((name, 0, 0))
+        out.append((kind, tuple(entries)))
+    return tuple(out)

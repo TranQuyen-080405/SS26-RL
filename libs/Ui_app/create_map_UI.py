@@ -1,5 +1,5 @@
 """
-UI tạo / chỉnh map — grid, bấm cạnh để chặn / mở, lưu JSON train hoặc infer.
+UI tạo / chỉnh map — grid, bấm cạnh để chặn / mở, lưu train hoặc infer.
 """
 
 import os
@@ -27,7 +27,7 @@ from map.map_io import (
 )
 from RL_lib.grid import DIRECTIONS, neighbor_xy, is_valid
 from Ui_app.map_layout import apply_fixed_canvas, avail_from_wrap, fit_grid_layout
-from Ui_app.ui_scale import configure_window, init as init_ui_scale, px
+from Ui_app.ui_scale import configure_window, init as init_ui_scale, px, font, text_lines
 
 
 class MapEditorApp:
@@ -50,8 +50,6 @@ class MapEditorApp:
         self.height = 5
         self.walls = set()
         self.map_name = tk.StringVar(value="custom_01")
-        self.kind = tk.StringVar(value="train")
-        self.kind.trace_add("write", self._on_kind_changed)
         self.start_x = tk.IntVar(value=0)
         self.start_y = tk.IntVar(value=0)
         self.goal_x = tk.IntVar(value=4)
@@ -66,25 +64,43 @@ class MapEditorApp:
         self._edge_hit = 10
         self._last_wrap_size = None
         self._resize_after_id = None
+        self._train_map_paths = []
+        self._infer_map_paths = []
+        self._suppress_list_events = False
+        self._active_list_kind = None
 
         self._build_toolbar()
-        self._build_canvas()
+        self._build_workspace()
         self._build_status()
         self.apply_size()
-        self._on_kind_changed()
+        self.refresh_map_lists()
         self.root.after_idle(self.redraw)
+
+    _MAX_TRAIN = 5
+    _MAX_INFER = 10
+
+    @staticmethod
+    def _max_size_for_kind(kind):
+        return MapEditorApp._MAX_TRAIN if kind == "train" else MapEditorApp._MAX_INFER
+
+    @staticmethod
+    def _kind_from_path(path):
+        norm = os.path.abspath(path).replace("\\", "/")
+        if "/map/infer/" in norm:
+            return "infer"
+        return "train"
 
     def _build_toolbar(self):
         bar = ttk.Frame(self.container, padding=8)
         bar.pack(fill=tk.X)
 
         ttk.Label(bar, text="Width").grid(row=0, column=0, padx=(0, 4))
-        self.spin_w = ttk.Spinbox(bar, from_=1, to=40, width=4, command=self._noop)
+        self.spin_w = ttk.Spinbox(bar, from_=1, to=self._MAX_INFER, width=4, command=self._noop)
         self.spin_w.set(str(self.width))
         self.spin_w.grid(row=0, column=1, padx=(0, 12))
 
         ttk.Label(bar, text="Height").grid(row=0, column=2, padx=(0, 4))
-        self.spin_h = ttk.Spinbox(bar, from_=1, to=40, width=4)
+        self.spin_h = ttk.Spinbox(bar, from_=1, to=self._MAX_INFER, width=4)
         self.spin_h.set(str(self.height))
         self.spin_h.grid(row=0, column=3, padx=(0, 12))
 
@@ -96,10 +112,6 @@ class MapEditorApp:
         ttk.Label(bar, text="Name").grid(row=0, column=6, padx=(0, 4))
         ttk.Entry(bar, textvariable=self.map_name, width=14).grid(row=0, column=7, padx=(0, 12))
 
-        ttk.Label(bar, text="Save as").grid(row=0, column=8, padx=(0, 4))
-        ttk.Radiobutton(bar, text="train", variable=self.kind, value="train").grid(row=0, column=9)
-        ttk.Radiobutton(bar, text="inference", variable=self.kind, value="infer").grid(row=0, column=10, padx=(0, 12))
-
         row2 = ttk.Frame(self.container, padding=(8, 0, 8, 8))
         row2.pack(fill=tk.X)
 
@@ -110,16 +122,24 @@ class MapEditorApp:
         self.btn_remove_cp = ttk.Button(row2, text="Xóa checkpoint", command=self.remove_selected_checkpoint)
         self.btn_remove_cp.pack(side=tk.LEFT, padx=(0, 12))
 
-        ttk.Button(row2, text="Xóa bản đồ…", command=self.delete_json).pack(side=tk.RIGHT, padx=4)
-        ttk.Button(row2, text="Load JSON…", command=self.load_json).pack(side=tk.RIGHT, padx=4)
-        ttk.Button(row2, text="Save JSON", command=self.save_json).pack(side=tk.RIGHT, padx=4)
+        ttk.Button(row2, text="Xóa bản đồ…", command=self.delete_map).pack(side=tk.RIGHT, padx=4)
+        ttk.Button(row2, text="Lưu infer", command=self.save_infer).pack(side=tk.RIGHT, padx=4)
+        ttk.Button(row2, text="Lưu train", command=self.save_train).pack(side=tk.RIGHT, padx=4)
+        ttk.Button(row2, text="Load infer map", command=self.load_infer_map).pack(side=tk.RIGHT, padx=4)
+        ttk.Button(row2, text="Load train map", command=self.load_train_map).pack(side=tk.RIGHT, padx=4)
         ttk.Button(row2, text="Clear walls", command=self.clear_walls).pack(side=tk.RIGHT, padx=4)
 
         self._update_pos_label()
 
-    def _build_canvas(self):
-        self._canvas_wrap = ttk.Frame(self.container, padding=px(8))
-        self._canvas_wrap.pack(fill=tk.BOTH, expand=True)
+    def _build_workspace(self):
+        self._workspace = ttk.Frame(self.container)
+        self._workspace.pack(fill=tk.BOTH, expand=True)
+        self._workspace.columnconfigure(0, weight=2)
+        self._workspace.columnconfigure(1, weight=1, minsize=px(320))
+        self._workspace.rowconfigure(0, weight=1)
+
+        self._canvas_wrap = ttk.Frame(self._workspace, padding=px(8))
+        self._canvas_wrap.grid(row=0, column=0, sticky="nsew")
 
         self.canvas = tk.Canvas(self._canvas_wrap, bg="#1e1e2e", highlightthickness=0)
         self.canvas.pack(fill=tk.BOTH, expand=True)
@@ -128,6 +148,147 @@ class MapEditorApp:
         self.root.bind("<Escape>", self._on_escape)
         self.root.bind("<Delete>", self._on_delete_key)
         self.root.bind("<BackSpace>", self._on_delete_key)
+
+        side = ttk.LabelFrame(self._workspace, text="List map", padding=px(6))
+        side.grid(row=0, column=1, sticky="nsew", padx=(0, px(8)), pady=px(8))
+        side.columnconfigure(0, weight=1)
+        side.rowconfigure(1, weight=1)
+        side.rowconfigure(3, weight=1)
+
+        ttk.Label(side, text="Train Map").grid(row=0, column=0, sticky=tk.W, pady=(0, 2))
+        train_wrap = ttk.Frame(side)
+        train_wrap.grid(row=1, column=0, sticky="nsew", pady=(0, px(8)))
+        train_wrap.columnconfigure(0, weight=1)
+        train_wrap.rowconfigure(0, weight=1)
+        scroll_t = ttk.Scrollbar(train_wrap, orient=tk.VERTICAL)
+        self.train_map_list = tk.Listbox(
+            train_wrap,
+            height=text_lines(14),
+            activestyle=tk.DOTBOX,
+            exportselection=False,
+            font=font(10),
+            width=28,
+            selectbackground="#a6e3a1",
+            selectforeground="#11111b",
+        )
+        scroll_t.config(command=self.train_map_list.yview)
+        self.train_map_list.config(yscrollcommand=scroll_t.set)
+        self.train_map_list.grid(row=0, column=0, sticky="nsew")
+        scroll_t.grid(row=0, column=1, sticky="ns")
+        self.train_map_list.bind("<<ListboxSelect>>", lambda _e: self._on_map_list_select("train"))
+
+        ttk.Label(side, text="Inference Map").grid(row=2, column=0, sticky=tk.W, pady=(0, 2))
+        infer_wrap = ttk.Frame(side)
+        infer_wrap.grid(row=3, column=0, sticky="nsew")
+        infer_wrap.columnconfigure(0, weight=1)
+        infer_wrap.rowconfigure(0, weight=1)
+        scroll_i = ttk.Scrollbar(infer_wrap, orient=tk.VERTICAL)
+        self.infer_map_list = tk.Listbox(
+            infer_wrap,
+            height=text_lines(14),
+            activestyle=tk.DOTBOX,
+            exportselection=False,
+            font=font(10),
+            width=28,
+            selectbackground="#89b4fa",
+            selectforeground="#11111b",
+        )
+        scroll_i.config(command=self.infer_map_list.yview)
+        self.infer_map_list.config(yscrollcommand=scroll_i.set)
+        self.infer_map_list.grid(row=0, column=0, sticky="nsew")
+        scroll_i.grid(row=0, column=1, sticky="ns")
+        self.infer_map_list.bind("<<ListboxSelect>>", lambda _e: self._on_map_list_select("infer"))
+
+    def refresh_map_lists(self, kind=None, select_path=None):
+        """Đọc lại map/train + map/infer; giữ selection nếu file còn tồn tại."""
+        prev_train = self._selected_map_path("train")
+        prev_infer = self._selected_map_path("infer")
+        if select_path:
+            if self._kind_from_path(select_path) == "infer":
+                prev_infer = select_path
+            else:
+                prev_train = select_path
+
+        self._suppress_list_events = True
+        try:
+            self._train_map_paths = list_map_files("train")
+            self.train_map_list.delete(0, tk.END)
+            for path in self._train_map_paths:
+                self.train_map_list.insert(tk.END, os.path.basename(path))
+
+            self._infer_map_paths = list_map_files("infer")
+            self.infer_map_list.delete(0, tk.END)
+            for path in self._infer_map_paths:
+                self.infer_map_list.insert(tk.END, os.path.basename(path))
+
+            self._select_in_list("train", prev_train)
+            self._select_in_list("infer", prev_infer)
+        finally:
+            self._suppress_list_events = False
+
+    def _selected_map_path(self, kind):
+        lb = self.train_map_list if kind == "train" else self.infer_map_list
+        paths = self._train_map_paths if kind == "train" else self._infer_map_paths
+        sel = lb.curselection()
+        if not sel or sel[0] >= len(paths):
+            return None
+        return paths[sel[0]]
+
+    def _select_in_list(self, kind, path):
+        if not path:
+            return
+        lb = self.train_map_list if kind == "train" else self.infer_map_list
+        paths = self._train_map_paths if kind == "train" else self._infer_map_paths
+        try:
+            idx = paths.index(os.path.abspath(path))
+        except ValueError:
+            base = os.path.basename(path)
+            idx = next((i for i, p in enumerate(paths) if os.path.basename(p) == base), None)
+            if idx is None:
+                return
+        lb.selection_clear(0, tk.END)
+        lb.selection_set(idx)
+        lb.see(idx)
+
+    def _on_map_list_select(self, kind):
+        if self._suppress_list_events:
+            return
+        paths = self._train_map_paths if kind == "train" else self._infer_map_paths
+        lb = self.train_map_list if kind == "train" else self.infer_map_list
+        sel = lb.curselection()
+        if not sel or sel[0] >= len(paths):
+            return
+        other = self.infer_map_list if kind == "train" else self.train_map_list
+        other.selection_clear(0, tk.END)
+        self._active_list_kind = kind
+        self._load_from_path(paths[sel[0]], kind, from_list=True)
+
+    def _notify_maps_changed(self, kind, path=None):
+        self.refresh_map_lists(kind=kind, select_path=path)
+        if self._on_saved:
+            try:
+                self._on_saved(kind, path)
+            except Exception:
+                pass
+
+    def _load_from_path(self, path, kind, from_list=False):
+        try:
+            spec = load_map_json(path)
+            w = int(spec.get("width", 0))
+            h = int(spec.get("height", 0))
+            max_val = self._max_size_for_kind(kind)
+            if w > max_val or h > max_val:
+                label = "train" if kind == "train" else "infer"
+                messagebox.showerror(
+                    "Load",
+                    "Map %s chỉ được tối đa %dx%d." % (label, max_val, max_val),
+                )
+                return
+            self.load_spec(spec)
+            if from_list:
+                self._select_in_list(kind, path)
+        except (OSError, ValueError, KeyError, json.JSONDecodeError) as e:
+            messagebox.showerror("Load", str(e))
 
     def _on_resize_event(self, event):
         size = (event.width, event.height)
@@ -196,10 +357,13 @@ class MapEditorApp:
         except ValueError:
             messagebox.showerror("Size", "Width / height phải là số nguyên.")
             return
-        k = self.kind.get()
-        max_val = 5 if k == "train" else 10
+        max_val = self._MAX_INFER
         if w < 1 or h < 1 or w > max_val or h > max_val:
-            messagebox.showerror("Size", f"Kích thước map tối đa ở chế độ {k} là {max_val}x{max_val} (phải lớn hơn 0).")
+            messagebox.showerror(
+                "Size",
+                "Kích thước map tối đa khi chỉnh là %dx%d (train lưu tối đa %dx%d)."
+                % (max_val, max_val, self._MAX_TRAIN, self._MAX_TRAIN),
+            )
             return
         self.width = w
         self.height = h
@@ -346,24 +510,42 @@ class MapEditorApp:
     def _load_checkpoints(self, cps):
         self.checkpoints = [list(c) for c in (cps or [])][:3]
 
-    def current_spec(self):
+    def current_spec(self, kind="train"):
         return spec_from_walls(
             self.width,
             self.height,
             self.walls,
             name=self.map_name.get().strip() or "custom",
-            kind=self.kind.get(),
+            kind=kind,
             start=[self.start_x.get(), self.start_y.get()],
             goal=[self.goal_x.get(), self.goal_y.get()],
             checkpoints=self._parse_checkpoints(),
         )
 
+    def _validate_size_for_kind(self, kind, width=None, height=None):
+        w = self.width if width is None else width
+        h = self.height if height is None else height
+        max_val = self._max_size_for_kind(kind)
+        if w < 1 or h < 1 or w > max_val or h > max_val:
+            label = "train" if kind == "train" else "infer"
+            messagebox.showerror(
+                "Size",
+                "Map %s chỉ được tối đa %dx%d (hiện tại %dx%d)."
+                % (label, max_val, max_val, w, h),
+            )
+            return False
+        return True
+
     def load_spec(self, spec):
+        raw_name = spec.get("name", "custom")
+        for pref in ("map_train_", "map_infer_"):
+            if raw_name.startswith(pref):
+                raw_name = raw_name[len(pref) :]
+        self.map_name.set(raw_name or "custom")
         self.width = int(spec["width"])
         self.height = int(spec["height"])
         self.spin_w.set(str(self.width))
         self.spin_h.set(str(self.height))
-        self.map_name.set(spec.get("name", "custom"))
         self.start_x.set(spec["start"][0])
         self.start_y.set(spec["start"][1])
         self.goal_x.set(spec["goal"][0])
@@ -375,106 +557,68 @@ class MapEditorApp:
         self.redraw()
         self.status.set("Loaded: %s" % spec.get("name", "?"))
 
-    def _on_kind_changed(self, *args):
-        name = self.map_name.get()
-        k = self.kind.get()
-        max_val = 5 if k == "train" else 10
-        
-        self.spin_w.config(state="normal", from_=1, to=max_val)
-        self.spin_h.config(state="normal", from_=1, to=max_val)
-        self.btn_apply_size.config(state="normal")
-
-        if k == "train":
-            if name.startswith("map_infer_"):
-                self.map_name.set(name.replace("map_infer_", "map_train_", 1))
-        else:
-            if name.startswith("map_train_"):
-                self.map_name.set(name.replace("map_train_", "map_infer_", 1))
-
-        # Clamp current spinbox values if they exceed the new max_val
+    def _save_map(self, kind):
+        if not self._validate_size_for_kind(kind):
+            return
+        spec = self.current_spec(kind=kind)
         try:
-            w = int(self.spin_w.get())
-            if w > max_val:
-                self.spin_w.set(str(max_val))
-        except ValueError:
-            self.spin_w.set(str(max_val))
-        try:
-            h = int(self.spin_h.get())
-            if h > max_val:
-                self.spin_h.set(str(max_val))
-        except ValueError:
-            self.spin_h.set(str(max_val))
-            
-        self.apply_size()
-
-    def save_json(self):
-        spec = self.current_spec()
-        try:
-            path = save_map_json(spec, kind=self.kind.get())
+            path = save_map_json(spec, kind=kind)
             path = os.path.abspath(path)
             self.map_name.set(spec["name"])
         except (OSError, ValueError, tk.TclError) as e:
             messagebox.showerror("Save", str(e))
             return
+        folder = "train" if kind == "train" else "infer"
         self.status.set("Saved: %s" % path)
-        folder = "train" if self.kind.get() == "train" else "infer"
-        if self._on_saved:
-            try:
-                self._on_saved(self.kind.get(), path)
-            except Exception:
-                pass
+        self._notify_maps_changed(kind, path)
         messagebox.showinfo("Saved", "Đã lưu vào map/%s/\n%s" % (folder, path))
 
-    def load_json(self):
-        kind = self.kind.get()
-        initial = TRAIN_MAPS_DIR if kind == "train" else INFER_MAPS_DIR
-        os.makedirs(initial, exist_ok=True)
-        path = filedialog.askopenfilename(
-            title="Load map JSON",
-            initialdir=initial,
-            filetypes=[("Map JSON", "map_*.json"), ("JSON", "*.json")],
-        )
-        if not path:
-            return
-        try:
-            spec = load_map_json(path)
-            w = int(spec.get("width", 0))
-            h = int(spec.get("height", 0))
-            max_val = 5 if kind == "train" else 10
-            if w > max_val or h > max_val:
-                messagebox.showerror("Load Error", f"Bản đồ chế độ {kind} chỉ được phép tối đa là {max_val}x{max_val}!")
-                return
-            self.load_spec(spec)
-        except (OSError, ValueError, KeyError, json.JSONDecodeError) as e:
-            messagebox.showerror("Load", str(e))
+    def save_train(self):
+        self._save_map("train")
 
-    def delete_json(self):
-        kind = self.kind.get()
+    def save_infer(self):
+        self._save_map("infer")
+
+    def _load_map(self, kind):
         initial = TRAIN_MAPS_DIR if kind == "train" else INFER_MAPS_DIR
         os.makedirs(initial, exist_ok=True)
+        label = "train" if kind == "train" else "infer"
         path = filedialog.askopenfilename(
-            title="Xóa map JSON",
+            title="Load %s map" % label,
             initialdir=initial,
-            filetypes=[("Map JSON", "map_*.json"), ("JSON", "*.json")],
+            filetypes=[("Map files", "map_*.json"), ("All", "*.json")],
         )
         if not path:
             return
+        self._load_from_path(path, kind, from_list=True)
+
+    def load_train_map(self):
+        self._load_map("train")
+
+    def load_infer_map(self):
+        self._load_map("infer")
+
+    def delete_map(self):
+        path = filedialog.askopenfilename(
+            title="Xóa map",
+            initialdir=TRAIN_MAPS_DIR,
+            filetypes=[("Map files", "map_*.json"), ("All", "*.json")],
+        )
+        if not path:
+            return
+        kind = self._kind_from_path(path)
         filename = os.path.basename(path)
         confirm = messagebox.askyesno(
             "Xác nhận xóa",
             f"Bạn có chắc chắn muốn xóa bản đồ '{filename}' không?",
-            icon="warning"
+            icon="warning",
         )
         if not confirm:
             return
         try:
             os.remove(path)
             messagebox.showinfo("Đã xóa", f"Đã xóa thành công bản đồ '{filename}'!")
-            if self._on_saved:
-                try:
-                    self._on_saved(kind, path)
-                except Exception:
-                    pass
+            self._notify_maps_changed(kind, path)
         except Exception as e:
             messagebox.showerror("Lỗi", f"Không thể xóa file: {str(e)}")
 

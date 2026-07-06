@@ -123,16 +123,42 @@ class SS26App:
         from Ui_app.rl_app_UI import RlApp
         from Ui_app.learn_lab_UI import LearnLabApp
 
-        self.rl_app = RlApp(parent=tab_rl, root=self.root)
-        self._map_editor = MapEditorApp(parent=tab_map, root=self.root, on_saved=self.rl_app.notify_map_saved)
+        self.rl_app = RlApp(parent=tab_rl, root=self.root, on_maps_changed=self._maps_changed)
+        self._map_editor = MapEditorApp(parent=tab_map, root=self.root, on_saved=self._maps_changed)
         self.learn_lab_app = LearnLabApp(parent=tab_lab, root=self.root)
         self.rl_app.set_learn_lab_app(self.learn_lab_app)
         self._monitor = RobotMonitorApp(parent=tab_robot, root=self.root)
+
+        from map.map_io import maps_storage_snapshot
+
+        self._map_snap = maps_storage_snapshot()
+        self._poll_maps()
 
         if 0 <= initial_tab < 4:
             tabs.select(initial_tab)
         else:
             tabs.select(0)
+
+    def _maps_changed(self, kind, path=None):
+        """Đồng bộ list map giữa Edit Map và Train/Infer."""
+        self.root.after(0, lambda: self._apply_maps_changed(kind, path))
+
+    def _apply_maps_changed(self, kind, path=None):
+        from map.map_io import maps_storage_snapshot
+
+        self.rl_app.handle_maps_changed(kind, path)
+        if self._map_editor is not None:
+            self._map_editor.refresh_map_lists(kind=kind, select_path=path)
+        self._map_snap = maps_storage_snapshot()
+
+    def _poll_maps(self):
+        from map.map_io import maps_storage_snapshot
+
+        snap = maps_storage_snapshot()
+        if snap != self._map_snap:
+            self._map_snap = snap
+            self._apply_maps_changed(None, None)
+        self.root.after(2000, self._poll_maps)
 
     def _on_close(self):
         if self._monitor is not None:

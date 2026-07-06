@@ -5,6 +5,6 @@ __pycache__/
 *.py[cod]
 *$py.class
 checkpoint/
-libs/map/train/
-libs/reward_formula/
+map/train/
+reward_formula/
 

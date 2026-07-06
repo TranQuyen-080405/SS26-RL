@@ -4,7 +4,7 @@ Submission CSV phải có 5184 dòng và các cột:
     id,q_forward,q_rotate_left,q_rotate_right
 
 Khi đóng gói metric trên Kaggle, đặt thư mục ``libs`` cạnh file này; các map
-ẩn được đọc từ ``libs/map/infer/*.json``.
+ẩn được đọc từ ``map/infer/*.json`` (cạnh main.py).
 """
 
 import math
@@ -47,11 +47,11 @@ KAGGLE_INFER_MAP_DIR = Path(
 
 
 def _list_infer_map_files():
-    """Dùng dataset Kaggle khi có; local thì dùng libs/map/infer."""
+    """Dùng dataset Kaggle khi có; local thì dùng map/infer cạnh main.py."""
     candidates = (
         KAGGLE_INFER_MAP_DIR,
         Path("/kaggle/input/maze-maps-csess26/map/infer"),
-        Path(_LIBS) / "map" / "infer",
+        Path(_ROOT) / "map" / "infer",
     )
     for directory in candidates:
         if directory.is_dir():
@@ -60,7 +60,7 @@ def _list_infer_map_files():
                 return paths
     raise RuntimeError(
         "Không tìm thấy map inference trong dataset maze-maps-csess26 "
-        "hoặc libs/map/infer."
+        "hoặc map/infer cạnh main.py."
     )
 
 

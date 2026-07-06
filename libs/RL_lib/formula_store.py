@@ -1,11 +1,11 @@
-"""Lưu / nạp công thức reward học sinh (.json trong libs/reward_formula/)."""
+"""Lưu / nạp công thức reward học sinh (.json trong reward_formula/ cạnh main.py)."""
 
 import json
 import os
 import re
 
-_LIBS_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-FORMULA_DIR = os.path.join(_LIBS_ROOT, "reward_formula")
+_REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+FORMULA_DIR = os.path.join(_REPO_ROOT, "reward_formula")
 _SCHEMA_VERSION = 1
 
 

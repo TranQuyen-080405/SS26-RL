@@ -47,7 +47,7 @@ class TextRedirector:
 
 
 class RlApp:
-    def __init__(self, parent=None, root=None):
+    def __init__(self, parent=None, root=None, on_maps_changed=None):
         if parent is None:
             self.root = tk.Tk()
             self.root.title("SS26 RL — Train / Inference")
@@ -84,6 +84,7 @@ class RlApp:
         self._eps_edit_iid = None
         self._start_queue_processing()
         self.learn_lab_app = None
+        self._on_maps_changed = on_maps_changed
 
         self._build_toolbar()
         self._build_checkpoint_bar()
@@ -378,7 +379,29 @@ class RlApp:
         self.workspace = ttk.Frame(self.container)
         self.workspace.pack(fill=tk.BOTH, expand=True, padx=px(8), pady=px(4))
 
-        self.log_frame = ttk.LabelFrame(self.workspace, text="Log", padding=px(8))
+        self._side_col_minsize = px(160)
+        self._log_col_minsize = px(220)
+        self._map_col_minsize = px(180)
+
+        try:
+            pane_bg = ttk.Style().lookup("TFrame", "background")
+        except tk.TclError:
+            pane_bg = "#f0f0f0"
+
+        self._paned = tk.PanedWindow(
+            self.workspace,
+            orient=tk.HORIZONTAL,
+            sashwidth=px(6),
+            sashrelief=tk.RAISED,
+            opaqueresize=False,
+            bg=pane_bg,
+            bd=0,
+            showhandle=False,
+        )
+        self._paned.pack(fill=tk.BOTH, expand=True)
+        self._paned.bind("<ButtonRelease-1>", self._on_paned_resize)
+
+        self.log_frame = ttk.LabelFrame(self._paned, text="Log", padding=px(8))
         self.log = scrolledtext.ScrolledText(
             self.log_frame,
             height=text_lines(16),
@@ -388,19 +411,52 @@ class RlApp:
         )
         self.log.pack(fill=tk.BOTH, expand=True)
 
-        self.map_frame = ttk.LabelFrame(self.workspace, text="Map", padding=px(8))
+        self.map_frame = ttk.LabelFrame(self._paned, text="Map", padding=px(8))
         self.map_view = SimMapCanvas(self.map_frame)
         self.map_view.pack(fill=tk.BOTH, expand=True)
 
-        self.maps_frame = ttk.LabelFrame(self.workspace, text="List map", padding=px(8))
+        self.maps_frame = ttk.LabelFrame(self._paned, text="List map", padding=px(8))
+        self.maps_frame.columnconfigure(0, weight=1)
+        self.maps_frame.rowconfigure(0, weight=1)
 
-        self._side_col_minsize = px(190)
-        self._log_col_minsize = px(500)
-        self._map_col_minsize = px(260)
-        self.workspace.columnconfigure(0, weight=5, minsize=self._log_col_minsize)
-        self.workspace.columnconfigure(1, weight=2, minsize=self._map_col_minsize)
-        self.workspace.columnconfigure(2, weight=1, minsize=self._side_col_minsize)
-        self.workspace.rowconfigure(0, weight=1)
+    def _on_paned_resize(self, _event=None):
+        if self.view.get() != "map":
+            return
+        try:
+            self.root.after_idle(self.map_view.redraw)
+        except Exception:
+            pass
+
+    def _apply_pane_minsizes(self):
+        try:
+            self._paned.paneconfigure(self.log_frame, minsize=self._log_col_minsize)
+            self._paned.paneconfigure(self.maps_frame, minsize=self._side_col_minsize)
+            if self.view.get() == "map":
+                self._paned.paneconfigure(self.map_frame, minsize=self._map_col_minsize)
+        except tk.TclError:
+            pass
+
+    def _rebuild_paned_panes(self):
+        """Sắp xếp lại pane Log | Map | List map — Map ẩn khi View = Log."""
+        for child in (self.log_frame, self.map_frame, self.maps_frame):
+            try:
+                self._paned.forget(child)
+            except tk.TclError:
+                pass
+
+        is_map = self.view.get() == "map"
+        stretch = "always"
+        self._paned.add(self.log_frame, minsize=self._log_col_minsize, stretch=stretch)
+        if is_map:
+            self._paned.add(self.map_frame, minsize=self._map_col_minsize, stretch=stretch)
+        self._paned.add(self.maps_frame, minsize=self._side_col_minsize, stretch=stretch)
+        self._apply_pane_minsizes()
+
+        if is_map:
+            self.delay_group.set_enabled(True)
+            self._preview_map_from_selection()
+        else:
+            self.delay_group.set_enabled(False)
 
     def _build_map_list(self):
         frame = self.maps_frame
@@ -490,6 +546,8 @@ class RlApp:
         box_button(btn_row_infer, text="Xóa map", command=self._delete_selected_infer_map, role="secondary").pack(
             side=tk.LEFT, pady=4
         )
+
+        self._rebuild_paned_panes()
 
     def _build_actions(self):
         bar = ttk.LabelFrame(self.container, text="Train / Inference", padding=px(8))
@@ -751,33 +809,45 @@ class RlApp:
             self._run_train_log(export_path)
 
     def notify_map_saved(self, kind, path):
-        """Gọi từ tab Tạo map sau khi Save JSON."""
-        self.root.after(0, lambda: self._handle_map_saved(kind, path))
+        """Gọi từ tab Tạo map sau khi lưu / xóa map."""
+        self.handle_maps_changed(kind, path)
 
-    def _handle_map_saved(self, kind, path):
+    def handle_maps_changed(self, kind=None, path=None):
+        """Cập nhật danh sách map train/infer khi có thay đổi trên đĩa."""
+        basename = os.path.basename(path) if path else None
+        self.refresh_maps()
         if self._is_busy():
+            if basename and (kind is None or kind == self.mode.get()):
+                self.status.set("Map cập nhật: %s" % basename)
             return
-        basename = os.path.basename(path)
-        if kind == "train" or (kind == "infer" and self.mode.get() == "infer"):
-            self.refresh_maps()
-            if kind == "train":
-                for i, row in enumerate(self._train_rows):
-                    if row["name"] == basename:
-                        row["enabled"] = True
-                        self._refresh_train_tree()
-                        self.train_tree.selection_set(str(i))
-                        self.train_tree.see(str(i))
-                        break
-            elif self._map_paths:
-                for i, p in enumerate(self._map_paths):
-                    if os.path.basename(p) == basename:
-                        self.map_list.selection_clear(0, tk.END)
-                        self.map_list.selection_set(i)
-                        self.map_list.see(i)
-                        break
-            if self.view.get() == "map":
-                self._preview_map_from_selection()
-            self.status.set("Đã refresh — map mới: %s" % basename)
+        if not basename or kind is None:
+            return
+        if kind == "train":
+            for i, row in enumerate(self._train_rows):
+                if row["name"] == basename:
+                    row["enabled"] = True
+                    self._refresh_train_tree()
+                    self.train_tree.selection_set(str(i))
+                    self.train_tree.see(str(i))
+                    break
+        elif kind == "infer" and self._map_paths:
+            for i, p in enumerate(self._map_paths):
+                if os.path.basename(p) == basename:
+                    self.map_list.selection_clear(0, tk.END)
+                    self.map_list.selection_set(i)
+                    self.map_list.see(i)
+                    break
+        if self.view.get() == "map" and (kind is None or kind == self.mode.get()):
+            self._preview_map_from_selection()
+        if basename and (kind is None or kind == self.mode.get()):
+            self.status.set("Đã refresh — map: %s" % basename)
+
+    def _emit_maps_changed(self, kind, path):
+        if self._on_maps_changed:
+            try:
+                self._on_maps_changed(kind, path)
+            except Exception:
+                pass
 
     def _step_delay_ms(self):
         try:
@@ -948,20 +1018,7 @@ class RlApp:
             self.map_view.set_status("Lỗi load map: %s" % exc)
 
     def _update_view_widgets(self):
-        is_map = self.view.get() == "map"
-        self.log_frame.grid_remove()
-        self.map_frame.grid_remove()
-        self.maps_frame.grid_remove()
-        if is_map:
-            self.log_frame.grid(row=0, column=0, sticky="nsew", padx=(0, px(4)))
-            self.map_frame.grid(row=0, column=1, sticky="nsew", padx=px(4))
-            self.maps_frame.grid(row=0, column=2, sticky="nsew", padx=(px(4), 0))
-            self.delay_group.set_enabled(True)
-            self._preview_map_from_selection()
-        else:
-            self.log_frame.grid(row=0, column=0, columnspan=2, sticky="nsew", padx=(0, px(6)))
-            self.maps_frame.grid(row=0, column=2, sticky="nsew")
-            self.delay_group.set_enabled(False)
+        self._rebuild_paned_panes()
 
     def _set_map_hint(self, text):
         text = (text or "").strip()
@@ -973,13 +1030,16 @@ class RlApp:
             self.map_hint.pack_forget()
 
     def refresh_maps(self):
-        kind = "train" if self.mode.get() == "train" else "infer"
-        self._map_paths = list_map_files(kind)
+        train_paths = list_map_files("train")
+        infer_paths = list_map_files("infer")
+
         if self.mode.get() == "train":
+            self._map_paths = train_paths
             self._sync_train_rows_from_paths()
             self._set_map_hint("")
             self.spin_ep.configure(state=tk.NORMAL if self.train_map_mode.get() == "random" else tk.DISABLED)
         else:
+            self._map_paths = infer_paths
             self.map_list.delete(0, tk.END)
             for path in self._map_paths:
                 self.map_list.insert(tk.END, os.path.basename(path))
@@ -987,6 +1047,11 @@ class RlApp:
             self.spin_ep.configure(state=tk.DISABLED)
             if self._map_paths:
                 self.map_list.selection_set(0)
+            # Giữ danh sách train đồng bộ khi đang xem tab infer
+            saved_paths = self._map_paths
+            self._map_paths = train_paths
+            self._sync_train_rows_from_paths()
+            self._map_paths = saved_paths
         if self.view.get() == "map":
             self.root.after_idle(self._preview_map_from_selection)
 
@@ -1057,7 +1122,7 @@ class RlApp:
             if os.path.exists(path):
                 os.remove(path)
                 messagebox.showinfo("Đã xóa", f"Đã xóa thành công bản đồ '{filename}'!")
-                self.refresh_maps()
+                self._emit_maps_changed("train", path)
             else:
                 messagebox.showerror("Lỗi", f"Không tìm thấy file bản đồ '{filename}' để xóa.")
         except Exception as e:
@@ -1087,7 +1152,7 @@ class RlApp:
             if os.path.exists(path):
                 os.remove(path)
                 messagebox.showinfo("Đã xóa", f"Đã xóa thành công bản đồ '{filename}'!")
-                self.refresh_maps()
+                self._emit_maps_changed("infer", path)
             else:
                 messagebox.showerror("Lỗi", f"Không tìm thấy file bản đồ '{filename}' để xóa.")
         except Exception as e:
@@ -1608,12 +1673,11 @@ class RlApp:
             pass
         try:
             self.workspace.pack_configure(padx=px(8), pady=px(4))
-            side = getattr(self, "_side_col_minsize", px(190))
-            log_w = getattr(self, "_log_col_minsize", px(500))
-            center = getattr(self, "_map_col_minsize", px(260))
-            self.workspace.columnconfigure(0, minsize=log_w)
-            self.workspace.columnconfigure(1, minsize=center)
-            self.workspace.columnconfigure(2, minsize=side)
+            self._side_col_minsize = px(160)
+            self._log_col_minsize = px(220)
+            self._map_col_minsize = px(180)
+            self._paned.configure(sashwidth=px(6))
+            self._apply_pane_minsizes()
         except tk.TclError:
             pass
         try:
