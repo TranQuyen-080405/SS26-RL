@@ -39,6 +39,7 @@ def execute_action_sim(robot, sim_map, action_name):
                         checkpoint_first_visited = i
         rb.mark_moved(robot)
         rb.perceive_facing_from_sim(robot, sim_map)
+        rb.note_walls_on_cell_entry(robot)
         return _finish_action(robot, {
             "success": True,
             "moved": True,

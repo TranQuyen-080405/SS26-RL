@@ -119,7 +119,7 @@ def _reset_at_start(robot, sim_map):
     rb.reset_explore_tracking(robot)
     rb.clear_obstacle_memory(robot)
     rb.inject_distances_from_map(robot)
-    rb.perceive_facing_from_sim(robot, sim_map)
+    rb.perceive_facing_from_sim(robot, sim_map, for_reward=False)
 
 
 def _episode_at_goal(robot, sim_map):

@@ -130,6 +130,7 @@ def migrate_formula_snapshot(data):
     # Handle wall_detected and wall_visible
     weights.setdefault("wall_detected", 0.0)
     weights.setdefault("wall_visible", 0.0)
+    weights.setdefault("wall_on_entry", 0.0)
 
     # Handle rotate split
     weights.setdefault("wasted_rotate", 0.0)

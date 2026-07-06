@@ -31,7 +31,6 @@ def _robot_map_from_sim(sim_map):
         checkpoints=list(sim_map.get("checkpoints") or []),
         start=sim_map.get("start"),
     )
-    rm.apply_boundary_walls(rmap)
     rm.populate_all_distances(rmap)
     return rmap
 
@@ -65,7 +64,7 @@ class LabWorld5:
         rb.reset_explore_tracking(self.robot)
         rb.clear_obstacle_memory(self.robot)
         rb.inject_distances_from_map(self.robot)
-        rb.perceive_facing_from_sim(self.robot, self.sim_map)
+        rb.perceive_facing_from_sim(self.robot, self.sim_map, for_reward=False)
         self.last_total = 0.0
         self.last_parts = {}
         self.last_action = None
@@ -75,7 +74,7 @@ class LabWorld5:
         self.rmap = _robot_map_from_sim(self.sim_map)
         self.robot["robot_map"] = self.rmap
         rb.inject_distances_from_map(self.robot)
-        rb.perceive_facing_from_sim(self.robot, self.sim_map)
+        rb.perceive_facing_from_sim(self.robot, self.sim_map, for_reward=False)
 
     def set_tool(self, tool):
         self.paint_tool = tool
@@ -85,7 +84,7 @@ class LabWorld5:
         if 0 <= x < w and 0 <= y < h:
             rb.update_position(self.robot, x, y)
             rb.inject_distances_from_map(self.robot)
-            rb.perceive_facing_from_sim(self.robot, self.sim_map)
+            rb.perceive_facing_from_sim(self.robot, self.sim_map, for_reward=False)
 
     def place_goal(self, x, y):
         self.sim_map["goal"] = (x, y)
@@ -110,7 +109,7 @@ class LabWorld5:
     def toggle_wall(self, x, y, direction):
         blocked = get_block(self.sim_map, x, y, direction)
         set_wall(self.sim_map, x, y, direction, not blocked)
-        rb.perceive_facing_from_sim(self.robot, self.sim_map)
+        rb.perceive_facing_from_sim(self.robot, self.sim_map, for_reward=False)
 
     def reset_scenario(self):
         self.sim_map = init_sim_map(

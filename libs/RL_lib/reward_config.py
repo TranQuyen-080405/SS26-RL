@@ -28,6 +28,7 @@ R_STRAIGHT_REACH = 2.0
 R_STRAIGHT_CAP = 2.0
 R_WALL_DETECT = 0.0
 R_WALL_VISIBLE = 0.0
+R_WALL_ON_ENTRY = 0.0
 R_VISIT_WINDOW = 0.0
 R_VISIT_REPEAT = -25.0
 R_PING_PONG = -30.0
@@ -68,6 +69,7 @@ REWARD_KEYS = (
     "R_STRAIGHT_CAP",
     "R_WALL_DETECT",
     "R_WALL_VISIBLE",
+    "R_WALL_ON_ENTRY",
     "R_VISIT_WINDOW",
     "R_VISIT_REPEAT",
     "R_PING_PONG",
@@ -213,6 +215,11 @@ def _build_reward_context(robot, sim_map, result, could_forward_before=False):
 
     at_goal = bool(sim_map and sm.is_at_goal(sim_map, robot["x"], robot["y"]))
 
+    wall_first = bool(robot.get("_reward_wall_first"))
+    wall_facing = bool(robot.get("_reward_wall_facing"))
+    wall_on_rotate = bool(rotated and wall_facing)
+    wall_on_cell_entry = bool(moved and robot.get("_reward_wall_on_cell_entry"))
+
     ctx = dict(get_reward_dict())
     ctx.update(
         {
@@ -237,8 +244,11 @@ def _build_reward_context(robot, sim_map, result, could_forward_before=False):
             "straight_streak_on": straight_streak >= MAX_STRAIGHT_REACH,
             "straight_streak_reach_on": moved and straight_streak >= MAX_STRAIGHT_REACH,
             "straight_streak_cap_on": moved and straight_streak <= MAX_STRAIGHT_CAP,
-            "wall_detected": bool(sim_map and sm.get_block(sim_map, robot["x"], robot["y"], robot["direct"])),
-            "wall_visible": bool(sim_map and any(sm.get_block(sim_map, robot["x"], robot["y"], d) for d in ["N", "W", "E", "S"])),
+            "wall_detected": wall_first,
+            "wall_visible": wall_on_rotate,
+            "wall_first_discover": wall_first,
+            "wall_on_rotate": wall_on_rotate,
+            "wall_on_cell_entry": wall_on_cell_entry,
         }
     )
     return ctx
@@ -250,6 +260,7 @@ _FAST_EVAL = {
     "R_FORWARD_CLEAR if moved and not collision else 0": lambda c: c["R_FORWARD_CLEAR"] if (c["moved"] and not c["collision"]) else 0.0,
     "R_WALL_DETECT if wall_detected else 0": lambda c: c["R_WALL_DETECT"] if c["wall_detected"] else 0.0,
     "R_WALL_VISIBLE if wall_visible else 0": lambda c: c["R_WALL_VISIBLE"] if c["wall_visible"] else 0.0,
+    "R_WALL_ON_ENTRY if wall_on_cell_entry else 0": lambda c: c["R_WALL_ON_ENTRY"] if c["wall_on_cell_entry"] else 0.0,
     "R_GOAL_CLOSER if goal_closer else 0": lambda c: c["R_GOAL_CLOSER"] if c["goal_closer"] else 0.0,
     "R_GOAL_FARTHER if goal_farther else 0": lambda c: c["R_GOAL_FARTHER"] if c["goal_farther"] else 0.0,
     "R_GOAL_REACHED if at_goal else 0": lambda c: c["R_GOAL_REACHED"] if c["at_goal"] else 0.0,

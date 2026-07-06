@@ -195,11 +195,41 @@ def clear_obstacle_memory(robot):
         node["W_obstacle"] = 0
         node["E_obstacle"] = 0
         node["S_obstacle"] = 0
+    robot["_wall_discovered_edges"] = set()
+    robot["_reward_wall_first"] = False
+    robot["_reward_wall_facing"] = False
+    robot["_reward_wall_on_cell_entry"] = False
 
 
-def perceive_facing_from_sim(robot, sim_map):
-    """Cập nhật obstacle hướng đang nhìn — muốn quét S phải rotate tới S trước."""
+def note_walls_on_cell_entry(robot):
+    """
+    Vừa tiến vào ô: cộng điểm nếu bộ nhớ tường tại ô có ≥1 hướng = 1.
+    Chỉ đọc memory (state), không đọc sim; mỗi lần vào ô đều tính lại.
+    """
+    node = get_node(robot["robot_map"], robot["x"], robot["y"])
+    if node is None:
+        robot["_reward_wall_on_cell_entry"] = False
+        return
+    robot["_reward_wall_on_cell_entry"] = any(get_obstacle_nwes(node))
+
+
+def perceive_facing_from_sim(robot, sim_map, *, for_reward=True):
+    """Cập nhật obstacle hướng đang nhìn; gắn cờ reward khi for_reward (hành động thật)."""
     from map import sim_map as sm
 
-    is_wall = sm.get_block(sim_map, robot["x"], robot["y"], robot["direct"])
+    x, y, d = robot["x"], robot["y"], robot["direct"]
+    is_wall = sm.get_block(sim_map, x, y, d)
     perceive_edge(robot, is_wall)
+
+    if not for_reward:
+        robot["_reward_wall_first"] = False
+        robot["_reward_wall_facing"] = False
+        return
+
+    edge = (x, y, d)
+    discovered = robot.setdefault("_wall_discovered_edges", set())
+    first = bool(is_wall and edge not in discovered)
+    if first:
+        discovered.add(edge)
+    robot["_reward_wall_first"] = first
+    robot["_reward_wall_facing"] = bool(is_wall)

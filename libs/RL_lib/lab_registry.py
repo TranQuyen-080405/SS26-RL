@@ -83,16 +83,22 @@ REWARD_ELEMENTS = {
         "default_formula": "R_FORWARD_CLEAR if moved and not collision else 0",
     },
     "wall_detected": {
-        "label": "Phát hiện tường",
+        "label": "Phát hiện tường lần đầu",
         "module": "obstacle",
         "constants": ["R_WALL_DETECT"],
         "default_formula": "R_WALL_DETECT if wall_detected else 0",
     },
     "wall_visible": {
-        "label": "Nhìn thấy tường",
+        "label": "Xoay thấy tường trước mặt",
         "module": "obstacle",
         "constants": ["R_WALL_VISIBLE"],
         "default_formula": "R_WALL_VISIBLE if wall_visible else 0",
+    },
+    "wall_on_entry": {
+        "label": "Vào ô có cạnh tường",
+        "module": "obstacle",
+        "constants": ["R_WALL_ON_ENTRY"],
+        "default_formula": "R_WALL_ON_ENTRY if wall_on_cell_entry else 0",
     },
     "goal_closer": {
         "label": "Lại gần goal",
@@ -201,6 +207,7 @@ ELEMENT_WEIGHT_KEY = {
     "forward_clear": "R_FORWARD_CLEAR",
     "wall_detected": "R_WALL_DETECT",
     "wall_visible": "R_WALL_VISIBLE",
+    "wall_on_entry": "R_WALL_ON_ENTRY",
     "goal_closer": "R_GOAL_CLOSER",
     "goal_farther": "R_GOAL_FARTHER",
     "goal_reached": "R_GOAL_REACHED",

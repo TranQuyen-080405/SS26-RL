@@ -29,6 +29,7 @@ def export_reward_config_py(values):
         "R_STRAIGHT_CAP",
         "R_WALL_DETECT",
         "R_WALL_VISIBLE",
+        "R_WALL_ON_ENTRY",
         "R_VISIT_WINDOW",
         "R_VISIT_REPEAT",
         "R_PING_PONG",

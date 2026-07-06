@@ -128,7 +128,7 @@ def _reset_episode_at_start(robot, sim_map):
     rb.reset_explore_tracking(robot)
     rb.clear_obstacle_memory(robot)
     rb.inject_distances_from_map(robot)
-    rb.perceive_facing_from_sim(robot, sim_map)
+    rb.perceive_facing_from_sim(robot, sim_map, for_reward=False)
 
 
 def run_episode(
