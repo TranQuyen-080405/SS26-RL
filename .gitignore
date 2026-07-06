@@ -5,3 +5,4 @@ __pycache__/
 *$py.class
 libs/map/
 libs/reward_formula/
+checkpoints/
