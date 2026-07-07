@@ -9,33 +9,33 @@ from RL_lib.reward_formula import safe_eval_formula
 from RL_lib.student_formula import default_total_formula, tokens_to_expr, eval_student_formula
 
 # --- Hằng reward (đặt 0 nếu module tắt / không dùng) ---
-R_STEP = -2.0
-R_COLLISION = -100
-R_EXCESS_ROTATE = -40
-R_GOAL_CLOSER = 6.0
-R_GOAL_FARTHER = -6.0
-R_CP_CLOSER = 6.0
-R_CP_FARTHER = -6.0
-R_CHECKPOINT_FIRST = 80.0
-R_GOAL_REACHED = 200.0
-R_ROTATE_IN_PLACE = -60
-R_FACING_CLEAR = 4.0
-R_FORWARD_CLEAR = 8.0
-R_WASTED_ROTATE = -15.0
-R_BLOCKED_ROTATE = 0.0
+R_STEP = -1.5
+R_COLLISION = -180
+R_EXCESS_ROTATE = -30
+R_GOAL_CLOSER = 8.0
+R_GOAL_FARTHER = -8.0
+R_CP_CLOSER = 10.0
+R_CP_FARTHER = -4.0
+R_CHECKPOINT_FIRST = 120.0
+R_GOAL_REACHED = 260.0
+R_ROTATE_IN_PLACE = -6
+R_FACING_CLEAR = 6.0
+R_FORWARD_CLEAR = 2.0
+R_WASTED_ROTATE = -5.0
+R_BLOCKED_ROTATE = 8.0
 R_STRAIGHT = 0.0
-R_STRAIGHT_REACH = 2.0
-R_STRAIGHT_CAP = 2.0
-R_WALL_DETECT = 0.0
-R_WALL_VISIBLE = 0.0
-R_WALL_ON_ENTRY = 0.0
-R_VISIT_WINDOW = -10
-R_VISIT_REPEAT = -25.0
-R_PING_PONG = -30.0
+R_STRAIGHT_REACH = 1.0
+R_STRAIGHT_CAP = 1.0
+R_WALL_DETECT = 8.0
+R_WALL_VISIBLE = 2.0
+R_WALL_ON_ENTRY = 3.0
+R_VISIT_WINDOW = -12
+R_VISIT_REPEAT = -30.0
+R_PING_PONG = -35.0
 
 MAX_ROTATE_STREAK = 4
-MAX_REVISIT_STEPS = 5
-MAX_CELL_REPEAT = 3
+MAX_REVISIT_STEPS = 4
+MAX_CELL_REPEAT = 2
 MAX_PING_PONG_CYCLES = 1
 MAX_PING_PONG_SPAN = 5
 MAX_STRAIGHT_REACH = 3
@@ -47,7 +47,7 @@ MAX_STEPS_PER_EPISODE = 600
 FORMULA_NAME = 'Reward_1'
 ENABLED_MODULES = set(['checkpoint', 'explore_penalty', 'goal', 'heading', 'obstacle', 'rotation', 'step'])
 ELEMENT_FORMULAS = dict(DEFAULT_ELEMENT_FORMULAS)
-TOTAL_FORMULA_STUDENT = 'Xoay sang hướng thông thoáng +  Xoay tại chỗ +  (  Lặp ô gần +  Quay lại ô +  Đi qua đi lại liên tục )  +  Mỗi bước đi +  Lại gần goal +  Giữ hướng +  Va chạm tường'
+TOTAL_FORMULA_STUDENT = 'Xoay sang hướng thông thoáng +  Xoay tại chỗ +  (  Lặp ô gần +  Quay lại ô +  Đi qua đi lại liên tục )  +  Mỗi bước đi +  Lại gần goal +  Lại gần checkpoint +  Chạm checkpoint +  Giữ hướng +  Va chạm tường'
 
 REWARD_KEYS = (
     "R_STEP",

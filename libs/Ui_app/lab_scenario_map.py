@@ -235,7 +235,7 @@ class LabScenarioMap5:
                 text=text,
                 bg=_STATE_BG,
                 fg=_STATE_FG,
-                font=font(10, family="Consolas"),
+                font=font(11, family="Consolas"),
                 anchor=tk.W,
             ).pack(fill=tk.X, pady=1)
 

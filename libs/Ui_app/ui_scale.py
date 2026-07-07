@@ -142,7 +142,7 @@ def _apply_ttk_defaults(root: tk.Misc) -> None:
         pass
     pad = btn_padding()
     f = font(10)
-    f_btn = font(8)
+    f_btn = font(10)
     fb = font(10, weight="bold")
     for name in (
         ".",

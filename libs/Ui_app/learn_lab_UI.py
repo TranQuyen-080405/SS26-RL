@@ -190,9 +190,7 @@ class LearnLabApp:
         right = ttk.Frame(cols)
         right.grid(row=0, column=1, sticky="nsew", padx=(px(4), 0))
 
-        self.apply_status = tk.StringVar(
-            value="Bấm 'Lưu công thức' để lưu file JSON và áp dụng cho Train"
-        )
+        self.apply_status = tk.StringVar(value="")
         self.export_text = None
 
         self.scenario_map = LabScenarioMap5(left, self.world, on_change=self._on_scenario_event)
@@ -514,7 +512,6 @@ class LearnLabApp:
         n, w, e, s = snap["obs"]
         state_rows = [
             "Vị trí (%d,%d)  hướng %s" % (snap["pos"][0], snap["pos"][1], snap["heading"]),
-            "s = %d" % snap["s"],
         ]
         if "obstacle" in enabled:
             state_rows.append(
@@ -528,6 +525,7 @@ class LearnLabApp:
             state_rows.append("Trend goal: %+d" % snap["goal_trend"])
         if "checkpoint" in enabled:
             state_rows.append("Trend CP: %s" % snap["cp_trends"])
+        state_rows.append("State: %d" % snap["s"])
 
         has_action = bool(self.world.last_action)
         parts = []

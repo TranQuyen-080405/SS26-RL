@@ -31,7 +31,7 @@ def box_button(parent, text, command=None, role="secondary", **kwargs):
         padx=px(5),
         pady=px(2),
         cursor="hand2",
-        font=font(8, weight="bold" if role in ("primary", "danger") else "normal"),
+        font=font(10, weight="bold" if role in ("primary", "danger") else "normal"),
     )
     opts.update(kwargs)
     return tk.Button(parent, **opts)
@@ -55,7 +55,7 @@ class SegmentGroup:
                 padx=px(5),
                 pady=px(2),
                 cursor="hand2",
-                font=font(8),
+                font=font(10),
                 command=lambda v=value: self._select(v),
             )
             btn.pack(side=tk.LEFT, padx=_padx)
@@ -82,14 +82,14 @@ class SegmentGroup:
                     relief=tk.SUNKEN,
                     bg="#89b4fa",
                     fg="#11111b",
-                    font=font(8, weight="bold"),
+                    font=font(10, weight="bold"),
                 )
             else:
                 btn.configure(
                     relief=tk.RAISED,
                     bg="#45475a",
                     fg="#cdd6f4",
-                    font=font(8),
+                    font=font(10),
                 )
 
     def set_enabled(self, enabled):

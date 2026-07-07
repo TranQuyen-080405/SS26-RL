@@ -70,6 +70,7 @@ class MapEditorApp:
         self._train_list_selected = None
         self._infer_list_selected = None
         self._map_list_select_bg = {}
+        self._map_list_wheel_cb = {}
         self._suppress_list_events = False
         self._active_list_kind = None
 
@@ -189,11 +190,15 @@ class MapEditorApp:
                 canvas.yview_scroll(1, "units")
             return "break"
 
+        def _bind_wheel(widget):
+            for seq in ("<MouseWheel>", "<Button-4>", "<Button-5>"):
+                widget.bind(seq, _on_wheel, add="+")
+
         inner.bind("<Configure>", _on_inner_configure)
         canvas.bind("<Configure>", _on_canvas_configure)
-        for seq in ("<MouseWheel>", "<Button-4>", "<Button-5>"):
-            canvas.bind(seq, _on_wheel)
-            inner.bind(seq, _on_wheel)
+        _bind_wheel(canvas)
+        _bind_wheel(inner)
+        _bind_wheel(wrap)
         canvas.configure(yscrollcommand=scroll.set)
         scroll.config(command=canvas.yview)
         canvas.grid(row=0, column=0, sticky="nsew")
@@ -209,6 +214,7 @@ class MapEditorApp:
             self._infer_list_inner = inner
             self._infer_list_rows = {}
             select_bg = "#89b4fa"
+        self._map_list_wheel_cb[kind] = _on_wheel
         self._map_list_select_bg[kind] = select_bg
         return wrap
 
@@ -315,6 +321,11 @@ class MapEditorApp:
 
         name_lbl.bind("<Button-1>", _activate)
         row.bind("<Button-1>", lambda e: _activate() if e.widget is row else None)
+        wheel_cb = self._map_list_wheel_cb.get(kind)
+        if wheel_cb:
+            for widget in (row, name_lbl, del_btn):
+                for seq in ("<MouseWheel>", "<Button-4>", "<Button-5>"):
+                    widget.bind(seq, wheel_cb, add="+")
         del_btn.configure(command=_delete)
         rows[path] = row
 
@@ -375,15 +386,6 @@ class MapEditorApp:
             abs_path = match
         self._set_map_list_selected(kind, abs_path)
         self._highlight_map_list_rows(kind)
-        row = self._map_list_rows(kind).get(abs_path)
-        if row is not None:
-            try:
-                self._map_list_inner(kind).update_idletasks()
-                canvas = self._train_list_canvas if kind == "train" else self._infer_list_canvas
-                y = row.winfo_y()
-                canvas.yview_moveto(max(0, min(1, y / max(1, self._map_list_inner(kind).winfo_height()))))
-            except tk.TclError:
-                pass
 
     def _notify_maps_changed(self, kind, path=None):
         self.refresh_map_lists(kind=kind, select_path=path)
