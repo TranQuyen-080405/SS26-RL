@@ -146,7 +146,7 @@ class FormulaBuilder(ttk.Frame):
         op_lbl = ttk.Label(op, text="Phép toán:", font=font(8))
         op_lbl.pack(side=tk.LEFT, padx=(0, px(4)))
         self._title_labels.append((op_lbl, 8, "normal", False))
-        for sym, disp in (("+", "+"), ("-", "−"), ("*", "×"), ("/", "÷"), ("^", "^")):
+        for sym, disp in (("+", "+"), ("-", "−"), ("*", "×"), ("^", "^")):
             style = _OP_CHIP.get(sym, _DEFAULT_OP)
             btn = tk.Button(
                 op,

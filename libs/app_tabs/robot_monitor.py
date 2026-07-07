@@ -797,10 +797,7 @@ class RobotMonitorApp:
         self.infer_var = tk.StringVar(value="Inference: chưa chạy")
         ttk.Label(bar, textvariable=self.infer_var, width=entry_width(28)).pack(side=tk.LEFT, padx=(px(8), 0))
 
-        self.status_var = tk.StringVar(
-            value="Nhập tên BLE → Kết nối → Start inference."
-        )
-        ttk.Label(bar, textvariable=self.status_var).pack(side=tk.LEFT, padx=12)
+        self.status_var = tk.StringVar(value="")
 
         paned = ttk.Panedwindow(self.container, orient=tk.HORIZONTAL)
         paned.pack(fill=tk.BOTH, expand=True, padx=8, pady=(0, 8))

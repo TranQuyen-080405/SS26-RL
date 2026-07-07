@@ -7,7 +7,7 @@ BLE UART — Robot (MicroPython bluetooth.BLE)
 import bluetooth
 from micropython import const
 
-BLE_NAME = "Robot"
+BLE_NAME = "Robot_1"
 _SVC = bluetooth.UUID("6E400001-B5A3-F393-E0A9-E50E24DCCA9E")
 _CHAR_RX = bluetooth.UUID("6E400002-B5A3-F393-E0A9-E50E24DCCA9E")
 _CHAR_TX = bluetooth.UUID("6E400003-B5A3-F393-E0A9-E50E24DCCA9E")

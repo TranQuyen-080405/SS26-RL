@@ -168,31 +168,31 @@ class LabScenarioMap5:
         outer.pack(fill=tk.X, pady=(4, 0))
 
         self._state_box = tk.LabelFrame(
-            outer, text=" STATE ", font=font(9, weight="bold"), bg=_STATE_BG, fg=_STATE_FG, padx=scale_px(8), pady=scale_px(6)
+            outer, text=" STATE ", font=font(10, weight="bold"), bg=_STATE_BG, fg=_STATE_FG, padx=scale_px(8), pady=scale_px(6)
         )
         self._state_box.pack(fill=tk.X, pady=(0, 4))
         self._state_inner = tk.Frame(self._state_box, bg=_STATE_BG)
         self._state_inner.pack(fill=tk.X)
 
         self._reward_box = tk.LabelFrame(
-            outer, text=" REWARD ", font=font(9, weight="bold"), bg=_REWARD_BG, fg=_REWARD_FG, padx=scale_px(8), pady=scale_px(6)
+            outer, text=" REWARD ", font=font(10, weight="bold"), bg=_REWARD_BG, fg=_REWARD_FG, padx=scale_px(8), pady=scale_px(6)
         )
         self._reward_box.pack(fill=tk.X)
         self._reward_inner = tk.Frame(self._reward_box, bg=_REWARD_BG)
         self._reward_inner.pack(fill=tk.X)
 
         self._action_lbl = tk.Label(
-            self._reward_inner, text="", bg=_REWARD_BG, fg="#89b4fa", font=font(9, weight="bold"), anchor=tk.W
+            self._reward_inner, text="", bg=_REWARD_BG, fg="#89b4fa", font=font(10, weight="bold"), anchor=tk.W
         )
         self._action_lbl.pack(fill=tk.X, pady=(0, 4))
 
         self._total_frame = tk.Frame(self._reward_inner, bg=_REWARD_BG)
         self._total_frame.pack(fill=tk.X, pady=(0, 6))
         tk.Label(
-            self._total_frame, text="TỔNG", bg=_REWARD_BG, fg=_REWARD_FG, font=font(10, weight="bold")
+            self._total_frame, text="TỔNG", bg=_REWARD_BG, fg=_REWARD_FG, font=font(11, weight="bold")
         ).pack(side=tk.LEFT, padx=(0, scale_px(8)))
         self._total_val = tk.Label(
-            self._total_frame, text="", font=font(14, weight="bold"), padx=scale_px(10), pady=scale_px(4)
+            self._total_frame, text="", font=font(15, weight="bold"), padx=scale_px(10), pady=scale_px(4)
         )
         self._total_val.pack(side=tk.LEFT)
 
@@ -237,7 +237,7 @@ class LabScenarioMap5:
                 text=text,
                 bg=_STATE_BG,
                 fg=_STATE_FG,
-                font=font(9, family="Consolas"),
+                font=font(10, family="Consolas"),
                 anchor=tk.W,
             ).pack(fill=tk.X, pady=1)
 
@@ -269,7 +269,7 @@ class LabScenarioMap5:
                     text="Kéo reward vào « Công thức tổng » để bắt đầu tính điểm",
                     bg=_REWARD_BG,
                     fg=_HINT_FG,
-                    font=font(8, weight="italic"),
+                    font=font(9, weight="italic"),
                     anchor=tk.W,
                     wraplength=scale_px(360),
                     justify=tk.LEFT,
@@ -280,7 +280,7 @@ class LabScenarioMap5:
                     text="Chi tiết thành phần:",
                     bg=_REWARD_BG,
                     fg="#a6adc8",
-                    font=font(8, weight="bold"),
+                    font=font(9, weight="bold"),
                     anchor=tk.W,
                 ).pack(fill=tk.X, pady=(0, 4))
             for i, (label, chip_bg, chip_fg, val) in enumerate(parts):
@@ -292,7 +292,7 @@ class LabScenarioMap5:
                     text=" %s " % label,
                     bg=chip_bg,
                     fg=chip_fg,
-                    font=font(8, weight="bold"),
+                    font=font(9, weight="bold"),
                     padx=4,
                     pady=2,
                 ).pack(side=tk.LEFT, padx=(0, 4))
@@ -307,7 +307,7 @@ class LabScenarioMap5:
                     text="%s%.1f" % (vsign, val),
                     bg=row_bg,
                     fg=vfg,
-                    font=font(11, weight="bold", family="Consolas"),
+                    font=font(12, weight="bold", family="Consolas"),
                     anchor=tk.E,
                 ).pack(side=tk.RIGHT, fill=tk.X, expand=True, padx=(8, 4))
             self._parts_frame.pack(fill=tk.X)
