@@ -20,7 +20,7 @@ if _SIM not in sys.path:
 from RL_lib import reward_config
 from RL_lib.lab_world import LabWorld5
 from RL_lib.lab_registry import (
-    STATE_MODULES,
+    DEFAULT_ENABLED_MODULES,
     REWARD_ELEMENTS,
     ELEMENT_WEIGHT_KEY,
     THRESHOLD_LABELS,
@@ -122,7 +122,6 @@ class LearnLabApp:
             self._standalone = False
 
         self.world = LabWorld5()
-        self._module_vars = {}
         self._weight_vars = {}
         self._threshold_vars = {}
         self._weight_rows = {}
@@ -130,6 +129,7 @@ class LearnLabApp:
         self._save_after_id = None
         self._loading = False
         self._loaded_formula_name = None
+        self._rl_app = None
         self._scaled_font_widgets = []
         self._scaled_spinboxes = []
 
@@ -140,6 +140,16 @@ class LearnLabApp:
         self._refresh_reward_panel()
         self._update_state_display()
         self._refresh_move_gate()
+
+    def set_rl_app(self, app):
+        self._rl_app = app
+
+    def _notify_formula_applied(self):
+        if self._rl_app is not None:
+            try:
+                self._rl_app._sync_formula_combo()
+            except Exception:
+                pass
 
     def _refresh_move_gate(self):
         self.scenario_map.set_move_enabled(self.formula_builder.is_valid())
@@ -239,41 +249,8 @@ class LearnLabApp:
         # self.export_text.pack(fill=tk.X)
 
     def _build_reward_config(self, parent):
-        top = ttk.LabelFrame(parent, text="State dùng", padding=8)
-        top.pack(fill=tk.X)
-        grid = ttk.Frame(top)
-        grid.pack(fill=tk.X)
-        grid.columnconfigure(0, weight=1)
-        grid.columnconfigure(1, weight=1)
-        col = row = 0
         self._scaled_font_widgets = []
         self._scaled_spinboxes = []
-        for mod in STATE_MODULES:
-            var = tk.BooleanVar(value=True)
-            self._module_vars[mod["id"]] = var
-            chip = module_chip_style(mod["id"])
-            cb = tk.Checkbutton(
-                grid,
-                text=mod["label"],
-                variable=var,
-                command=self._on_modules_changed,
-                bg=chip["bg"],
-                fg=chip["fg"],
-                activebackground=chip.get("active", chip["bg"]),
-                activeforeground=chip["fg"],
-                selectcolor="#ffffff",
-                padx=px(6),
-                pady=px(2),
-                font=font(9, weight="bold"),
-                anchor=tk.W,
-                relief=tk.FLAT,
-                bd=0,
-            )
-            cb.grid(row=row, column=col, sticky=tk.W + tk.E, padx=4, pady=4)
-            self._scaled_font_widgets.append((cb, 9, "bold"))
-            col += 1
-            if col >= 2:
-                col, row = 0, row + 1
 
         bottom = ttk.LabelFrame(parent, text="Công thức Reward", padding=6)
         bottom.pack(fill=tk.BOTH, expand=True, pady=(8, 0))
@@ -438,11 +415,10 @@ class LearnLabApp:
             self._bind_reward_wheel_tree(child)
 
     def _enabled_modules(self):
-        return {mid for mid, v in self._module_vars.items() if v.get()}
+        return set(DEFAULT_ENABLED_MODULES)
 
     def _enabled_labels(self):
-        enabled = self._enabled_modules()
-        return [REWARD_ELEMENTS[e]["label"] for e, m in REWARD_ELEMENTS.items() if m["module"] in enabled]
+        return [REWARD_ELEMENTS[e]["label"] for e in REWARD_ELEMENTS]
 
     def _formula_reward_eids(self):
         return reward_eids_in_formula(self.formula_builder.get_tokens())
@@ -469,16 +445,8 @@ class LearnLabApp:
 
 
 
-    def _on_modules_changed(self):
-        enabled_modules = self._enabled_modules()
-        reward_config.set_enabled_modules(enabled_modules)
-        
-        # Remove rewards belonging to disabled modules from formula builder
-        allowed_labels = {meta["label"] for meta in REWARD_ELEMENTS.values() if meta["module"] in enabled_modules}
-        tokens = self.formula_builder.get_tokens()
-        filtered_tokens = [t for t in tokens if t["kind"] != "reward" or t["value"] in allowed_labels]
-        self.formula_builder.set_tokens(filtered_tokens)
-
+    def _sync_enabled_modules(self):
+        reward_config.set_enabled_modules(self._enabled_modules())
         self._refresh_reward_panel()
         self._update_state_display()
         self._refresh_export()
@@ -552,6 +520,10 @@ class LearnLabApp:
             state_rows.append(
                 "Tường nhìn thấy: N=%d W=%d E=%d S=%d" % (n, w, e, s)
             )
+            visited = snap.get("visited_before", 0)
+            state_rows.append(
+                "Đã qua: %s" % ("1" if visited else "0")
+            )
         if "goal" in enabled:
             state_rows.append("Trend goal: %+d" % snap["goal_trend"])
         if "checkpoint" in enabled:
@@ -585,8 +557,7 @@ class LearnLabApp:
         for k, var in self._threshold_vars.items():
             if k in d:
                 var.set(str(d[k]))
-        for mid, var in self._module_vars.items():
-            var.set(mid in reward_config.get_enabled_modules())
+        reward_config.set_enabled_modules(self._enabled_modules())
         self.formula_builder.set_expr(reward_config.get_total_formula_student())
 
     def _refresh_export(self):
@@ -695,6 +666,7 @@ class LearnLabApp:
                 pass
 
             self.apply_status.set("Đã áp dụng công thức: %s" % self._loaded_formula_name)
+            self._notify_formula_applied()
             return True
         except Exception as exc:
             messagebox.showerror("Nạp công thức", "Lỗi nạp công thức: %s" % exc, parent=self.root)
@@ -706,12 +678,6 @@ class LearnLabApp:
         data = migrate_formula_snapshot(data)
         self._loading = True
         try:
-            modules = set(data.get("enabled_modules") or [])
-            if not modules:
-                modules = set(self._module_vars.keys())
-            for mid, var in self._module_vars.items():
-                var.set(mid in modules)
-
             weights = data.get("element_weights") or {}
             for eid, var in self._weight_vars.items():
                 if eid in weights:
@@ -725,7 +691,7 @@ class LearnLabApp:
             expr = data.get("total_formula") or ""
             self.formula_builder.set_labels(self._enabled_labels())
             self.formula_builder.set_expr(expr)
-            self._on_modules_changed()
+            self._sync_enabled_modules()
         finally:
             self._loading = False
 
@@ -801,13 +767,12 @@ class LearnLabApp:
                 "Đã lưu %s + áp dụng Train — %s"
                 % (os.path.basename(json_path), save_name)
             )
+            self._notify_formula_applied()
         except Exception as exc:
             self.apply_status.set("Lỗi lưu: %s" % exc)
             messagebox.showerror("Lưu công thức", str(exc), parent=self.root)
 
     def _reset_defaults(self):
-        for mid, var in self._module_vars.items():
-            var.set(True)
         for eid, var in self._weight_vars.items():
             var.set(str(_DEFAULT_WEIGHTS.get(eid, 0)))
         for k, var in self._threshold_vars.items():
@@ -820,10 +785,10 @@ class LearnLabApp:
                 "MAX_STRAIGHT_REACH": 3,
                 "MAX_STRAIGHT_CAP": 3,
             }.get(k, var.get())))
-        self.formula_builder.set_tokens(default_total_formula(set(self._module_vars.keys())))
+        self.formula_builder.set_tokens(default_total_formula(self._enabled_modules()))
         self.world.reset_scenario()
         self.scenario_map.redraw()
-        self._on_modules_changed()
+        self._sync_enabled_modules()
         self._loaded_formula_name = ""
         reward_config.set_formula_name("")
 
@@ -834,11 +799,7 @@ class LearnLabApp:
             pass
         for w, sz, wt in self._scaled_font_widgets:
             try:
-                opts = {"font": font(sz, weight=wt)}
-                if isinstance(w, tk.Checkbutton):
-                    opts["padx"] = px(6)
-                    opts["pady"] = px(2)
-                w.configure(**opts)
+                w.configure(font=font(sz, weight=wt))
             except tk.TclError:
                 pass
         for spin, cw in self._scaled_spinboxes:

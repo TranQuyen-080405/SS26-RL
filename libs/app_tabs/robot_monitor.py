@@ -89,10 +89,30 @@ class MonitorMapModel:
         self.step = 0
         self.last_action = ""
         self.walls = set()
-        self._init_boundary_walls()
-        for w in spec.get("walls") or []:
+        self._reset_discovered_walls()
+
+    def _add_wall_items(self, items):
+        for item in items or []:
+            if not item or len(item) < 3:
+                continue
+            self.walls.add((int(item[0]), int(item[1]), str(item[2])))
+
+    def _add_boundary_walls(self):
+        for y in range(self.h):
+            self.walls.add((0, y, "W"))
+            self.walls.add((self.w - 1, y, "E"))
+        for x in range(self.w):
+            self.walls.add((x, 0, "S"))
+            self.walls.add((x, self.h - 1, "N"))
+
+    def _reset_discovered_walls(self, extra_items=None):
+        """Tường biên + tường cố định trong MAP_CFG; bỏ tường robot đã khám phá."""
+        self.walls.clear()
+        self._add_boundary_walls()
+        for w in _ROBOT_MAP_SPEC.get("walls") or []:
             if w and len(w) >= 3:
                 self.walls.add((int(w[0]), int(w[1]), str(w[2])))
+        self._add_wall_items(extra_items)
 
     def apply_map_spec(self, spec):
         if not spec:
@@ -119,20 +139,14 @@ class MonitorMapModel:
         if cps is not None:
             self.checkpoints = [tuple(cp) for cp in cps]
         self.reset_robot()
-        self.walls.clear()
-        self._init_boundary_walls()
-        for w in _ROBOT_MAP_SPEC.get("walls") or []:
-            if w and len(w) >= 3:
-                self.walls.add((int(w[0]), int(w[1]), str(w[2])))
+        if "walls" in spec:
+            self._reset_discovered_walls(spec.get("walls"))
+        else:
+            self._reset_discovered_walls()
 
     def _init_boundary_walls(self):
         self.walls.clear()
-        for y in range(self.h):
-            self.walls.add((0, y, "W"))
-            self.walls.add((self.w - 1, y, "E"))
-        for x in range(self.w):
-            self.walls.add((x, 0, "S"))
-            self.walls.add((x, self.h - 1, "N"))
+        self._add_boundary_walls()
 
     def reset_robot(self):
         self.x, self.y = self.start
@@ -157,13 +171,10 @@ class MonitorMapModel:
             self.step = int(msg["n"])
         if "a" in msg:
             self.last_action = str(msg["a"])
+        if "w" in msg:
+            self._add_wall_items(msg["w"])
         if "walls" in msg:
-            self.walls.clear()
-            self._init_boundary_walls()
-            for item in msg["walls"]:
-                if not item or len(item) < 3:
-                    continue
-                self.walls.add((int(item[0]), int(item[1]), str(item[2])))
+            self._reset_discovered_walls(msg["walls"])
         return prev_phase
 
     def phase_label(self):
@@ -582,6 +593,7 @@ class RobotMapCanvas:
         self.redraw()
 
     def reset_to_start(self):
+        self.model._reset_discovered_walls()
         self.model.reset_robot()
         self.path = [self.model.robot_pos()]
         self.model.phase = "i"
@@ -785,10 +797,10 @@ class RobotMonitorApp:
 
         self.btn_connect = ttk.Button(bar, text="Kết nối", command=self.toggle_connect)
         self.btn_connect.pack(side=tk.LEFT, padx=2)
-        self.btn_start = ttk.Button(bar, text="Start inference", command=self.request_start_infer, state=tk.DISABLED)
-        self.btn_start.pack(side=tk.LEFT, padx=2)
-        self.btn_stop = ttk.Button(bar, text="Stop inference", command=self.request_stop_infer, state=tk.DISABLED)
-        self.btn_stop.pack(side=tk.LEFT, padx=2)
+        self.btn_infer = ttk.Button(
+            bar, text="Start inference", command=self.toggle_infer, state=tk.DISABLED
+        )
+        self.btn_infer.pack(side=tk.LEFT, padx=2)
         ttk.Button(bar, text="Xóa log", command=self.clear_log).pack(side=tk.LEFT, padx=2)
         ttk.Button(bar, text="Chạy lại", command=self.reset_for_rerun).pack(side=tk.LEFT, padx=2)
         self.btn_upload = ttk.Button(bar, text="Tải file lên", command=self.request_upload_file, state=tk.DISABLED)
@@ -797,10 +809,7 @@ class RobotMonitorApp:
         self.infer_var = tk.StringVar(value="Inference: chưa chạy")
         ttk.Label(bar, textvariable=self.infer_var, width=entry_width(28)).pack(side=tk.LEFT, padx=(px(8), 0))
 
-        self.status_var = tk.StringVar(
-            value="Nhập tên BLE → Kết nối → Start inference."
-        )
-        ttk.Label(bar, textvariable=self.status_var).pack(side=tk.LEFT, padx=12)
+        self.status_var = tk.StringVar(value="")
 
         paned = ttk.Panedwindow(self.container, orient=tk.HORIZONTAL)
         paned.pack(fill=tk.BOTH, expand=True, padx=8, pady=(0, 8))
@@ -896,32 +905,38 @@ class RobotMonitorApp:
             self._ble_thread.join(timeout=3.0)
             self._ble_thread = None
 
+    def _update_infer_button(self):
+        if not self._connected:
+            self.btn_infer.configure(state=tk.DISABLED, text="Start inference")
+        elif self._infer_running:
+            self.btn_infer.configure(state=tk.NORMAL, text="Stop inference")
+        else:
+            self.btn_infer.configure(state=tk.NORMAL, text="Start inference")
+
+    def toggle_infer(self):
+        if self._infer_running:
+            self.request_stop_infer()
+        else:
+            self.request_start_infer()
+
     def _on_connection_changed(self, connected):
         self._connected = connected
         self.map_view.connected = connected
         if not connected:
             self.map_view.reset_to_start()
-            self.btn_stop.configure(state=tk.DISABLED)
-            self.btn_start.configure(state=tk.DISABLED)
-            if hasattr(self, 'btn_upload'):
+            if hasattr(self, "btn_upload"):
                 self.btn_upload.configure(state=tk.DISABLED)
         else:
-            self.btn_start.configure(state=tk.NORMAL)
-            self.btn_stop.configure(state=tk.DISABLED)
-            if hasattr(self, 'btn_upload'):
+            if hasattr(self, "btn_upload"):
                 self.btn_upload.configure(state=tk.NORMAL)
+        self._update_infer_button()
         self.map_view.redraw()
 
     def _set_infer_status(self, text, running=None):
         self.infer_var.set(text)
         if running is not None:
             self._infer_running = running
-            if running:
-                self.btn_start.configure(state=tk.DISABLED)
-                self.btn_stop.configure(state=tk.NORMAL)
-            elif self._connected:
-                self.btn_start.configure(state=tk.NORMAL)
-                self.btn_stop.configure(state=tk.DISABLED)
+            self._update_infer_button()
 
     def _handle_ble_state(self, state):
         self.map_view.apply_ble(state)

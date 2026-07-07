@@ -127,6 +127,7 @@ class SS26App:
         self._map_editor = MapEditorApp(parent=tab_map, root=self.root, on_saved=self._maps_changed)
         self.learn_lab_app = LearnLabApp(parent=tab_lab, root=self.root)
         self.rl_app.set_learn_lab_app(self.learn_lab_app)
+        self.learn_lab_app.set_rl_app(self.rl_app)
         self._monitor = RobotMonitorApp(parent=tab_robot, root=self.root)
 
         from map.map_io import maps_storage_snapshot

@@ -7,7 +7,7 @@ BLE UART — Robot (MicroPython bluetooth.BLE)
 import bluetooth
 from micropython import const
 
-BLE_NAME = "Robot"
+BLE_NAME = "Robot_1"
 _SVC = bluetooth.UUID("6E400001-B5A3-F393-E0A9-E50E24DCCA9E")
 _CHAR_RX = bluetooth.UUID("6E400002-B5A3-F393-E0A9-E50E24DCCA9E")
 _CHAR_TX = bluetooth.UUID("6E400003-B5A3-F393-E0A9-E50E24DCCA9E")
@@ -63,6 +63,26 @@ def _advertise(name):
 
 
 _MAX_NOTIFY = 240
+_published_walls = set()
+
+
+def reset_wall_publish_state(robot=None):
+    """Đặt lại bộ tường đã gửi — gọi khi idle / bắt đầu episode mới."""
+    global _published_walls
+    _published_walls = set()
+    if robot is not None and "robot_map" in robot:
+        for item in _walls_from_map(robot["robot_map"]):
+            _published_walls.add((int(item[0]), int(item[1]), str(item[2])))
+
+
+def _walls_delta_from_map(rmap):
+    global _published_walls
+    current = set()
+    for item in _walls_from_map(rmap):
+        current.add((int(item[0]), int(item[1]), str(item[2])))
+    delta = current - _published_walls
+    _published_walls = current
+    return [[x, y, d] for x, y, d in sorted(delta)]
 
 
 def _notify(line):
@@ -279,8 +299,7 @@ def _walls_from_map(rmap):
 
 
 def _compact_state(robot, phase="i", step=0, action=None):
-    # Không gửi walls — vượt 240 byte BLE notify limit.
-    # PC tự vẽ tường biên; walls gửi qua M: (publish_map_meta) khi idle.
+    # Tường gửi dạng delta "w" — tránh vượt 240 byte BLE notify limit.
     out = {
         "x": robot["x"],
         "y": robot["y"],
@@ -291,6 +310,10 @@ def _compact_state(robot, phase="i", step=0, action=None):
         out["n"] = step
     if action:
         out["a"] = action
+    if robot and "robot_map" in robot:
+        delta = _walls_delta_from_map(robot["robot_map"])
+        if delta:
+            out["w"] = delta
     return out
 
 
@@ -348,6 +371,7 @@ def publish_idle(robot=None):
                               checkpoints=_map_cfg["checkpoints"], start=s)
         apply_walls_from_spec(rmap, _map_cfg["walls"])
         robot = make_robot(s[0], s[1], "N", rmap)
+    reset_wall_publish_state(robot)
     publish_state(robot, phase="i", step=0)
     publish_map_meta(robot)
 

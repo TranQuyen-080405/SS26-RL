@@ -95,13 +95,10 @@ class RlApp:
         self.mode.trace_add("write", lambda *_: self._on_mode_change())
         self.view.trace_add("write", lambda *_: self._on_view_change())
         self._on_mode_change()
-
-        if not self._standalone:
-            self.container.bind("<Visibility>", self.update_formula_name)
-        self.update_formula_name()
+        self._sync_formula_combo()
 
     def _build_toolbar(self):
-        bar = ttk.LabelFrame(self.container, text="Điều khiển chung", padding=px(8))
+        bar = ttk.LabelFrame(self.container, text="Bảng điều khiển chung", padding=px(8))
         bar.pack(fill=tk.X, padx=px(8), pady=(px(8), px(4)))
 
         ttk.Label(bar, text="Mode").grid(row=0, column=0, padx=(0, 8), sticky=tk.W)
@@ -135,24 +132,23 @@ class RlApp:
         )
         self.delay_group.grid(row=0, column=10, padx=(0, 8))
 
-        # Row 1: Công thức reward hiện tại
-        ttk.Label(bar, text="Công thức reward:").grid(row=1, column=0, columnspan=2, sticky=tk.W, pady=(8, 0))
-        self.formula_name_var = tk.StringVar(value="")
+        ttk.Label(bar, text="Reward").grid(row=1, column=0, sticky=tk.W, pady=(6, 0))
+        self.formula_var = tk.StringVar(value="")
         self.combo_formula = ttk.Combobox(
             bar,
-            textvariable=self.formula_name_var,
+            textvariable=self.formula_var,
             state="readonly",
-            width=entry_width(48),
+            width=entry_width(24),
             postcommand=self.refresh_formula_list,
         )
-        self.combo_formula.grid(row=1, column=2, columnspan=9, sticky=tk.W, pady=(8, 0))
+        self.combo_formula.grid(row=1, column=1, columnspan=4, sticky=tk.W, pady=(6, 0), padx=(0, 8))
         self.combo_formula.bind("<<ComboboxSelected>>", self._on_formula_selected)
 
     def _build_checkpoint_bar(self):
-        self.ck_frame = ttk.LabelFrame(self.container, text="Policy train", padding=(8, 6))
+        self.ck_frame = ttk.LabelFrame(self.container, text="Nạp Policy", padding=(8, 6))
         row1 = ttk.Frame(self.ck_frame)
         row1.pack(fill=tk.X)
-        ttk.Label(row1, text="Nạp Q từ").pack(side=tk.LEFT, padx=(0, 4))
+        ttk.Label(row1, text="Nạp từ").pack(side=tk.LEFT, padx=(0, 4))
         self.combo_checkpoint = ttk.Combobox(
             row1,
             textvariable=self.checkpoint_var,
@@ -181,6 +177,32 @@ class RlApp:
         )
         self.combo_export_policy.pack(side=tk.LEFT, padx=(0, 4))
         ttk.Label(row2, text=".bin").pack(side=tk.LEFT, padx=(0, 8))
+        ttk.Separator(row2, orient=tk.VERTICAL).pack(side=tk.RIGHT, fill=tk.Y, padx=6)
+        box_button(
+            row2,
+            text="Random init",
+            command=lambda: self._create_init_policy("random"),
+            role="secondary",
+        ).pack(side=tk.RIGHT, padx=(4, 0))
+        box_button(
+            row2,
+            text="Right init",
+            command=lambda: self._create_init_policy("right"),
+            role="secondary",
+        ).pack(side=tk.RIGHT, padx=(4, 0))
+        box_button(
+            row2,
+            text="Left init",
+            command=lambda: self._create_init_policy("left"),
+            role="secondary",
+        ).pack(side=tk.RIGHT, padx=(4, 0))
+        box_button(
+            row2,
+            text="Forward init",
+            command=lambda: self._create_init_policy("forward"),
+            role="secondary",
+        ).pack(side=tk.RIGHT, padx=(4, 0))
+        ttk.Label(row2, text="Init policy:").pack(side=tk.RIGHT, padx=(0, 4))
         # ttk.Label(
         #     row2,
         #     text="Train mới → đặt tên file; train tiếp → có thể giữ hoặc đổi tên",
@@ -198,18 +220,14 @@ class RlApp:
         )
         self.combo_infer_policy.pack(side=tk.LEFT, padx=(0, 8))
         box_button(
-            self.infer_policy_frame, text="Refresh list", command=self.refresh_infer_policies, role="secondary"
+            self.infer_policy_frame, text="Làm mới", command=self.refresh_infer_policies, role="secondary"
         ).pack(side=tk.LEFT, padx=(0, 4))
         box_button(
-            self.infer_policy_frame, text="Delete policy", command=self._delete_selected_policy, role="secondary"
+            self.infer_policy_frame, text="Xóa policy", command=self._delete_selected_policy, role="secondary"
         ).pack(side=tk.LEFT, padx=(0, 4))
         box_button(
-            self.infer_policy_frame, text="Xuất policy ra CSV", command=self._export_policy_to_csv, role="secondary"
+            self.infer_policy_frame, text="Xuất file CSV", command=self._export_policy_to_csv, role="secondary"
         ).pack(side=tk.LEFT, padx=(0, 4))
-        ttk.Label(
-            self.infer_policy_frame,
-            text="Chọn file checkpoints/*.bin để inference",
-        ).pack(side=tk.LEFT, padx=8)
         self.refresh_infer_policies()
 
     def _export_policy_to_csv(self):
@@ -376,6 +394,44 @@ class RlApp:
         base = normalize_policy_base_name(self.export_policy_var.get())
         return checkpoint_bin_path(base)
 
+    def _create_init_policy(self, mode):
+        if self._is_busy():
+            messagebox.showinfo("Init policy", "Đang chạy train/inference — vui lòng bấm Stop hoặc đợi chạy xong.")
+            return
+        try:
+            from robot.policy_io import (
+                normalize_policy_base_name,
+                checkpoint_bin_path,
+                export_policy,
+                biased_q_table,
+                random_q_table,
+            )
+
+            base = normalize_policy_base_name(self.export_policy_var.get())
+            path = checkpoint_bin_path(base)
+            if mode == "forward":
+                q_table = biased_q_table("forward", preferred_value=0.5, other_value=0.0)
+                label = "forward"
+            elif mode == "left":
+                q_table = biased_q_table("rotate left", preferred_value=0.5, other_value=0.0)
+                label = "rotate left"
+            elif mode == "right":
+                q_table = biased_q_table("rotate right", preferred_value=0.5, other_value=0.0)
+                label = "rotate right"
+            else:
+                q_table = random_q_table(-0.5, 0.5)
+                label = "random"
+            export_policy(q_table, path)
+            self.refresh_checkpoints()
+            self.refresh_infer_policies()
+            self.checkpoint_var.set(base)
+            self.export_policy_var.set(base)
+            self.infer_policy_var.set(base + ".bin")
+            self.status.set("Init policy '%s' (%s)" % (base, label))
+            messagebox.showinfo("Init policy", "Đã tạo policy khởi tạo:\n%s" % os.path.basename(path))
+        except Exception as exc:
+            messagebox.showerror("Init policy", str(exc))
+
     def _infer_policy_bin(self):
         from robot.policy_io import policy_bin_path
 
@@ -391,7 +447,7 @@ class RlApp:
         self.workspace = ttk.Frame(self.container)
         self.workspace.pack(fill=tk.BOTH, expand=True, padx=px(8), pady=px(4))
 
-        self._side_col_minsize = px(160)
+        self._side_col_minsize = px(240)
         self._log_col_minsize = px(220)
         self._map_col_minsize = px(180)
 
@@ -486,7 +542,7 @@ class RlApp:
         self.train_mode_group = SegmentGroup(
             mode_row,
             self.train_map_mode,
-            [("Random", "random"), ("Lần lượt", "sequential"), ("Đơn map", "single")],
+            [("Random", "random"), ("Sequence", "sequential"), ("Single", "single")],
             command=self._on_train_mode_change,
         )
         self.train_mode_group.pack(side=tk.LEFT)
@@ -496,24 +552,28 @@ class RlApp:
         tree_wrap.columnconfigure(0, weight=1)
         tree_wrap.rowconfigure(0, weight=1)
         scroll_t = ttk.Scrollbar(tree_wrap, orient=tk.VERTICAL)
+        scroll_x = ttk.Scrollbar(tree_wrap, orient=tk.HORIZONTAL)
         self.train_tree = ttk.Treeview(
             tree_wrap,
             columns=("on", "ord", "name", "eps"),
             show="headings",
             height=text_lines(8),
             yscrollcommand=scroll_t.set,
+            xscrollcommand=scroll_x.set,
             selectmode="browse",
         )
         scroll_t.config(command=self.train_tree.yview)
+        scroll_x.config(command=self.train_tree.xview)
         style_train_treeview(self.train_tree, self.root)
         self.train_tree.heading("ord", text="≡")
         self.train_tree.heading("name", text="File map")
         self.train_tree.heading("eps", text="Episodes")
-        self.train_tree.column("ord", width=px(32), anchor=tk.CENTER, stretch=False)
-        self.train_tree.column("name", width=px(200), anchor=tk.W, stretch=True)
-        self.train_tree.column("eps", width=px(80), anchor=tk.CENTER, stretch=False)
+        self.train_tree.column("ord", width=px(32), anchor=tk.CENTER, stretch=False, minwidth=px(28))
+        self.train_tree.column("name", width=px(160), anchor=tk.W, stretch=True, minwidth=px(72))
+        self.train_tree.column("eps", width=px(72), anchor=tk.CENTER, stretch=False, minwidth=px(56))
         self.train_tree.grid(row=0, column=0, sticky="nsew")
         scroll_t.grid(row=0, column=1, sticky="ns")
+        scroll_x.grid(row=1, column=0, sticky="ew")
         self.train_tree.bind("<<TreeviewSelect>>", self._on_train_tree_select)
         self.train_tree.bind("<Button-1>", self._on_train_tree_click, add=True)
         self.train_tree.bind("<ButtonRelease-1>", self._on_train_drag_release, add=True)
@@ -522,15 +582,10 @@ class RlApp:
         btn_row = tk.Frame(self.train_cfg_frame, height=px(44))
         btn_row.grid(row=2, column=0, sticky="ew", pady=(px(6), 0))
         btn_row.grid_propagate(False)
-        box_button(btn_row, text="Tất cả", command=self._train_select_all, role="accent").pack(
-            side=tk.LEFT, padx=(0, 4), pady=4
-        )
-        box_button(btn_row, text="Bỏ chọn", command=self._train_select_none, role="secondary").pack(
-            side=tk.LEFT, padx=4, pady=4
-        )
-        box_button(btn_row, text="Xóa map", command=self._delete_selected_train_map, role="secondary").pack(
-            side=tk.LEFT, padx=4, pady=4
-        )
+        self.btn_train_select_all = box_button(btn_row, text="Chọn tất cả", command=self._train_select_all, role="accent")
+        self.btn_train_select_all.pack(side=tk.LEFT, padx=(0, 4), pady=4)
+        self.btn_train_select_none = box_button(btn_row, text="Bỏ chọn tất cả", command=self._train_select_none, role="secondary")
+        self.btn_train_select_none.pack(side=tk.LEFT, padx=4, pady=4)
 
         self.infer_list_frame = ttk.LabelFrame(frame, text="Chọn map inference", padding=6)
         list_frame = ttk.Frame(self.infer_list_frame)
@@ -552,7 +607,6 @@ class RlApp:
         self.map_list.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         scroll.pack(side=tk.RIGHT, fill=tk.Y)
         self.map_list.bind("<<ListboxSelect>>", self._on_map_select)
-
         btn_row_infer = tk.Frame(self.infer_list_frame, height=px(44))
         btn_row_infer.pack(fill=tk.X, pady=(4, 0))
         box_button(btn_row_infer, text="Xóa map", command=self._delete_selected_infer_map, role="secondary").pack(
@@ -579,10 +633,74 @@ class RlApp:
 
     def _on_train_mode_change(self):
         mode = self.train_map_mode.get()
+        if mode == "single":
+            enabled = [r for r in self._train_rows if r["enabled"]]
+            if len(enabled) > 1:
+                keep = enabled[0]
+                for r in self._train_rows:
+                    r["enabled"] = r is keep
+            elif len(enabled) == 0 and self._train_rows:
+                sel = self.train_tree.selection()
+                pick = self._train_row_by_iid(sel[0]) if sel else self._train_rows[0]
+                if pick:
+                    for r in self._train_rows:
+                        r["enabled"] = r is pick
+        self._apply_train_mode_ui()
+        self._refresh_train_tree()
+
+    def _train_tree_display_columns(self):
+        if self.train_map_mode.get() == "random":
+            return ("on", "ord", "name")
+        return ("on", "ord", "eps", "name")
+
+    def _train_eps_column_index(self):
+        cols = self._train_tree_display_columns()
+        if "eps" not in cols:
+            return None
+        return "#%d" % (cols.index("eps") + 1)
+
+    def _train_drag_column_indices(self):
+        cols = self._train_tree_display_columns()
+        out = set()
+        for key in ("ord", "name"):
+            if key in cols:
+                out.add("#%d" % (cols.index(key) + 1))
+        return out
+
+    def _apply_train_mode_ui(self):
+        mode = self.train_map_mode.get()
+        self.train_tree.configure(displaycolumns=self._train_tree_display_columns())
+        if mode != "random":
+            self.train_tree.heading("eps", text="Episodes")
+            self.train_tree.column(
+                "eps",
+                width=px(72),
+                anchor=tk.CENTER,
+                stretch=False,
+                minwidth=px(56),
+            )
+        if mode == "single":
+            self.btn_train_select_all.pack_forget()
+            self.btn_train_select_none.pack_forget()
+        else:
+            self.btn_train_select_all.pack(side=tk.LEFT, padx=(0, 4), pady=4)
+            self.btn_train_select_none.pack(side=tk.LEFT, padx=4, pady=4)
         if mode == "random":
             self.spin_ep.configure(state=tk.NORMAL)
         else:
-            self.spin_ep.configure(state=tk.DISABLED)
+            self._update_train_episodes_total()
+
+    def _train_enabled_rows(self):
+        return [r for r in self._train_rows if r["enabled"]]
+
+    def _update_train_episodes_total(self):
+        mode = self.train_map_mode.get()
+        if mode == "random":
+            return
+        enabled = self._train_enabled_rows()
+        total = sum(max(1, int(r["episodes"])) for r in enabled)
+        self.spin_ep.configure(state=tk.DISABLED)
+        self.spin_ep.set(str(max(1, total) if total else 1))
 
     def _train_row_by_iid(self, iid):
         if not iid:
@@ -608,6 +726,7 @@ class RlApp:
                 values=(mark, i + 1, row["name"], row["episodes"]),
                 tags=tags,
             )
+        self._update_train_episodes_total()
 
     def _cancel_eps_edit(self):
         if self._eps_entry is not None:
@@ -617,7 +736,7 @@ class RlApp:
 
     def _start_eps_edit(self, iid):
         self._cancel_eps_edit()
-        bbox = self.train_tree.bbox(iid, column="#4")
+        bbox = self.train_tree.bbox(iid, column="eps")
         if not bbox:
             return
         row = self._train_row_by_iid(iid)
@@ -663,6 +782,7 @@ class RlApp:
         row["episodes"] = n
         self._refresh_train_tree()
         self.train_tree.selection_set(iid)
+        self._update_train_episodes_total()
 
     def _on_train_tree_select(self, _event=None):
         if self._eps_entry is not None:
@@ -681,11 +801,12 @@ class RlApp:
             self.train_tree.selection_set(iid)
             self._train_toggle_selected()
             return "break"
-        if col == "#4":
+        eps_col = self._train_eps_column_index()
+        if eps_col and col == eps_col and self.train_map_mode.get() != "random":
             self.train_tree.selection_set(iid)
             self.root.after_idle(lambda i=iid: self._start_eps_edit(i))
             return "break"
-        if col in ("#2", "#3"):
+        if col in self._train_drag_column_indices():
             self._drag_src_iid = iid
             self.train_tree.selection_set(iid)
 
@@ -757,30 +878,43 @@ class RlApp:
         if not sel:
             return
         row = self._train_row_by_iid(sel[0])
-        if row:
+        if not row:
+            return
+        if self.train_map_mode.get() == "single":
+            if row["enabled"]:
+                return
+            for r in self._train_rows:
+                r["enabled"] = False
+            row["enabled"] = True
+        else:
             row["enabled"] = not row["enabled"]
-            self._refresh_train_tree()
-            self.train_tree.selection_set(sel[0])
+        self._refresh_train_tree()
+        self.train_tree.selection_set(sel[0])
+        self._update_train_episodes_total()
 
     def _train_select_all(self):
+        if self.train_map_mode.get() == "single":
+            return
         for row in self._train_rows:
             row["enabled"] = True
         self._refresh_train_tree()
+        self._update_train_episodes_total()
 
     def _train_select_none(self):
+        if self.train_map_mode.get() == "single":
+            return
         for row in self._train_rows:
             row["enabled"] = False
         self._refresh_train_tree()
+        self._update_train_episodes_total()
 
     def _build_train_run_config(self):
         mode = self.train_map_mode.get()
         if mode == "single":
-            sel = self.train_tree.selection()
-            if not sel:
-                raise ValueError("Chế độ Đơn map — chọn một dòng trong bảng.")
-            row = self._train_row_by_iid(sel[0])
-            if not row:
-                raise ValueError("Map không hợp lệ.")
+            enabled = self._train_enabled_rows()
+            if len(enabled) != 1:
+                raise ValueError("Chế độ Single — chọn đúng một map (bấm [ ]).")
+            row = enabled[0]
             sim = build_sim_map_from_file(row["path"])
             n_ep = max(1, int(row["episodes"]))
             return "random", [sim], None, n_ep
@@ -1052,13 +1186,13 @@ class RlApp:
             self._map_paths = train_paths
             self._sync_train_rows_from_paths()
             self._set_map_hint("")
-            self.spin_ep.configure(state=tk.NORMAL if self.train_map_mode.get() == "random" else tk.DISABLED)
+            self._apply_train_mode_ui()
         else:
             self._map_paths = infer_paths
             self.map_list.delete(0, tk.END)
             for path in self._map_paths:
                 self.map_list.insert(tk.END, os.path.basename(path))
-            self._set_map_hint("Inference: chọn map. Map + Run để xem robot inference từng bước.")
+            self._set_map_hint("")
             self.spin_ep.configure(state=tk.DISABLED)
             if self._map_paths:
                 self.map_list.selection_set(0)
@@ -1112,7 +1246,6 @@ class RlApp:
             self.status.set("Refresh map — %d file trong map/%s/" % (n, kind))
         else:
             self.status.set("Refresh map — %d file trong map/%s/ (chọn View Map để xem)" % (n, kind))
-
     def _delete_selected_train_map(self):
         if self._is_busy():
             messagebox.showinfo("Xóa map", "Đang chạy train/inference — vui lòng bấm Stop hoặc đợi chạy xong.")
@@ -1178,7 +1311,6 @@ class RlApp:
                 messagebox.showerror("Lỗi", f"Không tìm thấy file bản đồ '{filename}' để xóa.")
         except Exception as e:
             messagebox.showerror("Lỗi", f"Lỗi khi xóa file: {str(e)}")
-
     def on_run(self):
         if self._running and self._paused:
             self._set_paused_ui(False)
@@ -1692,77 +1824,67 @@ class RlApp:
     def refresh_formula_list(self):
         try:
             from RL_lib.formula_store import list_saved_formulas
-            names = list_saved_formulas()
-            self.combo_formula["values"] = names
+
+            self.combo_formula["values"] = list_saved_formulas()
         except Exception:
             pass
 
-    def _on_formula_selected(self, _event=None):
-        name = self.formula_name_var.get().strip()
-        if not name:
-            return
-        if self.learn_lab_app:
-            self.learn_lab_app.load_and_compile_formula(name)
-        else:
-            # Standalone fallback: load to memory & compile to reward_config.py
-            try:
-                from RL_lib.formula_store import load_formula_file, normalize_formula_basename
-                from RL_lib import reward_config
-                import importlib
-                
-                data = load_formula_file(name)
-                # Apply in memory
-                weights = data.get("element_weights") or {}
-                reward_config.sync_weights_from_elements(weights)
-                
-                thresholds = data.get("thresholds") or {}
-                for k, v in thresholds.items():
-                    if k in reward_config.REWARD_KEYS:
-                        setattr(reward_config, k, v)
-                
-                reward_config.set_total_formula_student(data.get("total_formula") or "")
-                reward_config.set_enabled_modules(data.get("enabled_modules") or [])
-                
-                norm_name = normalize_formula_basename(name)
-                reward_config.set_formula_name(norm_name)
-                
-                # Patch file
-                pc_path = os.path.join(os.path.dirname(reward_config.__file__), "reward_config.py")
-                with open(pc_path, "r", encoding="utf-8") as f:
-                    src = f.read()
-                
-                from Ui_app.learn_lab_UI import _patch_line, _patch_enabled_modules, _patch_total_formula, _patch_formula_name
-                
-                for k, v in reward_config.get_reward_dict().items():
-                    if k in reward_config.REWARD_KEYS:
-                        src = _patch_line(src, k, v)
-                src = _patch_enabled_modules(src, sorted(data.get("enabled_modules") or []))
-                src = _patch_total_formula(src, data.get("total_formula") or "")
-                src = _patch_formula_name(src, norm_name)
-                
-                with open(pc_path, "w", encoding="utf-8") as f:
-                    f.write(src)
-                
-                importlib.reload(reward_config)
-                try:
-                    import Simulation.robot.trainer as trainer
-                    importlib.reload(trainer)
-                except Exception:
-                    pass
-                self.status.set("Đã nạp công thức: %s" % norm_name)
-            except Exception as exc:
-                messagebox.showerror("Nạp công thức", "Lỗi nạp công thức: %s" % exc)
-
-    def update_formula_name(self, event=None):
-        if event and event.widget is not self.container:
-            return
+    def _sync_formula_combo(self):
         self.refresh_formula_list()
         try:
             from RL_lib import reward_config
-            name = reward_config.get_formula_name()
-            self.formula_name_var.set(name)
+
+            name = (reward_config.get_formula_name() or "").strip()
         except Exception:
-            self.formula_name_var.set("Không xác định")
+            name = ""
+        values = self.combo_formula["values"]
+        self.formula_var.set(name if name in values else "")
+
+    def _on_formula_selected(self, _event=None):
+        name = self.formula_var.get().strip()
+        if not name:
+            return
+        if self.learn_lab_app:
+            if not self.learn_lab_app.load_and_compile_formula(name):
+                self._sync_formula_combo()
+            return
+        try:
+            from RL_lib.formula_store import load_formula_file, normalize_formula_basename
+            from RL_lib import reward_config
+            import importlib
+
+            data = load_formula_file(name)
+            reward_config.sync_weights_from_elements(data.get("element_weights") or {})
+            for k, v in (data.get("thresholds") or {}).items():
+                if k in reward_config.REWARD_KEYS:
+                    setattr(reward_config, k, v)
+            reward_config.set_total_formula_student(data.get("total_formula") or "")
+            reward_config.set_enabled_modules(data.get("enabled_modules") or [])
+            norm_name = normalize_formula_basename(name)
+            reward_config.set_formula_name(norm_name)
+
+            pc_path = os.path.join(os.path.dirname(reward_config.__file__), "reward_config.py")
+            with open(pc_path, "r", encoding="utf-8") as f:
+                src = f.read()
+            from Ui_app.learn_lab_UI import _patch_line, _patch_enabled_modules, _patch_total_formula, _patch_formula_name
+
+            for k, v in reward_config.get_reward_dict().items():
+                if k in reward_config.REWARD_KEYS:
+                    src = _patch_line(src, k, v)
+            src = _patch_enabled_modules(src, sorted(data.get("enabled_modules") or []))
+            src = _patch_total_formula(src, data.get("total_formula") or "")
+            src = _patch_formula_name(src, norm_name)
+            with open(pc_path, "w", encoding="utf-8") as f:
+                f.write(src)
+            importlib.reload(reward_config)
+            try:
+                import Simulation.robot.trainer as trainer
+                importlib.reload(trainer)
+            except Exception:
+                pass
+        except Exception as exc:
+            messagebox.showerror("Reward", str(exc))
+            self._sync_formula_combo()
 
     def refresh_ui_scale(self):
         for grp in (self.mode_group, self.view_group, self.delay_group, self.train_mode_group):
@@ -1773,9 +1895,10 @@ class RlApp:
         try:
             style_train_treeview(self.train_tree, self.root)
             self.train_tree.configure(height=text_lines(8))
-            self.train_tree.column("ord", width=px(32))
-            self.train_tree.column("name", width=px(200))
-            self.train_tree.column("eps", width=px(80))
+            self.train_tree.column("ord", width=px(32), minwidth=px(28))
+            self.train_tree.column("name", width=px(160), minwidth=px(72))
+            self.train_tree.column("eps", width=px(72), minwidth=px(56))
+            self._apply_train_mode_ui()
         except tk.TclError:
             pass
         try:
@@ -1788,7 +1911,7 @@ class RlApp:
             pass
         try:
             self.workspace.pack_configure(padx=px(8), pady=px(4))
-            self._side_col_minsize = px(160)
+            self._side_col_minsize = px(240)
             self._log_col_minsize = px(220)
             self._map_col_minsize = px(180)
             self._paned.configure(sashwidth=px(6))
@@ -1797,7 +1920,7 @@ class RlApp:
             pass
         try:
             self.spin_ep.configure(width=entry_width(8))
-            self.combo_formula.configure(width=entry_width(48))
+            self.combo_formula.configure(width=entry_width(24))
             self.combo_checkpoint.configure(width=entry_width(22))
             self.combo_export_policy.configure(width=entry_width(22))
             self.combo_infer_policy.configure(width=entry_width(28))

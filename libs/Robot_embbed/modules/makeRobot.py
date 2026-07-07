@@ -11,9 +11,9 @@ def run(cfg):
     publish_state = None
     publish_log = None
     try:
-        from modules.server.ble_monitor import pump, publish_idle, publish_log, publish_state
+        from modules.server.ble_monitor import pump, publish_idle, publish_log, publish_state, reset_wall_publish_state
     except ImportError:
-        pass
+        reset_wall_publish_state = None
 
     def _log(msg):
         print(msg)
@@ -37,6 +37,8 @@ def run(cfg):
     bot = make_robot(s[0], s[1], "N", rmap)
     clear_obstacle_memory(bot)
     inject_distances_from_map(bot)
+    if reset_wall_publish_state:
+        reset_wall_publish_state(bot)
 
     step = 0
     _log("SW: Inference loop started - policy loaded")

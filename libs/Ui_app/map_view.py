@@ -8,7 +8,7 @@ from tkinter import ttk
 
 from RL_lib.grid import neighbor_xy, is_valid
 from Ui_app.map_layout import apply_fixed_canvas, avail_from_wrap, fit_grid_layout
-from Ui_app.ui_scale import font, px
+from Ui_app.ui_scale import px
 
 _TAG_STATIC = "static"
 _TAG_DYNAMIC = "dynamic"
@@ -37,11 +37,6 @@ class SimMapCanvas:
         self._layout_key = None
         self._map_fingerprint = None
         self._last_visited_cps = set()
-
-        self.info_var = tk.StringVar(value="Chọn map inference và bấm Run.")
-        ttk.Label(self.frame, textvariable=self.info_var, anchor=tk.W, font=font(9)).pack(
-            fill=tk.X, pady=(px(4), 0)
-        )
 
     def pack(self, **kwargs):
         self.frame.pack(**kwargs)
@@ -154,14 +149,10 @@ class SimMapCanvas:
             x, y = entry["x"], entry["y"]
             d = entry["direct"]
             self.step_info = "Step %d | (%d,%d) %s → %s" % (step, x, y, d, act)
-            if status_text:
-                self.info_var.set(status_text)
-            else:
-                self.info_var.set(self.step_info)
         self._redraw_dynamic()
 
     def set_status(self, text):
-        self.info_var.set(text)
+        pass
 
     def _edge_valid(self, x, y, d):
         w, h = self.sim_map["width"], self.sim_map["height"]

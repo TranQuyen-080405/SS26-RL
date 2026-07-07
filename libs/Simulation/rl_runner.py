@@ -47,6 +47,8 @@ def run_train(
         raise FileNotFoundError("Không có map train được chọn")
 
     initial_q, ck_label = resolve_checkpoint(checkpoint)
+    from RL_lib.reward_config import get_formula_name
+
     train_log.print_train_header(
         train_names=[s.get("name", "?") for s in train_sims],
         eval_names=[s.get("name", "?") for s in eval_sims] if infer_paths else [],
@@ -55,6 +57,7 @@ def run_train(
         checkpoint_label=ck_label,
         export_path=export_policy_path,
         resuming=initial_q is not None,
+        reward_formula=get_formula_name(),
     )
 
     result = trainer.train_multi(

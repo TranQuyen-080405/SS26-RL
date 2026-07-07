@@ -9,8 +9,8 @@ TITLE_INFER = "SummerSchool 2026 - Inference"
 
 _MODE_LABELS = {
     "random": "random",
-    "sequential": "sequential",
-    "single": "single map",
+    "sequential": "sequence",
+    "single": "single",
 }
 
 
@@ -51,6 +51,7 @@ def print_train_header(
     checkpoint_label,
     export_path,
     resuming,
+    reward_formula=None,
 ):
     global _episode_header_printed
     _episode_header_printed = False
@@ -58,6 +59,8 @@ def print_train_header(
     banner(TITLE_TRAIN)
     line("Mode", _MODE_LABELS.get(map_mode, map_mode))
     line("Episodes", n_episodes)
+    reward_name = (reward_formula or "").strip()
+    line("Reward formula", reward_name if reward_name else "(chưa đặt tên)")
     if resuming:
         line("Load Q from", _basename(checkpoint_label))
     else:
