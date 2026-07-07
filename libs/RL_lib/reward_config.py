@@ -18,7 +18,7 @@ R_CP_CLOSER = 6.0
 R_CP_FARTHER = -6.0
 R_CHECKPOINT_FIRST = 80.0
 R_GOAL_REACHED = 200.0
-R_ROTATE_IN_PLACE = -5.0
+R_ROTATE_IN_PLACE = -60
 R_FACING_CLEAR = 4.0
 R_FORWARD_CLEAR = 8.0
 R_WASTED_ROTATE = -15.0
@@ -44,10 +44,10 @@ COLLISION_RESET = False
 MAX_STEPS_PER_EPISODE = 600
 
 # --- Learn Lab: module bật + công thức từng element ---
-FORMULA_NAME = 'cong_thuc_moi'
+FORMULA_NAME = 'Reward_1'
 ENABLED_MODULES = set(['checkpoint', 'explore_penalty', 'goal', 'heading', 'obstacle', 'rotation', 'step'])
 ELEMENT_FORMULAS = dict(DEFAULT_ELEMENT_FORMULAS)
-TOTAL_FORMULA_STUDENT = 'Đến đích +  Lại gần goal +  Lặp ô gần +  Quay lại ô +  Tiến lên thành công +  Xoay tại chỗ liên tục +  Va chạm tường +  Đi qua đi lại liên tục +  Xoay sang hướng thông thoáng +  Mỗi bước đi'
+TOTAL_FORMULA_STUDENT = 'Xoay sang hướng thông thoáng +  Xoay tại chỗ +  (  Lặp ô gần +  Quay lại ô +  Đi qua đi lại liên tục )  +  Mỗi bước đi +  Lại gần goal +  Giữ hướng +  Va chạm tường'
 
 REWARD_KEYS = (
     "R_STEP",

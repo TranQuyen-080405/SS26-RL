@@ -693,7 +693,6 @@ class MapEditorApp:
         folder = "train" if kind == "train" else "infer"
         self.status.set("Saved: %s" % path)
         self._notify_maps_changed(kind, path)
-        messagebox.showinfo("Saved", "Đã lưu vào map/%s/\n%s" % (folder, path))
 
     def save_train(self):
         self._save_map("train")

@@ -11,6 +11,7 @@ _MODE_LABELS = {
     "random": "random",
     "sequential": "sequence",
     "single": "single",
+    "curriculum": "curriculum",
 }
 
 

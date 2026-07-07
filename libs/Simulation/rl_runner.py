@@ -31,6 +31,7 @@ def run_train(
     train_map_mode="random",
     train_sims=None,
     sequential_plan=None,
+    curriculum_goal_hits=None,
     export_policy_path=None,
 ):
     from robot import trainer
@@ -72,6 +73,7 @@ def run_train(
         initial_q=initial_q,
         map_mode=train_map_mode,
         sequential_plan=sequential_plan,
+        curriculum_goal_hits=curriculum_goal_hits,
         export_bin_path=export_policy_path,
     )
     return result

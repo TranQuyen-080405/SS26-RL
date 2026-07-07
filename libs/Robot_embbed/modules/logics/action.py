@@ -31,16 +31,24 @@ _SPD   = 30    # tốc độ bám line
 _TURN  = 80    # góc xoay (degree)
 _GAP   = 200   # delay giữa các action (ms)
 _OBS   = 8     # khoảng cách phát hiện vật cản (cm)
+_VERBOSE = False
 
 
 def _log(msg):
     """Gửi log qua Bluetooth BLE lên PC và in ra Serial."""
+    if not _VERBOSE:
+        return
     try:
         from modules.server.ble_monitor import publish_log
         publish_log(msg)
     except Exception:
         pass
     print(msg)
+
+
+def set_verbose(enabled):
+    global _VERBOSE
+    _VERBOSE = bool(enabled)
 
 
 def _is_stopped():
@@ -175,9 +183,8 @@ def forward_hw(bot):
         return _collision(bot)
 
     if _read_obstacle():
-        _log("HW: Ultrasonic phát hiện vật cản")
+        bot["_sensor_wall_hit"] = True
         perceive_edge(bot, True)
-        _log("SW: Cập nhật tường hướng %s" % bot["direct"])
         return _collision(bot)
 
     if not _forward_to_node():
@@ -239,25 +246,18 @@ def run_policy_step(bot):
       3. Execute action (blocking)
       4. Gap 0.2s giữa các bước
     """
-    _log("--- run_policy_step ---")
-
     # 1. HW: quét ultrasonic trước mặt
     obs = _read_obstacle()
-    _log("HW: Ultrasonic = %s" % ("vật cản" if obs else "trống"))
     perceive_edge(bot, obs)
-    if obs:
-        _log("SW: Tường hướng %s ghi nhận" % bot["direct"])
+    bot["_sensor_wall_hit"] = bool(obs)
 
     # 2. SW: encode state → chọn action từ Q-table
     s = build_encoded_state(bot)
-    _log("SW: State=%d" % s)
     name = get_policy_for_state(s)
-    _log("SW: Policy → %s" % name)
 
     # 3. Execute action (blocking)
     result = execute_action(bot, name)
-    _log("SW: Kết quả: success=%s moved=%s collision=%s" % (
-        result.get("success"), result.get("moved"), result.get("collision")))
+    sensor_wall = bool(bot.pop("_sensor_wall_hit", False))
 
     # 4. Gap 0.2s — chia nhỏ để có thể dừng ngay
     for _ in range(4):
@@ -265,4 +265,4 @@ def run_policy_step(bot):
             break
         time.sleep_ms(50)
 
-    return name, result
+    return name, result, s, sensor_wall

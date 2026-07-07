@@ -278,12 +278,7 @@ class RobotMapCanvas:
         self.model = MonitorMapModel()
         self.connected = False
         self.path = []
-        w, h = self.model.w, self.model.h
-        self.info_var = tk.StringVar(
-            value="Map %dx%d — start %s goal %s — chờ dữ liệu từ robot."
-            % (w, h, self.model.start, self.model.goal)
-        )
-        ttk.Label(self.frame, textvariable=self.info_var, anchor=tk.W).pack(fill=tk.X, pady=(4, 0))
+        self.info_var = tk.StringVar(value="")
         
         self._selection = None
         self._await_new_cp = False
@@ -292,6 +287,7 @@ class RobotMapCanvas:
         self._cell = px(44)
         self._offset_x = 0
         self._offset_y = 0
+        self._axis_pad = px(20)
 
         self._resize_after_id = None
         self._last_wrap_size = None
@@ -520,11 +516,14 @@ class RobotMapCanvas:
     def _update_layout(self):
         w, h = self.model.w, self.model.h
         aw, ah = avail_from_wrap(self._map_wrap, min_w=200, min_h=160)
-        cell, ox, oy, cw, ch = fit_grid_layout(w, h, aw, ah)
+        pad = max(px(14), self._axis_pad)
+        grid_aw = max(px(120), aw - 2 * pad)
+        grid_ah = max(px(120), ah - 2 * pad)
+        cell, ox, oy, _, _ = fit_grid_layout(w, h, grid_aw, grid_ah)
         self._cell = cell
-        self._offset_x = ox
-        self._offset_y = oy
-        apply_fixed_canvas(self.canvas, cw, ch)
+        self._offset_x = ox + pad
+        self._offset_y = oy + pad
+        apply_fixed_canvas(self.canvas, aw, ah)
 
     def cell_px(self, x, y, h):
         px = self._offset_x + x * self._cell
@@ -583,6 +582,7 @@ class RobotMapCanvas:
         )
 
     def apply_ble(self, msg):
+        needs_static = bool(msg and ("w" in msg or "walls" in msg))
         prev_phase = self.model.apply_ble(msg)
         pos = self.model.robot_pos()
         if self.model.phase == "r" and self.model.step == 1 and prev_phase != "r":
@@ -590,7 +590,7 @@ class RobotMapCanvas:
         elif not self.path or self.path[-1] != pos:
             self.path.append(pos)
         self._update_info()
-        self.redraw()
+        self.redraw(fast=not needs_static)
 
     def reset_to_start(self):
         self.model._reset_discovered_walls()
@@ -610,8 +610,12 @@ class RobotMapCanvas:
         self.path = [self.model.robot_pos()]
         self.redraw()
 
-    def redraw(self):
+    def redraw(self, fast=False):
         c = self.canvas
+        if fast:
+            c.delete("dynamic")
+            self._draw_dynamic()
+            return
         c.delete("all")
         self._update_layout()
         m = self.model
@@ -720,17 +724,41 @@ class RobotMapCanvas:
                     else:
                         c.create_line(x1, y1, x2, y2, fill="#56586e", width=open_w)
 
+        self._draw_dynamic()
+
+    def _draw_dynamic(self):
+        c = self.canvas
+        m = self.model
+        h = m.h
+        cell = self._cell
         if self.path:
             pts = [self.cell_center(self.path[0][0], self.path[0][1], h)]
             for x, y in self.path[1:]:
                 pts.append(self.cell_center(x, y, h))
             for i in range(len(pts) - 1):
-                c.create_line(pts[i][0], pts[i][1], pts[i + 1][0], pts[i + 1][1], fill="#89b4fa", width=3)
+                c.create_line(
+                    pts[i][0],
+                    pts[i][1],
+                    pts[i + 1][0],
+                    pts[i + 1][1],
+                    fill="#89b4fa",
+                    width=3,
+                    tags=("dynamic",),
+                )
 
         if m.x is not None and m.y is not None:
             cx, cy = self.cell_center(m.x, m.y, h)
             r = cell // 4
-            c.create_oval(cx - r, cy - r, cx + r, cy + r, fill="#cba6f7", outline="#cdd6f4", width=2)
+            c.create_oval(
+                cx - r,
+                cy - r,
+                cx + r,
+                cy + r,
+                fill="#cba6f7",
+                outline="#cdd6f4",
+                width=2,
+                tags=("dynamic",),
+            )
             arrow_len = max(8, cell // 4)
             dir_offsets = {
                 "N": (0, -arrow_len),
@@ -739,7 +767,17 @@ class RobotMapCanvas:
                 "W": (-arrow_len, 0)
             }
             dx, dy = dir_offsets.get(m.d, (0, -arrow_len))
-            c.create_line(cx, cy, cx + dx, cy + dy, fill="#1e1e2e", width=3, arrow=tk.LAST, arrowshape=(8, 10, 4))
+            c.create_line(
+                cx,
+                cy,
+                cx + dx,
+                cy + dy,
+                fill="#1e1e2e",
+                width=3,
+                arrow=tk.LAST,
+                arrowshape=(8, 10, 4),
+                tags=("dynamic",),
+            )
 
 
 class RobotMonitorApp:

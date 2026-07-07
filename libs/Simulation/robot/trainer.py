@@ -226,9 +226,10 @@ def train_multi(
     initial_q=None,
     map_mode="random",
     sequential_plan=None,
+    curriculum_goal_hits=None,
     export_bin_path=None,
 ):
-    """Train nhiều map; map_mode='random' | 'sequential'. sequential_plan: [(sim, n_ep), ...]."""
+    """Train nhiều map; map_mode='random' | 'sequential' | 'curriculum'."""
     from robot.policy_io import DEFAULT_POLICY_BIN
 
     export_path = export_bin_path or DEFAULT_POLICY_BIN
@@ -335,6 +336,35 @@ def train_multi(
                     break
                 ep_global += 1
         n_episodes = total_eps
+    elif map_mode == "curriculum":
+        goal_target = max(1, int(curriculum_goal_hits or 10))
+        total_target = max(1, goal_target * len(train_sims))
+        train_log.print_train_start(
+            map_mode, total_target, len(train_sims), len(q) if resuming else None, resuming
+        )
+        ep_global = 0
+        for sim in train_sims:
+            if stopped:
+                break
+            map_goals = 0
+            while map_goals < goal_target:
+                _gate_pause(pause_gate, should_stop)
+                if should_stop and should_stop():
+                    stopped = True
+                    train_log.print_stopped_at(ep_global)
+                    break
+                eps = epsilon_min + (epsilon - epsilon_min) * (
+                    1.0 - min(ep_global, total_target - 1) / max(total_target - 1, 1)
+                )
+                before_goal = n_goal
+                if not _run_one_episode(sim, ep_global, eps, total_target):
+                    break
+                if n_goal > before_goal:
+                    map_goals += (n_goal - before_goal)
+                ep_global += 1
+                if stopped:
+                    break
+        n_episodes = ep_global
     else:
         if n_episodes > 0:
             train_log.print_train_start(

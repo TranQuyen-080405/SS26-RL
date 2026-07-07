@@ -113,7 +113,7 @@ REWARD_ELEMENTS = {
         "default_formula": "R_GOAL_FARTHER if goal_farther else 0",
     },
     "goal_reached": {
-        "label": "Đến đích",
+        "label": "Đến goal",
         "module": "goal",
         "constants": ["R_GOAL_REACHED"],
         "default_formula": "R_GOAL_REACHED if at_goal else 0",

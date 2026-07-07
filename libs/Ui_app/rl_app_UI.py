@@ -79,6 +79,7 @@ class RlApp:
         self._locked_view = None
         self._locked_mode = None
         self.train_map_mode = tk.StringVar(value="random")
+        self.curriculum_goal_hits = tk.StringVar(value="10")
         self._drag_src_iid = None
         self._eps_entry = None
         self._eps_edit_iid = None
@@ -94,6 +95,7 @@ class RlApp:
         self._build_map_list()
         self.mode.trace_add("write", lambda *_: self._on_mode_change())
         self.view.trace_add("write", lambda *_: self._on_view_change())
+        self.curriculum_goal_hits.trace_add("write", lambda *_: self._on_curriculum_goal_hits_changed())
         self._on_mode_change()
         self._sync_formula_combo()
 
@@ -166,6 +168,31 @@ class RlApp:
         box_button(row1, text="Xuất policy ra CSV", command=self._export_policy_to_csv, role="secondary").pack(
             side=tk.LEFT, padx=(0, 4)
         )
+        ttk.Label(row1, text="Khởi tạo Q_table:").pack(side=tk.LEFT, padx=(8, 4))
+        box_button(
+            row1,
+            text="Ưu tiên thẳng",
+            command=lambda: self._create_init_policy("forward"),
+            role="secondary",
+        ).pack(side=tk.LEFT, padx=(0, 4))
+        box_button(
+            row1,
+            text="Ưu tiên trái",
+            command=lambda: self._create_init_policy("left"),
+            role="secondary",
+        ).pack(side=tk.LEFT, padx=(0, 4))
+        box_button(
+            row1,
+            text="Ưu tiên phải",
+            command=lambda: self._create_init_policy("right"),
+            role="secondary",
+        ).pack(side=tk.LEFT, padx=(0, 4))
+        box_button(
+            row1,
+            text="Ngẫu nhiên",
+            command=lambda: self._create_init_policy("random"),
+            role="secondary",
+        ).pack(side=tk.LEFT, padx=(0, 8))
 
         row2 = ttk.Frame(self.ck_frame)
         row2.pack(fill=tk.X, pady=(6, 0))
@@ -177,32 +204,6 @@ class RlApp:
         )
         self.combo_export_policy.pack(side=tk.LEFT, padx=(0, 4))
         ttk.Label(row2, text=".bin").pack(side=tk.LEFT, padx=(0, 8))
-        ttk.Separator(row2, orient=tk.VERTICAL).pack(side=tk.RIGHT, fill=tk.Y, padx=6)
-        box_button(
-            row2,
-            text="Random init",
-            command=lambda: self._create_init_policy("random"),
-            role="secondary",
-        ).pack(side=tk.RIGHT, padx=(4, 0))
-        box_button(
-            row2,
-            text="Right init",
-            command=lambda: self._create_init_policy("right"),
-            role="secondary",
-        ).pack(side=tk.RIGHT, padx=(4, 0))
-        box_button(
-            row2,
-            text="Left init",
-            command=lambda: self._create_init_policy("left"),
-            role="secondary",
-        ).pack(side=tk.RIGHT, padx=(4, 0))
-        box_button(
-            row2,
-            text="Forward init",
-            command=lambda: self._create_init_policy("forward"),
-            role="secondary",
-        ).pack(side=tk.RIGHT, padx=(4, 0))
-        ttk.Label(row2, text="Init policy:").pack(side=tk.RIGHT, padx=(0, 4))
         # ttk.Label(
         #     row2,
         #     text="Train mới → đặt tên file; train tiếp → có thể giữ hoặc đổi tên",
@@ -294,7 +295,6 @@ class RlApp:
         try:
             if os.path.exists(path):
                 os.remove(path)
-                messagebox.showinfo("Đã xóa", f"Đã xóa thành công file policy '{name}'!")
                 self.refresh_infer_policies()
                 self.refresh_checkpoints()
             else:
@@ -328,7 +328,6 @@ class RlApp:
         try:
             if os.path.exists(path):
                 os.remove(path)
-                messagebox.showinfo("Đã xóa", f"Đã xóa thành công file policy '{name}'!")
                 self.refresh_checkpoints()
                 self.refresh_infer_policies()
             else:
@@ -396,7 +395,7 @@ class RlApp:
 
     def _create_init_policy(self, mode):
         if self._is_busy():
-            messagebox.showinfo("Init policy", "Đang chạy train/inference — vui lòng bấm Stop hoặc đợi chạy xong.")
+            messagebox.showinfo("Khởi tạo policy", "Đang chạy train/inference — vui lòng bấm Stop hoặc đợi chạy xong.")
             return
         try:
             from robot.policy_io import (
@@ -419,7 +418,7 @@ class RlApp:
                 q_table = biased_q_table("rotate right", preferred_value=0.5, other_value=0.0)
                 label = "rotate right"
             else:
-                q_table = random_q_table(-0.5, 0.5)
+                q_table = random_q_table()
                 label = "random"
             export_policy(q_table, path)
             self.refresh_checkpoints()
@@ -427,10 +426,10 @@ class RlApp:
             self.checkpoint_var.set(base)
             self.export_policy_var.set(base)
             self.infer_policy_var.set(base + ".bin")
-            self.status.set("Init policy '%s' (%s)" % (base, label))
-            messagebox.showinfo("Init policy", "Đã tạo policy khởi tạo:\n%s" % os.path.basename(path))
+            self.status.set("Khởi tạo policy '%s' (%s)" % (base, label))
+            messagebox.showinfo("Khởi tạo policy", "Đã tạo policy khởi tạo:\n%s" % os.path.basename(path))
         except Exception as exc:
-            messagebox.showerror("Init policy", str(exc))
+            messagebox.showerror("Khởi tạo policy", str(exc))
 
     def _infer_policy_bin(self):
         from robot.policy_io import policy_bin_path
@@ -542,10 +541,22 @@ class RlApp:
         self.train_mode_group = SegmentGroup(
             mode_row,
             self.train_map_mode,
-            [("Random", "random"), ("Sequence", "sequential"), ("Single", "single")],
+            [("Random", "random"), ("Sequence", "sequential"), ("Single", "single"), ("Curriculum", "curriculum")],
             command=self._on_train_mode_change,
         )
         self.train_mode_group.pack(side=tk.LEFT)
+        self.curriculum_cfg_frame = ttk.Frame(mode_row)
+        self.curriculum_cfg_frame.pack(side=tk.LEFT, padx=(10, 0))
+        ttk.Label(self.curriculum_cfg_frame, text="Mục tiêu qua map").pack(side=tk.LEFT, padx=(0, 4))
+        self.spin_curriculum_goal_hits = ttk.Spinbox(
+            self.curriculum_cfg_frame,
+            from_=1,
+            to=1000,
+            increment=1,
+            width=entry_width(6),
+            textvariable=self.curriculum_goal_hits,
+        )
+        self.spin_curriculum_goal_hits.pack(side=tk.LEFT)
 
         tree_wrap = ttk.Frame(self.train_cfg_frame)
         tree_wrap.grid(row=1, column=0, sticky="nsew")
@@ -648,8 +659,13 @@ class RlApp:
         self._apply_train_mode_ui()
         self._refresh_train_tree()
 
+    def _on_curriculum_goal_hits_changed(self):
+        if self.train_map_mode.get() != "curriculum":
+            return
+        self._update_train_episodes_total()
+
     def _train_tree_display_columns(self):
-        if self.train_map_mode.get() == "random":
+        if self.train_map_mode.get() in ("random", "curriculum"):
             return ("on", "ord", "name")
         return ("on", "ord", "eps", "name")
 
@@ -685,8 +701,19 @@ class RlApp:
         else:
             self.btn_train_select_all.pack(side=tk.LEFT, padx=(0, 4), pady=4)
             self.btn_train_select_none.pack(side=tk.LEFT, padx=4, pady=4)
+        if mode == "curriculum":
+            self.curriculum_cfg_frame.pack(side=tk.LEFT, padx=(10, 0))
+            self.spin_curriculum_goal_hits.configure(state=tk.NORMAL)
+        else:
+            self.curriculum_cfg_frame.pack_forget()
+            self.spin_curriculum_goal_hits.configure(state=tk.DISABLED)
         if mode == "random":
             self.spin_ep.configure(state=tk.NORMAL)
+        elif mode == "curriculum":
+            enabled = self._train_enabled_rows()
+            per_map = max(1, int(self.curriculum_goal_hits.get() or "1"))
+            self.spin_ep.configure(state=tk.DISABLED)
+            self.spin_ep.set(str(max(1, per_map * max(1, len(enabled)))))
         else:
             self._update_train_episodes_total()
 
@@ -698,6 +725,15 @@ class RlApp:
         if mode == "random":
             return
         enabled = self._train_enabled_rows()
+        if mode == "curriculum":
+            try:
+                per_map = max(1, int(self.curriculum_goal_hits.get()))
+            except ValueError:
+                per_map = 10
+            total_target = per_map * max(1, len(enabled))
+            self.spin_ep.configure(state=tk.DISABLED)
+            self.spin_ep.set(str(total_target))
+            return
         total = sum(max(1, int(r["episodes"])) for r in enabled)
         self.spin_ep.configure(state=tk.DISABLED)
         self.spin_ep.set(str(max(1, total) if total else 1))
@@ -917,11 +953,20 @@ class RlApp:
             row = enabled[0]
             sim = build_sim_map_from_file(row["path"])
             n_ep = max(1, int(row["episodes"]))
-            return "random", [sim], None, n_ep
+            return "random", [sim], None, n_ep, None
 
         enabled = [r for r in self._train_rows if r["enabled"]]
         if not enabled:
             raise ValueError("Chọn ít nhất một map train (bấm ô [ ]).")
+        if mode == "curriculum":
+            ordered = sorted(enabled, key=lambda r: r["order"])
+            sims = [build_sim_map_from_file(r["path"]) for r in ordered]
+            try:
+                goal_hits = max(1, int(self.curriculum_goal_hits.get()))
+            except ValueError:
+                goal_hits = 10
+            total_target = goal_hits * max(1, len(sims))
+            return mode, sims, None, total_target, goal_hits
         if mode == "sequential":
             ordered = sorted(enabled, key=lambda r: r["order"])
             plan = []
@@ -931,13 +976,13 @@ class RlApp:
                 plan.append((sim, int(r["episodes"])))
                 sims.append(sim)
             total = sum(r["episodes"] for r in ordered)
-            return mode, sims, plan, total
+            return mode, sims, plan, total, None
         sims = [build_sim_map_from_file(r["path"]) for r in enabled]
         try:
             n_ep = int(self.spin_ep.get())
         except ValueError:
             n_ep = 10000
-        return mode, sims, None, n_ep
+        return mode, sims, None, n_ep, None
 
     def _start_train(self):
         if self._running:
@@ -1527,7 +1572,7 @@ class RlApp:
         self.status.set("Running...")
 
         try:
-            mode, sims, plan, n_ep = self._build_train_run_config()
+            mode, sims, plan, n_ep, curriculum_goal_hits = self._build_train_run_config()
         except ValueError as exc:
             messagebox.showwarning("Train", str(exc))
             self._end_train(False, 0)
@@ -1547,6 +1592,7 @@ class RlApp:
                     train_map_mode=mode,
                     train_sims=sims,
                     sequential_plan=plan,
+                    curriculum_goal_hits=curriculum_goal_hits,
                     export_policy_path=export_path,
                 )
             except Exception as exc:
@@ -1570,7 +1616,7 @@ class RlApp:
             self._anim_after_id = None
 
         try:
-            mode, sims, plan, n_ep = self._build_train_run_config()
+            mode, sims, plan, n_ep, curriculum_goal_hits = self._build_train_run_config()
         except ValueError as exc:
             messagebox.showwarning("Train", str(exc))
             self._end_train(False, 0)
@@ -1595,6 +1641,7 @@ class RlApp:
                     train_map_mode=mode,
                     train_sims=sims,
                     sequential_plan=plan,
+                    curriculum_goal_hits=curriculum_goal_hits,
                     export_policy_path=export_path,
                 )
             except Exception as exc:
