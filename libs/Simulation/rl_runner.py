@@ -134,7 +134,41 @@ def _episode_at_goal(robot, sim_map):
     return rb.is_at_goal(robot)
 
 
-def run_infer_episode(sim_map, q_table, max_steps=MAX_STEPS_INFER, verbose=True, on_step=None, pause_gate=None):
+def _infer_outcome(sim_map, status, steps, log):
+    checkpoints = set(tuple(cp) for cp in sim_map.get("checkpoints", []))
+    visited = set()
+    start = tuple(sim_map.get("start", ()))
+    if start in checkpoints:
+        visited.add(start)
+    for entry in log:
+        pos = (entry.get("nx"), entry.get("ny"))
+        if pos in checkpoints:
+            visited.add(pos)
+
+    score = float(
+        (400 if status == "goal" else 0)
+        + 100 * len(visited)
+        - (100 if status == "collision" else 0)
+        - 2 * steps
+    )
+    return {
+        "status": status,
+        "steps": steps,
+        "log": log,
+        "score": score,
+        "checkpoints_visited": sorted(visited),
+    }
+
+
+def run_infer_episode(
+    sim_map,
+    q_table,
+    max_steps=MAX_STEPS_INFER,
+    verbose=True,
+    on_step=None,
+    pause_gate=None,
+    should_stop=None,
+):
     """Chạy policy thuần (argmax Q). Trả dict status, steps, log."""
     import train_log
     from robot.trainer import _gate_pause
@@ -150,10 +184,14 @@ def run_infer_episode(sim_map, q_table, max_steps=MAX_STEPS_INFER, verbose=True,
 
     for step in range(1, max_steps + 1):
         _gate_pause(pause_gate)
+        if should_stop and should_stop():
+            if verbose:
+                train_log.print_infer_summary("stopped", step - 1)
+            return _infer_outcome(sim_map, "stopped", step - 1, log)
         if _episode_at_goal(bot, sim_map):
             if verbose:
                 train_log.print_infer_summary("goal", step - 1)
-            return {"status": "goal", "steps": step - 1, "log": log}
+            return _infer_outcome(sim_map, "goal", step - 1, log)
 
         s = rb.build_encoded_state(bot)
         a_name = get_policy(s, q_table)
@@ -191,16 +229,16 @@ def run_infer_episode(sim_map, q_table, max_steps=MAX_STEPS_INFER, verbose=True,
         if result.get("collision"):
             if verbose:
                 train_log.print_infer_summary("collision", step)
-            return {"status": "collision", "steps": step, "log": log}
+            return _infer_outcome(sim_map, "collision", step, log)
 
         if _episode_at_goal(bot, sim_map):
             if verbose:
                 train_log.print_infer_summary("goal", step)
-            return {"status": "goal", "steps": step, "log": log}
+            return _infer_outcome(sim_map, "goal", step, log)
 
     if verbose:
         train_log.print_infer_summary("max_steps", max_steps)
-    return {"status": "max_steps", "steps": max_steps, "log": log}
+    return _infer_outcome(sim_map, "max_steps", max_steps, log)
 
 
 def run_infer_episode_for_map(
@@ -210,6 +248,7 @@ def run_infer_episode_for_map(
     on_step=None,
     policy_bin=None,
     pause_gate=None,
+    should_stop=None,
 ):
     """Nạp map + policy, chạy một episode infer."""
     import train_log
@@ -222,7 +261,13 @@ def run_infer_episode_for_map(
     if verbose:
         train_log.print_infer_header(sim, policy_path)
     return sim, run_infer_episode(
-        sim, q, max_steps=max_steps, verbose=verbose, on_step=on_step, pause_gate=pause_gate
+        sim,
+        q,
+        max_steps=max_steps,
+        verbose=verbose,
+        on_step=on_step,
+        pause_gate=pause_gate,
+        should_stop=should_stop,
     )
 
 

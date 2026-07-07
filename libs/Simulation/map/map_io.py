@@ -1,21 +1,48 @@
 """
-Đọc / ghi map JSON cho editor và Simulation.
-Lưu tại: <repo>/map/train/map_train_*.json | <repo>/map/infer/map_infer_*.json
+Read/write map JSON for editor and Simulation.
+
+Writable maps live under <app_root>/map/train and <app_root>/map/infer.
+When packaged with PyInstaller, default infer maps can also be bundled inside
+<bundle>/map/infer; those bundled maps are read-only and are merged into the
+infer list without exposing files next to the exe.
 """
 
 import json
 import os
 import re
 
+from runtime_paths import app_data_path, bundled_path, is_frozen
+
 _SIM_MAP_DIR = os.path.dirname(os.path.abspath(__file__))
-_REPO_ROOT = os.path.abspath(os.path.join(_SIM_MAP_DIR, "..", "..", ".."))
-MAP_ROOT = os.path.join(_REPO_ROOT, "map")
+_REPO_ROOT = app_data_path()
+MAP_ROOT = app_data_path("map")
 TRAIN_MAPS_DIR = os.path.join(MAP_ROOT, "train")
 INFER_MAPS_DIR = os.path.join(MAP_ROOT, "infer")
-# Tương thích import cũ
+BUNDLED_MAP_ROOT = bundled_path("map")
+BUNDLED_INFER_MAPS_DIR = os.path.join(BUNDLED_MAP_ROOT, "infer")
+# Backward-compatible import name.
 MAPS_DIR = MAP_ROOT
 
 _KIND_PREFIX = {"train": "map_train_", "infer": "map_infer_"}
+
+
+def _abs(path):
+    return os.path.abspath(path)
+
+
+def _is_same_path(a, b):
+    return os.path.normcase(_abs(a)) == os.path.normcase(_abs(b))
+
+
+def is_bundled_map_path(path):
+    """Return True for read-only maps that came from the packaged exe."""
+    if not path or not is_frozen():
+        return False
+    try:
+        common = os.path.commonpath([_abs(path), _abs(BUNDLED_MAP_ROOT)])
+    except ValueError:
+        return False
+    return _is_same_path(common, BUNDLED_MAP_ROOT)
 
 
 def maps_dir_for_kind(kind):
@@ -76,23 +103,23 @@ def spec_from_walls(width, height, walls_set, **kwargs):
 
 
 def save_map_json(spec, path=None, kind=None):
-    """Lưu spec ra JSON trong map/train/ hoặc map/infer/."""
+    """Save a map JSON to writable map/train or map/infer."""
     spec = _normalize_spec(spec)
     if kind:
         spec["kind"] = kind
     k = spec.get("kind", "train")
     ensure_maps_dir(k)
-    
+
     orig_name = spec.get("name", "map")
     safe = re.sub(r"[^\w\-]+", "_", orig_name).strip("_") or "map"
     for pref in ["map_train_", "map_infer_"]:
         if safe.startswith(pref):
             safe = safe[len(pref):]
-            
+
     prefix = _KIND_PREFIX.get(k, "map_train_")
     new_name = f"{prefix}{safe}"
     spec["name"] = new_name
-    
+
     if path is None:
         path = os.path.join(maps_dir_for_kind(k), f"{new_name}.json")
     with open(path, "w", encoding="utf-8") as f:
@@ -106,7 +133,7 @@ def load_map_json(path):
 
 
 def build_sim_map(spec):
-    """Nạp spec JSON → sim_map dict (dùng cho train / infer)."""
+    """Load a JSON spec into a sim_map dict for train/infer."""
     import sys
 
     _sim_root = os.path.abspath(os.path.join(_SIM_MAP_DIR, ".."))
@@ -134,41 +161,60 @@ def build_sim_map_from_file(path):
     return build_sim_map(load_map_json(path))
 
 
+def _json_in_dir(directory):
+    if not os.path.isdir(directory):
+        return []
+    return sorted(
+        os.path.join(directory, name)
+        for name in os.listdir(directory)
+        if name.lower().endswith(".json")
+    )
+
+
+def _merge_by_name(*path_lists):
+    by_name = {}
+    for paths in path_lists:
+        for path in paths:
+            by_name[os.path.basename(path).lower()] = path
+    return [by_name[name] for name in sorted(by_name)]
+
+
 def list_map_files(kind=None):
-    """Liệt kê mọi file .json trong map/train/ hoặc map/infer/."""
+    """List train/infer JSON maps. Bundled infer maps are read-only."""
     ensure_maps_dir("train")
     ensure_maps_dir("infer")
 
-    def _json_in_dir(directory):
-        if not os.path.isdir(directory):
-            return []
-        return sorted(
-            os.path.join(directory, name)
-            for name in os.listdir(directory)
-            if name.lower().endswith(".json")
-        )
+    train_paths = _json_in_dir(TRAIN_MAPS_DIR)
+    bundled_infer_paths = _json_in_dir(BUNDLED_INFER_MAPS_DIR)
+    external_infer_paths = _json_in_dir(INFER_MAPS_DIR)
+    infer_paths = _merge_by_name(bundled_infer_paths, external_infer_paths)
 
     if kind == "train":
-        return _json_in_dir(TRAIN_MAPS_DIR)
+        return train_paths
     if kind == "infer":
-        return _json_in_dir(INFER_MAPS_DIR)
-    return _json_in_dir(TRAIN_MAPS_DIR) + _json_in_dir(INFER_MAPS_DIR)
+        return infer_paths
+    return train_paths + infer_paths
 
 
 def maps_storage_snapshot():
-    """Fingerprint thư mục map/train + map/infer — dùng phát hiện thay đổi file."""
+    """Fingerprint map folders so UI can detect external save/delete changes."""
     out = []
-    for kind in ("train", "infer"):
-        directory = maps_dir_for_kind(kind)
+    for kind, directories in (
+        ("train", (TRAIN_MAPS_DIR,)),
+        ("infer", (BUNDLED_INFER_MAPS_DIR, INFER_MAPS_DIR)),
+    ):
         entries = []
-        if os.path.isdir(directory):
+        for directory in directories:
+            if not os.path.isdir(directory):
+                continue
+            source = "bundled" if _is_same_path(directory, BUNDLED_INFER_MAPS_DIR) else "external"
             for name in sorted(os.listdir(directory)):
                 if not name.lower().endswith(".json"):
                     continue
                 path = os.path.join(directory, name)
                 try:
-                    entries.append((name, os.path.getmtime(path), os.path.getsize(path)))
+                    entries.append((source, name, os.path.getmtime(path), os.path.getsize(path)))
                 except OSError:
-                    entries.append((name, 0, 0))
+                    entries.append((source, name, 0, 0))
         out.append((kind, tuple(entries)))
     return tuple(out)
