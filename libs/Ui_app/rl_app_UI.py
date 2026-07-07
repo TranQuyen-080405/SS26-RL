@@ -17,7 +17,7 @@ if _ROOT not in sys.path:
 if _SIM not in sys.path:
     sys.path.insert(0, _SIM)
 
-from map.map_io import list_map_files, build_sim_map_from_file, maps_dir_for_kind
+from map.map_io import list_map_files, build_sim_map_from_file
 from Ui_app.map_view import SimMapCanvas
 from Ui_app.ui_scale import configure_window, entry_width, font, init as init_ui_scale, px, text_lines
 from Ui_app.ui_widgets import SegmentGroup, box_button, style_train_treeview, train_map_mark, train_row_tags
@@ -98,7 +98,7 @@ class RlApp:
         self._sync_formula_combo()
 
     def _build_toolbar(self):
-        bar = ttk.LabelFrame(self.container, text="Điều khiển chung", padding=px(8))
+        bar = ttk.LabelFrame(self.container, text="Bảng điều khiển chung", padding=px(8))
         bar.pack(fill=tk.X, padx=px(8), pady=(px(8), px(4)))
 
         ttk.Label(bar, text="Mode").grid(row=0, column=0, padx=(0, 8), sticky=tk.W)
@@ -145,10 +145,10 @@ class RlApp:
         self.combo_formula.bind("<<ComboboxSelected>>", self._on_formula_selected)
 
     def _build_checkpoint_bar(self):
-        self.ck_frame = ttk.LabelFrame(self.container, text="Policy train", padding=(8, 6))
+        self.ck_frame = ttk.LabelFrame(self.container, text="Nạp Policy", padding=(8, 6))
         row1 = ttk.Frame(self.ck_frame)
         row1.pack(fill=tk.X)
-        ttk.Label(row1, text="Nạp Q từ").pack(side=tk.LEFT, padx=(0, 4))
+        ttk.Label(row1, text="Nạp từ").pack(side=tk.LEFT, padx=(0, 4))
         self.combo_checkpoint = ttk.Combobox(
             row1,
             textvariable=self.checkpoint_var,
@@ -177,6 +177,32 @@ class RlApp:
         )
         self.combo_export_policy.pack(side=tk.LEFT, padx=(0, 4))
         ttk.Label(row2, text=".bin").pack(side=tk.LEFT, padx=(0, 8))
+        ttk.Separator(row2, orient=tk.VERTICAL).pack(side=tk.RIGHT, fill=tk.Y, padx=6)
+        box_button(
+            row2,
+            text="Random init",
+            command=lambda: self._create_init_policy("random"),
+            role="secondary",
+        ).pack(side=tk.RIGHT, padx=(4, 0))
+        box_button(
+            row2,
+            text="Right init",
+            command=lambda: self._create_init_policy("right"),
+            role="secondary",
+        ).pack(side=tk.RIGHT, padx=(4, 0))
+        box_button(
+            row2,
+            text="Left init",
+            command=lambda: self._create_init_policy("left"),
+            role="secondary",
+        ).pack(side=tk.RIGHT, padx=(4, 0))
+        box_button(
+            row2,
+            text="Forward init",
+            command=lambda: self._create_init_policy("forward"),
+            role="secondary",
+        ).pack(side=tk.RIGHT, padx=(4, 0))
+        ttk.Label(row2, text="Init policy:").pack(side=tk.RIGHT, padx=(0, 4))
         # ttk.Label(
         #     row2,
         #     text="Train mới → đặt tên file; train tiếp → có thể giữ hoặc đổi tên",
@@ -194,18 +220,14 @@ class RlApp:
         )
         self.combo_infer_policy.pack(side=tk.LEFT, padx=(0, 8))
         box_button(
-            self.infer_policy_frame, text="Refresh list", command=self.refresh_infer_policies, role="secondary"
+            self.infer_policy_frame, text="Làm mới", command=self.refresh_infer_policies, role="secondary"
         ).pack(side=tk.LEFT, padx=(0, 4))
         box_button(
-            self.infer_policy_frame, text="Delete policy", command=self._delete_selected_policy, role="secondary"
+            self.infer_policy_frame, text="Xóa policy", command=self._delete_selected_policy, role="secondary"
         ).pack(side=tk.LEFT, padx=(0, 4))
         box_button(
-            self.infer_policy_frame, text="Xuất policy ra CSV", command=self._export_policy_to_csv, role="secondary"
+            self.infer_policy_frame, text="Xuất file CSV", command=self._export_policy_to_csv, role="secondary"
         ).pack(side=tk.LEFT, padx=(0, 4))
-        ttk.Label(
-            self.infer_policy_frame,
-            text="Chọn file checkpoints/*.bin để inference",
-        ).pack(side=tk.LEFT, padx=8)
         self.refresh_infer_policies()
 
     def _export_policy_to_csv(self):
@@ -360,6 +382,44 @@ class RlApp:
         base = normalize_policy_base_name(self.export_policy_var.get())
         return checkpoint_bin_path(base)
 
+    def _create_init_policy(self, mode):
+        if self._is_busy():
+            messagebox.showinfo("Init policy", "Đang chạy train/inference — vui lòng bấm Stop hoặc đợi chạy xong.")
+            return
+        try:
+            from robot.policy_io import (
+                normalize_policy_base_name,
+                checkpoint_bin_path,
+                export_policy,
+                biased_q_table,
+                random_q_table,
+            )
+
+            base = normalize_policy_base_name(self.export_policy_var.get())
+            path = checkpoint_bin_path(base)
+            if mode == "forward":
+                q_table = biased_q_table("forward", preferred_value=0.5, other_value=0.0)
+                label = "forward"
+            elif mode == "left":
+                q_table = biased_q_table("rotate left", preferred_value=0.5, other_value=0.0)
+                label = "rotate left"
+            elif mode == "right":
+                q_table = biased_q_table("rotate right", preferred_value=0.5, other_value=0.0)
+                label = "rotate right"
+            else:
+                q_table = random_q_table(-0.5, 0.5)
+                label = "random"
+            export_policy(q_table, path)
+            self.refresh_checkpoints()
+            self.refresh_infer_policies()
+            self.checkpoint_var.set(base)
+            self.export_policy_var.set(base)
+            self.infer_policy_var.set(base + ".bin")
+            self.status.set("Init policy '%s' (%s)" % (base, label))
+            messagebox.showinfo("Init policy", "Đã tạo policy khởi tạo:\n%s" % os.path.basename(path))
+        except Exception as exc:
+            messagebox.showerror("Init policy", str(exc))
+
     def _infer_policy_bin(self):
         from robot.policy_io import policy_bin_path
 
@@ -510,13 +570,10 @@ class RlApp:
         btn_row = tk.Frame(self.train_cfg_frame, height=px(44))
         btn_row.grid(row=2, column=0, sticky="ew", pady=(px(6), 0))
         btn_row.grid_propagate(False)
-        self.btn_train_select_all = box_button(btn_row, text="Tất cả", command=self._train_select_all, role="accent")
+        self.btn_train_select_all = box_button(btn_row, text="Chọn tất cả", command=self._train_select_all, role="accent")
         self.btn_train_select_all.pack(side=tk.LEFT, padx=(0, 4), pady=4)
-        self.btn_train_select_none = box_button(btn_row, text="Bỏ chọn", command=self._train_select_none, role="secondary")
+        self.btn_train_select_none = box_button(btn_row, text="Bỏ chọn tất cả", command=self._train_select_none, role="secondary")
         self.btn_train_select_none.pack(side=tk.LEFT, padx=4, pady=4)
-        box_button(btn_row, text="Xóa map", command=self._delete_selected_train_map, role="secondary").pack(
-            side=tk.LEFT, padx=4, pady=4
-        )
 
         self.infer_list_frame = ttk.LabelFrame(frame, text="Chọn map inference", padding=6)
         list_frame = ttk.Frame(self.infer_list_frame)
@@ -538,12 +595,6 @@ class RlApp:
         self.map_list.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         scroll.pack(side=tk.RIGHT, fill=tk.Y)
         self.map_list.bind("<<ListboxSelect>>", self._on_map_select)
-
-        btn_row_infer = tk.Frame(self.infer_list_frame, height=px(44))
-        btn_row_infer.pack(fill=tk.X, pady=(4, 0))
-        box_button(btn_row_infer, text="Xóa map", command=self._delete_selected_infer_map, role="secondary").pack(
-            side=tk.LEFT, pady=4
-        )
 
         self._rebuild_paned_panes()
 
@@ -1121,7 +1172,7 @@ class RlApp:
             self.map_list.delete(0, tk.END)
             for path in self._map_paths:
                 self.map_list.insert(tk.END, os.path.basename(path))
-            self._set_map_hint("Inference: chọn map. Map + Run để xem robot inference từng bước.")
+            self._set_map_hint("")
             self.spin_ep.configure(state=tk.DISABLED)
             if self._map_paths:
                 self.map_list.selection_set(0)
@@ -1175,66 +1226,6 @@ class RlApp:
             self.status.set("Refresh map — %d file trong map/%s/" % (n, kind))
         else:
             self.status.set("Refresh map — %d file trong map/%s/ (chọn View Map để xem)" % (n, kind))
-
-    def _delete_selected_train_map(self):
-        if self._is_busy():
-            messagebox.showinfo("Xóa map", "Đang chạy train/inference — vui lòng bấm Stop hoặc đợi chạy xong.")
-            return
-        sel = self.train_tree.selection()
-        if not sel:
-            messagebox.showinfo("Xóa map", "Vui lòng chọn bản đồ trong danh sách train để xóa.")
-            return
-        row = self._train_row_by_iid(sel[0])
-        if not row:
-            return
-        filename = row["name"]
-        confirm = messagebox.askyesno(
-            "Xác nhận xóa",
-            f"Bạn có chắc chắn muốn xóa bản đồ '{filename}' khỏi danh sách train không?",
-            icon="warning"
-        )
-        if not confirm:
-            return
-        path = os.path.join(maps_dir_for_kind("train"), filename)
-        try:
-            if os.path.exists(path):
-                os.remove(path)
-                messagebox.showinfo("Đã xóa", f"Đã xóa thành công bản đồ '{filename}'!")
-                self._emit_maps_changed("train", path)
-            else:
-                messagebox.showerror("Lỗi", f"Không tìm thấy file bản đồ '{filename}' để xóa.")
-        except Exception as e:
-            messagebox.showerror("Lỗi", f"Lỗi khi xóa file: {str(e)}")
-
-    def _delete_selected_infer_map(self):
-        if self._is_busy():
-            messagebox.showinfo("Xóa map", "Đang chạy train/inference — vui lòng bấm Stop hoặc đợi chạy xong.")
-            return
-        sel = self.map_list.curselection()
-        if not sel:
-            messagebox.showinfo("Xóa map", "Vui lòng chọn bản đồ trong danh sách inference để xóa.")
-            return
-        idx = sel[0]
-        if idx >= len(self._map_paths):
-            return
-        path = self._map_paths[idx]
-        filename = os.path.basename(path)
-        confirm = messagebox.askyesno(
-            "Xác nhận xóa",
-            f"Bạn có chắc chắn muốn xóa bản đồ '{filename}' khỏi danh sách inference không?",
-            icon="warning"
-        )
-        if not confirm:
-            return
-        try:
-            if os.path.exists(path):
-                os.remove(path)
-                messagebox.showinfo("Đã xóa", f"Đã xóa thành công bản đồ '{filename}'!")
-                self._emit_maps_changed("infer", path)
-            else:
-                messagebox.showerror("Lỗi", f"Không tìm thấy file bản đồ '{filename}' để xóa.")
-        except Exception as e:
-            messagebox.showerror("Lỗi", f"Lỗi khi xóa file: {str(e)}")
 
     def on_run(self):
         if self._running and self._paused:

@@ -65,9 +65,9 @@ class LabScenarioMap5:
         ttk.Label(act_row, text="Move:", font=font(9)).pack(side=tk.LEFT, padx=(0, scale_px(4)))
         self._move_btns = []
         for label, cmd in (
-            ("Rotate Left", lambda: self._action("rotate left")),
-            ("Forward", lambda: self._action("forward")),
-            ("Rotate Right", lambda: self._action("rotate right")),
+            ("(A) Rotate Left", lambda: self._action("rotate left")),
+            ("(S) Forward", lambda: self._action("forward")),
+            ("(D) Rotate Right", lambda: self._action("rotate right")),
         ):
             btn = ttk.Button(act_row, text=label, command=cmd)
             btn.pack(side=tk.LEFT, padx=scale_px(2))
@@ -78,8 +78,6 @@ class LabScenarioMap5:
             "a": "rotate left",
             "d": "rotate right",
         }
-
-        ttk.Label(act_row, text="(A / S / D)", foreground="#6c7086").pack(side=tk.LEFT, padx=(8, 0))
 
         self._build_result_panel()
         self.set_result_display(state_rows=[], has_action=False)

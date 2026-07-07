@@ -2,6 +2,7 @@
 
 import csv
 import os
+import random
 import struct
 
 from RL_lib.rl_core import N_ROWS, ACTIONS
@@ -170,3 +171,23 @@ def export_checkpoint(q_table, base_name):
 def empty_q_table(forward_bias=0.05):
     """forward_bias nhẹ — tránh kẹt xoay khi Q còn toàn 0."""
     return [[forward_bias, 0.0, 0.0] for _ in range(N_ROWS)]
+
+
+def biased_q_table(preferred_action="forward", preferred_value=0.5, other_value=0.0):
+    """Q-table ưu tiên một action cho mọi state."""
+    action_to_idx = {name: i for i, name in enumerate(ACTIONS)}
+    idx = action_to_idx.get(preferred_action, 0)
+    row = [float(other_value)] * len(ACTIONS)
+    row[idx] = float(preferred_value)
+    return [list(row) for _ in range(N_ROWS)]
+
+
+def random_q_table(choices=(-0.5, 0.0, 0.5)):
+    """Q-table ngẫu nhiên rời rạc: mỗi ô chọn từ choices."""
+    vals = [float(v) for v in choices]
+    if not vals:
+        vals = [-0.5, 0.0, 0.5]
+    table = []
+    for _ in range(N_ROWS):
+        table.append([random.choice(vals) for _ in ACTIONS])
+    return table

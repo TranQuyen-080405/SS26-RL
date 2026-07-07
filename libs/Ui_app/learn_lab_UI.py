@@ -520,6 +520,10 @@ class LearnLabApp:
             state_rows.append(
                 "Tường nhìn thấy: N=%d W=%d E=%d S=%d" % (n, w, e, s)
             )
+            visited = snap.get("visited_before", 0)
+            state_rows.append(
+                "Đã qua: %s" % ("1" if visited else "0")
+            )
         if "goal" in enabled:
             state_rows.append("Trend goal: %+d" % snap["goal_trend"])
         if "checkpoint" in enabled:
