@@ -4,8 +4,10 @@ import json
 import os
 import re
 
-_REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
-FORMULA_DIR = os.path.join(_REPO_ROOT, "reward_formula")
+from runtime_paths import app_data_path
+
+_REPO_ROOT = app_data_path()
+FORMULA_DIR = app_data_path("reward_formula")
 _SCHEMA_VERSION = 1
 
 

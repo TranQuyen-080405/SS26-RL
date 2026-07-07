@@ -1,0 +1,57 @@
+name: Build macOS app
+
+on:
+  workflow_dispatch:
+    inputs:
+      artifact_name:
+        description: Output app name
+        required: false
+        default: SS26-RL
+      exclude_infer_maps:
+        description: Do not bundle map/infer into the app
+        required: false
+        type: boolean
+        default: false
+  push:
+    tags:
+      - 'mac-*'
+
+jobs:
+  build-macos-app:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt pyinstaller
+
+      - name: Build .app
+        run: |
+          NAME="${{ github.event.inputs.artifact_name }}"
+          if [ -z "$NAME" ]; then NAME="SS26-RL"; fi
+          EXTRA=""
+          if [ "${{ github.event.inputs.exclude_infer_maps }}" = "true" ]; then
+            EXTRA="--exclude-infer-maps"
+          fi
+          python build_exe.py --target app --name "$NAME" $EXTRA
+
+      - name: Package app
+        run: |
+          NAME="${{ github.event.inputs.artifact_name }}"
+          if [ -z "$NAME" ]; then NAME="SS26-RL"; fi
+          ditto -c -k --sequesterRsrc --keepParent "dist/$NAME.app" "dist/$NAME-macOS.zip"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: SS26-RL-macOS-app
+          path: dist/*-macOS.zip
+          if-no-files-found: error

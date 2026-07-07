@@ -1,5 +1,5 @@
 # SS26-RL — pip install -r requirements.txt
 numpy
 bleak
-
+pyinstaller
 pandas

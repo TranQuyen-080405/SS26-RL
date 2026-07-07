@@ -8,3 +8,6 @@ checkpoint/
 map/train/
 reward_formula/
 
+build/
+dist/
+*.spec

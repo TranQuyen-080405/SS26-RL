@@ -17,7 +17,7 @@ if _ROOT not in sys.path:
 if _SIM not in sys.path:
     sys.path.insert(0, _SIM)
 
-from map.map_io import list_map_files, build_sim_map_from_file
+from map.map_io import build_sim_map_from_file, is_bundled_map_path, list_map_files, maps_dir_for_kind
 from Ui_app.map_view import SimMapCanvas
 from Ui_app.ui_scale import configure_window, entry_width, font, init as init_ui_scale, px, text_lines
 from Ui_app.ui_widgets import SegmentGroup, box_button, style_train_treeview, train_map_mark, train_row_tags
@@ -283,8 +283,14 @@ class RlApp:
         )
         if not confirm:
             return
-        from robot.policy_io import policy_bin_path
+        from robot.policy_io import is_bundled_policy_path, policy_bin_path
         path = policy_bin_path(name)
+        if is_bundled_policy_path(path):
+            messagebox.showinfo(
+                "Xóa policy",
+                "Policy mặc định nằm bên trong file .exe nên không thể xóa từ danh sách."
+            )
+            return
         try:
             if os.path.exists(path):
                 os.remove(path)
@@ -311,8 +317,14 @@ class RlApp:
         )
         if not confirm:
             return
-        from robot.policy_io import policy_bin_path
+        from robot.policy_io import is_bundled_policy_path, policy_bin_path
         path = policy_bin_path(name)
+        if is_bundled_policy_path(path):
+            messagebox.showinfo(
+                "Xóa policy",
+                "Policy mặc định nằm bên trong file .exe nên không thể xóa từ danh sách."
+            )
+            return
         try:
             if os.path.exists(path):
                 os.remove(path)
@@ -595,6 +607,14 @@ class RlApp:
         self.map_list.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         scroll.pack(side=tk.RIGHT, fill=tk.Y)
         self.map_list.bind("<<ListboxSelect>>", self._on_map_select)
+        btn_row_infer = tk.Frame(self.infer_list_frame, height=px(44))
+        btn_row_infer.pack(fill=tk.X, pady=(4, 0))
+        box_button(btn_row_infer, text="Xóa map", command=self._delete_selected_infer_map, role="secondary").pack(
+            side=tk.LEFT, pady=4
+        )
+        box_button(btn_row_infer, text="Check infer", command=self._run_check_infer_all, role="accent").pack(
+            side=tk.LEFT, padx=(8, 0), pady=4
+        )
 
         self._rebuild_paned_panes()
 
@@ -1226,7 +1246,71 @@ class RlApp:
             self.status.set("Refresh map — %d file trong map/%s/" % (n, kind))
         else:
             self.status.set("Refresh map — %d file trong map/%s/ (chọn View Map để xem)" % (n, kind))
+    def _delete_selected_train_map(self):
+        if self._is_busy():
+            messagebox.showinfo("Xóa map", "Đang chạy train/inference — vui lòng bấm Stop hoặc đợi chạy xong.")
+            return
+        sel = self.train_tree.selection()
+        if not sel:
+            messagebox.showinfo("Xóa map", "Vui lòng chọn bản đồ trong danh sách train để xóa.")
+            return
+        row = self._train_row_by_iid(sel[0])
+        if not row:
+            return
+        filename = row["name"]
+        confirm = messagebox.askyesno(
+            "Xác nhận xóa",
+            f"Bạn có chắc chắn muốn xóa bản đồ '{filename}' khỏi danh sách train không?",
+            icon="warning"
+        )
+        if not confirm:
+            return
+        path = os.path.join(maps_dir_for_kind("train"), filename)
+        try:
+            if os.path.exists(path):
+                os.remove(path)
+                messagebox.showinfo("Đã xóa", f"Đã xóa thành công bản đồ '{filename}'!")
+                self._emit_maps_changed("train", path)
+            else:
+                messagebox.showerror("Lỗi", f"Không tìm thấy file bản đồ '{filename}' để xóa.")
+        except Exception as e:
+            messagebox.showerror("Lỗi", f"Lỗi khi xóa file: {str(e)}")
 
+    def _delete_selected_infer_map(self):
+        if self._is_busy():
+            messagebox.showinfo("Xóa map", "Đang chạy train/inference — vui lòng bấm Stop hoặc đợi chạy xong.")
+            return
+        sel = self.map_list.curselection()
+        if not sel:
+            messagebox.showinfo("Xóa map", "Vui lòng chọn bản đồ trong danh sách inference để xóa.")
+            return
+        idx = sel[0]
+        if idx >= len(self._map_paths):
+            return
+        path = self._map_paths[idx]
+        filename = os.path.basename(path)
+        if is_bundled_map_path(path):
+            messagebox.showinfo(
+                "Xóa map",
+                "Map infer mặc định nằm bên trong file .exe nên không thể xóa từ danh sách."
+            )
+            return
+        confirm = messagebox.askyesno(
+            "Xác nhận xóa",
+            f"Bạn có chắc chắn muốn xóa bản đồ '{filename}' khỏi danh sách inference không?",
+            icon="warning"
+        )
+        if not confirm:
+            return
+        try:
+            if os.path.exists(path):
+                os.remove(path)
+                messagebox.showinfo("Đã xóa", f"Đã xóa thành công bản đồ '{filename}'!")
+                self._emit_maps_changed("infer", path)
+            else:
+                messagebox.showerror("Lỗi", f"Không tìm thấy file bản đồ '{filename}' để xóa.")
+        except Exception as e:
+            messagebox.showerror("Lỗi", f"Lỗi khi xóa file: {str(e)}")
     def on_run(self):
         if self._running and self._paused:
             self._set_paused_ui(False)
@@ -1522,6 +1606,100 @@ class RlApp:
                 ep_done = result.get("episodes_done", 0)
                 out = result.get("export_path", export_path)
                 self._ui_async(lambda s=stopped, e=ep_done, p=out: self._end_train(s, e, p))
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def _format_check_infer_report(self, label, sim_map, outcome):
+        cps = sim_map.get("checkpoints") or []
+        visited = outcome.get("checkpoints_visited") or []
+        lines = [
+            "-" * 80,
+            "%s" % label,
+            "robot start %s  goal %s  checkpoint %s"
+            % (sim_map.get("start"), sim_map.get("goal"), cps),
+            "result %s  steps %d  map_score %.1f  visited_checkpoint %s"
+            % (
+                outcome.get("status", "?"),
+                int(outcome.get("steps", 0)),
+                float(outcome.get("score", 0.0)),
+                visited,
+            ),
+            "%-5s  %-13s  %-13s  %-9s  %-14s  %8s"
+            % ("step", "robot", "next", "dir", "action", "score"),
+        ]
+        for entry in outcome.get("log") or []:
+            lines.append(
+                "%-5d  (%d,%d) ->     (%d,%d) ->     %-3s -> %-3s  %-14s  %+8.1f"
+                % (
+                    int(entry.get("step", 0)),
+                    int(entry.get("x", 0)),
+                    int(entry.get("y", 0)),
+                    int(entry.get("nx", entry.get("x", 0))),
+                    int(entry.get("ny", entry.get("y", 0))),
+                    entry.get("direct", "?"),
+                    entry.get("ndirect", "?"),
+                    entry.get("action", "?"),
+                    float(entry.get("reward", 0.0)),
+                )
+            )
+        return "\n".join(lines) + "\n"
+
+    def _run_check_infer_all(self):
+        if self._running:
+            return
+        infer_paths = list_map_files("infer")
+        if not infer_paths:
+            messagebox.showwarning("Check infer", "Khong co map trong map/infer/.")
+            return
+        try:
+            policy_bin = self._infer_policy_bin()
+        except FileNotFoundError as exc:
+            messagebox.showwarning("Check infer", str(exc))
+            return
+
+        if self.view.get() != "log":
+            self.view.set("log")
+        self._begin_run()
+        self._clear_log()
+        self.status.set("Checking infer...")
+        self._append_log_text(
+            "Check infer: map labels are anonymized; file names and dataset paths are hidden."
+        )
+
+        def finish(done, total, stopped=False):
+            self._end_run()
+            if stopped:
+                self.status.set("Stopped - checked %d/%d map(s)" % (done, total))
+            else:
+                self.status.set("Done - checked %d map(s)" % done)
+
+        def work():
+            import rl_runner
+
+            done = 0
+            total = len(infer_paths)
+            try:
+                for index, map_path in enumerate(infer_paths, start=1):
+                    if self._stop_requested:
+                        break
+                    label = "infer_map_%03d" % index
+                    sim, outcome = rl_runner.run_infer_episode_for_map(
+                        map_path,
+                        verbose=False,
+                        policy_bin=policy_bin,
+                        pause_gate=self._pause_gate,
+                        should_stop=lambda: self._stop_requested,
+                    )
+                    done += 1
+                    text = self._format_check_infer_report(label, sim, outcome)
+                    self._ui_async(lambda t=text: self._append_log_text(t))
+                    if outcome.get("status") == "stopped":
+                        break
+            except Exception as exc:
+                self._ui_async(lambda err=exc: self._append_log_text("ERROR: %s" % err))
+            finally:
+                stopped = bool(self._stop_requested)
+                self._ui_async(lambda d=done, t=total, s=stopped: finish(d, t, s))
 
         threading.Thread(target=work, daemon=True).start()
 
