@@ -6,6 +6,7 @@ from tkinter import ttk
 
 from RL_lib.lab_registry import REWARD_ELEMENTS
 from RL_lib.student_formula import parse_expr_to_tokens, tokens_to_expr, validate_formula_tokens
+from Ui_app.ui_scale import font, px, scale
 
 # Màu chip reward theo state module
 _MODULE_CHIP = {
@@ -56,27 +57,34 @@ class FormulaBuilder(ttk.Frame):
         self._drag = None
         self._ghost = None
         self._bar_outer = None
+        self._op_buttons = []
+        self._bar_buttons = []
+        self._title_labels = []
         self._palette_btns = []
         self._palette_built_w = -1
         self._palette_font = tkfont.Font(family="TkDefaultFont", size=8, weight="bold")
         self._valid = True
         self._error_msg = ""
 
-        ttk.Label(
+        lbl1 = ttk.Label(
             self,
             text="Reward list:",
-            font=("", 9, "bold"),
-        ).pack(anchor=tk.W)
+            font=font(9, weight="bold"),
+        )
+        lbl1.pack(anchor=tk.W)
+        self._title_labels.append((lbl1, 9, "bold", False))
 
         self._pal_inner = tk.Frame(self, bg="#eceff4")
         self._pal_inner.pack(fill=tk.X, pady=(0, 4))
         self._pal_inner.bind("<Configure>", self._on_palette_frame_configure)
 
-        ttk.Label(
+        lbl2 = ttk.Label(
             self,
             text="Công thức Reward",
-            font=("", 9, "bold"),
-        ).pack(anchor=tk.W)
+            font=font(9, weight="bold"),
+        )
+        lbl2.pack(anchor=tk.W)
+        self._title_labels.append((lbl2, 9, "bold", False))
 
         bar_outer = tk.Frame(self, bg=_BAR_BG)
         bar_outer.pack(fill=tk.X, pady=4)
@@ -86,7 +94,7 @@ class FormulaBuilder(ttk.Frame):
         chip_wrap.pack(side=tk.LEFT, fill=tk.X, expand=True)
 
         self._chip_canvas = tk.Canvas(
-            chip_wrap, height=44, bg=_BAR_BG, highlightthickness=2, highlightbackground=_BAR_BORDER_OK
+            chip_wrap, height=px(44), bg=_BAR_BG, highlightthickness=2, highlightbackground=_BAR_BORDER_OK
         )
         self._chip_canvas.configure(takefocus=True)
         self._chip_canvas.pack(side=tk.TOP, fill=tk.X, expand=True)
@@ -115,24 +123,30 @@ class FormulaBuilder(ttk.Frame):
             "activeforeground": "#eff1f5",
             "relief": tk.RAISED,
             "bd": 1,
-            "font": ("", 8, "bold"),
+            "font": font(8, weight="bold"),
             "cursor": "hand2",
         }
-        tk.Button(btn_col, text="⌫", width=3, command=self.pop_token, **btn_style).pack(pady=2)
-        tk.Button(btn_col, text="Xóa hết", width=7, command=self.clear, **btn_style).pack(pady=2)
+        b_pop = tk.Button(btn_col, text="⌫", width=3, command=self.pop_token, **btn_style)
+        b_pop.pack(pady=2)
+        self._bar_buttons.append(b_pop)
+        b_clear = tk.Button(btn_col, text="Xóa hết", width=7, command=self.clear, **btn_style)
+        b_clear.pack(pady=2)
+        self._bar_buttons.append(b_clear)
 
         self._err_lbl = tk.Label(
             self,
             text="",
             fg=_BAR_BORDER_ERR,
-            font=("", 9, "bold"),
+            font=font(9, weight="bold"),
             anchor=tk.W,
         )
 
         op = ttk.Frame(self)
         op.pack(fill=tk.X, pady=2)
-        ttk.Label(op, text="Phép toán:", font=("", 8)).pack(side=tk.LEFT, padx=(0, 4))
-        for sym, disp in (("+", "+"), ("-", "−"), ("*", "×"), ("/", "÷"), ("^", "^")):
+        op_lbl = ttk.Label(op, text="Phép toán:", font=font(8))
+        op_lbl.pack(side=tk.LEFT, padx=(0, px(4)))
+        self._title_labels.append((op_lbl, 8, "normal", False))
+        for sym, disp in (("+", "+"), ("-", "−"), ("*", "×"), ("^", "^")):
             style = _OP_CHIP.get(sym, _DEFAULT_OP)
             btn = tk.Button(
                 op,
@@ -143,16 +157,19 @@ class FormulaBuilder(ttk.Frame):
                 activebackground=style["bg"],
                 relief=tk.RAISED,
                 bd=1,
-                font=("", 9, "bold"),
+                font=font(9, weight="bold"),
                 cursor="hand2",
             )
             btn.pack(side=tk.LEFT, padx=1)
             btn.bind("<ButtonPress-1>", lambda e, s=sym: self._op_press(e, s))
             btn.bind("<B1-Motion>", self._palette_motion)
+            self._op_buttons.append(btn)
 
         paren_row = ttk.Frame(self)
         paren_row.pack(fill=tk.X, pady=2)
-        ttk.Label(paren_row, text="Ngoặc:", font=("", 8)).pack(side=tk.LEFT, padx=(0, 4))
+        paren_lbl = ttk.Label(paren_row, text="Ngoặc:", font=font(8))
+        paren_lbl.pack(side=tk.LEFT, padx=(0, px(4)))
+        self._title_labels.append((paren_lbl, 8, "normal", False))
         for sym in ("(", ")"):
             style = _PAREN_CHIP[sym]
             btn = tk.Button(
@@ -164,12 +181,13 @@ class FormulaBuilder(ttk.Frame):
                 activebackground=style["bg"],
                 relief=tk.RAISED,
                 bd=1,
-                font=("", 9, "bold"),
+                font=font(9, weight="bold"),
                 cursor="hand2",
             )
             btn.pack(side=tk.LEFT, padx=1)
             btn.bind("<ButtonPress-1>", lambda e, s=sym: self._paren_press(e, s))
             btn.bind("<B1-Motion>", self._palette_motion)
+            self._op_buttons.append(btn)
 
         num_row = ttk.Frame(self)
         num_row.pack(fill=tk.X, pady=2)
@@ -229,9 +247,9 @@ class FormulaBuilder(ttk.Frame):
             activebackground=pal["active"],
             relief=tk.RAISED,
             bd=2,
-            padx=6,
-            pady=2,
-            font=("", 8, "bold"),
+            padx=px(6),
+            pady=px(2),
+            font=font(8, weight="bold"),
             cursor="hand2",
         )
         btn.bind("<ButtonPress-1>", lambda e, l=lbl: self._palette_press(e, l))
@@ -278,7 +296,7 @@ class FormulaBuilder(ttk.Frame):
 
     def _on_inner_configure(self, event):
         self._chip_canvas.configure(scrollregion=self._chip_canvas.bbox("all"))
-        h = max(44, event.height + _INNER_PAD * 2)
+        h = max(px(44), event.height + _INNER_PAD * 2)
         self._chip_canvas.configure(height=h)
         if self._drag and self._drag.get("active"):
             self._refresh_drop_visual(self._drag.get("insert_idx", 0))
@@ -813,6 +831,20 @@ class FormulaBuilder(ttk.Frame):
 
     def is_dragging(self):
         return self._drag is not None
+
+    def refresh_scale(self):
+        for w, sz, wt, _ in self._title_labels:
+            w.configure(font=font(sz, weight=wt))
+        self._chip_canvas.configure(height=px(44))
+        for btn in self._bar_buttons:
+            btn.configure(font=font(8, weight="bold"))
+        for btn in self._op_buttons:
+            btn.configure(font=font(9, weight="bold"))
+        self._err_lbl.configure(font=font(9, weight="bold"))
+        self._palette_font.configure(size=max(7, int(round(8 * scale()))))
+        self._palette_built_w = -1
+        self._rebuild_palette()
+        self._redraw_chips()
 
     def _notify(self):
         self._validate_and_update()

@@ -20,7 +20,7 @@ if _SIM not in sys.path:
 from RL_lib import reward_config
 from RL_lib.lab_world import LabWorld5
 from RL_lib.lab_registry import (
-    STATE_MODULES,
+    DEFAULT_ENABLED_MODULES,
     REWARD_ELEMENTS,
     ELEMENT_WEIGHT_KEY,
     THRESHOLD_LABELS,
@@ -35,17 +35,20 @@ from RL_lib.formula_store import (
     load_formula_file,
     normalize_formula_basename,
     save_formula_file,
+    delete_formula_file,
 )
 from RL_lib.rl_core import N_ROWS
 from Ui_app.lab_scenario_map import LabScenarioMap5
 from Ui_app.formula_builder import FormulaBuilder, module_chip_style, reward_eids_in_formula
+from Ui_app.ui_scale import entry_width, font, px
 
 _THRESHOLD_FOR_EID = {
     "excess_rotate": "MAX_ROTATE_STREAK",
     "visit_window": "MAX_REVISIT_STEPS",
     "visit_repeat": "MAX_CELL_REPEAT",
     "ping_pong": ["MAX_PING_PONG_CYCLES", "MAX_PING_PONG_SPAN"],
-    "straight_streak": "MAX_STRAIGHT_STREAK",
+    "straight_streak_reach": "MAX_STRAIGHT_REACH",
+    "straight_streak_cap": "MAX_STRAIGHT_CAP",
 }
 
 # Giá trị mặc định weight theo cục reward (học sinh thấy tên tiếng Việt)
@@ -53,43 +56,56 @@ _DEFAULT_WEIGHTS = {
     "R_STEP": 0.0,
     "collision": 0.0,
     "forward_clear": 0.0,
-    "goal_trend": 0.0,
+    "wall_detected": 0.0,
+    "wall_visible": 0.0,
+    "wall_on_entry": 0.0,
+    "goal_closer": 0.0,
+    "goal_farther": 0.0,
     "goal_reached": 0.0,
-    "cp_trend": 0.0,
+    "cp_closer": 0.0,
+    "cp_farther": 0.0,
     "checkpoint": 0.0,
     "rotate": 0.0,
     "facing_clear": 0.0,
     "wasted_rotate": 0.0,
+    "blocked_rotate": 0.0,
     "excess_rotate": 0.0,
     "visit_window": 0.0,
     "visit_repeat": 0.0,
     "ping_pong": 0.0,
-    "straight_streak": 0.0,
-    "wall_detected": 0.0,
+    "straight_streak_reach": 0.0,
+    "straight_streak_cap": 0.0,
 }
 
 _REWARD_DESCRIPTIONS = {
     "collision": "Robot va chạm tường",
     "forward_clear": "Tiến lên ô không có vật cản",
-    "goal_trend": "Thay đổi khoảng cách tới Goal",
+    "wall_detected": "Phát hiện tường lần đầu — phải quay/tiến để nhìn hướng đó (mỗi ô+hướng 1 lần)",
+    "wall_visible": "Xoay hướng có tường ngay trước mặt (mỗi lần xoay đều cộng)",
+    "wall_on_entry": "Tiến vào ô — state tường (memory) tại ô có ≥1 hướng đã biết; cộng mỗi lần vào ô",
+    "goal_closer": "Khoảng cách Manhattan tới đích giảm",
+    "goal_farther": "Khoảng cách Manhattan tới đích tăng",
     "goal_reached": "Đứng tại ô Goal",
-    "cp_trend": "Thay đổi khoảng cách tới Checkpoint",
+    "cp_closer": "Khoảng cách tới checkpoint chưa ăn giảm",
+    "cp_farther": "Khoảng cách tới checkpoint chưa ăn tăng",
     "checkpoint": "Đến Checkpoint lần đầu",
     "rotate": "Hành động xoay hướng",
     "facing_clear": "Hướng mặt về ô không vật cản sau khi xoay",
     "wasted_rotate": "Xoay hướng khi đường phía trước trống",
+    "blocked_rotate": "Xoay hướng khi đường phía trước bị chặn",
     "excess_rotate": "Số lần xoay liên tiếp vượt quá ngưỡng",
     "visit_window": "Vào lại cùng một ô trong vòng N bước gần nhất",
     "visit_repeat": "Số lần quay lại ô đã từng đi qua vượt ngưỡng (không tính lần đầu)",
     "ping_pong": "Đi qua-lại cùng một đoạn đường (palindrome); chỉnh Ô mỗi chiều cho đường dài 2–5 ô",
-    "straight_streak": "Số lần giữ nguyên hướng đi liên tiếp vượt quá ngưỡng",
-    "wall_detected": "Phát hiện có vật cản ngay trước mặt sau hành động",
+    "straight_streak_reach": "Số lần giữ nguyên hướng đi liên tiếp vượt quá ngưỡng",
+    "straight_streak_cap": "Số lần giữ nguyên hướng đi liên tiếp còn ngắn (<= ngưỡng)",
     "MAX_ROTATE_STREAK": "Ngưỡng xoay",
     "MAX_REVISIT_STEPS": "Số bước",
     "MAX_CELL_REPEAT": "Lần quay lại",
-    "MAX_PING_PONG_CYCLES": "Chu kỳ qua lại",
-    "MAX_PING_PONG_SPAN": "Số ô tối đa mỗi chiều (2 = hai ô, 5 = năm ô)",
-    "MAX_STRAIGHT_STREAK": "Ngưỡng giữ hướng",
+    "MAX_PING_PONG_CYCLES": "Số lần được phép đi lặp qua lại",
+    "MAX_PING_PONG_SPAN": "Số ô tối đa mỗi chiều tính được tính là lặp lại",
+    "MAX_STRAIGHT_REACH": "Ngưỡng giữ hướng",
+    "MAX_STRAIGHT_CAP": "Ngưỡng giữ hướng ngắn",
 }
 
 
@@ -106,7 +122,6 @@ class LearnLabApp:
             self._standalone = False
 
         self.world = LabWorld5()
-        self._module_vars = {}
         self._weight_vars = {}
         self._threshold_vars = {}
         self._weight_rows = {}
@@ -114,6 +129,9 @@ class LearnLabApp:
         self._save_after_id = None
         self._loading = False
         self._loaded_formula_name = None
+        self._rl_app = None
+        self._scaled_font_widgets = []
+        self._scaled_spinboxes = []
 
         self._build_ui()
         self._loading = True
@@ -123,16 +141,54 @@ class LearnLabApp:
         self._update_state_display()
         self._refresh_move_gate()
 
+    def set_rl_app(self, app):
+        self._rl_app = app
+
+    def _notify_formula_applied(self):
+        if self._rl_app is not None:
+            try:
+                self._rl_app._sync_formula_combo()
+            except Exception:
+                pass
+
     def _refresh_move_gate(self):
         self.scenario_map.set_move_enabled(self.formula_builder.is_valid())
 
     def _build_ui(self):
         main_layout = ttk.Frame(self.container)
-        main_layout.pack(fill=tk.BOTH, expand=True, padx=6, pady=6)
-        left = ttk.Frame(main_layout)
-        left.pack(side=tk.LEFT, fill=tk.Y, padx=(0, 8))
-        right = ttk.Frame(main_layout)
-        right.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        main_layout.pack(fill=tk.BOTH, expand=True, padx=px(6), pady=px(6))
+        self._main_layout = main_layout
+
+        cols = ttk.Frame(main_layout)
+        cols.pack(fill=tk.BOTH, expand=True)
+        cols.columnconfigure(0, weight=1, uniform="lab_cols")
+        cols.columnconfigure(1, weight=3, uniform="lab_cols")
+        cols.rowconfigure(0, weight=1)
+        self._cols = cols
+        self._cols_resize_after = None
+
+        left_outer = ttk.Frame(cols)
+        left_outer.grid(row=0, column=0, sticky="nsew", padx=(0, px(4)))
+        left_scroll = tk.Canvas(left_outer, highlightthickness=0, borderwidth=0)
+        left_sb = ttk.Scrollbar(left_outer, orient=tk.VERTICAL, command=left_scroll.yview)
+        left_scroll.configure(yscrollcommand=left_sb.set)
+        left_sb.pack(side=tk.RIGHT, fill=tk.Y)
+        left_scroll.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        left = ttk.Frame(left_scroll)
+        self._left_scroll = left_scroll
+        self._left_win = left_scroll.create_window((0, 0), window=left, anchor=tk.NW)
+
+        def _on_left_inner_configure(_event):
+            left_scroll.configure(scrollregion=left_scroll.bbox("all"))
+
+        def _on_left_canvas_configure(event):
+            left_scroll.itemconfigure(self._left_win, width=event.width)
+
+        left.bind("<Configure>", _on_left_inner_configure)
+        left_scroll.bind("<Configure>", _on_left_canvas_configure)
+
+        right = ttk.Frame(cols)
+        right.grid(row=0, column=1, sticky="nsew", padx=(px(4), 0))
 
         self.apply_status = tk.StringVar(
             value="Bấm 'Lưu công thức' để lưu file JSON và áp dụng cho Train"
@@ -140,7 +196,47 @@ class LearnLabApp:
         self.export_text = None
 
         self.scenario_map = LabScenarioMap5(left, self.world, on_change=self._on_scenario_event)
+        self._bind_left_wheel(left)
         self._build_reward_config(right)
+        cols.bind("<Configure>", self._on_lab_cols_configure)
+        self.root.after_idle(self._redraw_lab_map)
+
+    def _bind_left_wheel(self, widget):
+        if getattr(widget, "_lab_wheel_tag", False):
+            return
+        widget._lab_wheel_tag = True
+
+        def _on_wheel(event):
+            c = self._left_scroll
+            if event.delta:
+                c.yview_scroll(int(-event.delta / 120), "units")
+            elif event.num == 4:
+                c.yview_scroll(-1, "units")
+            elif event.num == 5:
+                c.yview_scroll(1, "units")
+            return "break"
+
+        for seq in ("<MouseWheel>", "<Button-4>", "<Button-5>"):
+            widget.bind(seq, _on_wheel, add="+")
+        for child in widget.winfo_children():
+            self._bind_left_wheel(child)
+
+    def _on_lab_cols_configure(self, event=None):
+        if event is not None and event.widget is not self._cols:
+            return
+        if self._cols_resize_after is not None:
+            try:
+                self.root.after_cancel(self._cols_resize_after)
+            except tk.TclError:
+                pass
+        self._cols_resize_after = self.root.after(80, self._redraw_lab_map)
+
+    def _redraw_lab_map(self):
+        self._cols_resize_after = None
+        try:
+            self.scenario_map.redraw()
+        except (tk.TclError, AttributeError):
+            pass
 
         # exp = ttk.LabelFrame(self.container, text="Xuất cấu hình", padding=4)
         # exp.pack(fill=tk.X, padx=6, pady=(0, 6))
@@ -153,37 +249,8 @@ class LearnLabApp:
         # self.export_text.pack(fill=tk.X)
 
     def _build_reward_config(self, parent):
-        top = ttk.LabelFrame(parent, text="State dùng", padding=8)
-        top.pack(fill=tk.X)
-        grid = ttk.Frame(top)
-        grid.pack(fill=tk.X)
-        grid.columnconfigure(0, weight=1)
-        grid.columnconfigure(1, weight=1)
-        col = row = 0
-        for mod in STATE_MODULES:
-            var = tk.BooleanVar(value=True)
-            self._module_vars[mod["id"]] = var
-            chip = module_chip_style(mod["id"])
-            tk.Checkbutton(
-                grid,
-                text=mod["label"],
-                variable=var,
-                command=self._on_modules_changed,
-                bg=chip["bg"],
-                fg=chip["fg"],
-                activebackground=chip.get("active", chip["bg"]),
-                activeforeground=chip["fg"],
-                selectcolor="#ffffff",
-                padx=6,
-                pady=2,
-                font=("", 9, "bold"),
-                anchor=tk.W,
-                relief=tk.FLAT,
-                bd=0,
-            ).grid(row=row, column=col, sticky=tk.W + tk.E, padx=4, pady=4)
-            col += 1
-            if col >= 2:
-                col, row = 0, row + 1
+        self._scaled_font_widgets = []
+        self._scaled_spinboxes = []
 
         bottom = ttk.LabelFrame(parent, text="Công thức Reward", padding=6)
         bottom.pack(fill=tk.BOTH, expand=True, pady=(8, 0))
@@ -199,7 +266,7 @@ class LearnLabApp:
         self.formula_combo = ttk.Combobox(
             formula_bar,
             textvariable=self.formula_pick_var,
-            width=28,
+            width=entry_width(28),
             state="readonly",
         )
         self.formula_combo.pack(side=tk.LEFT, padx=(0, 6))
@@ -207,7 +274,9 @@ class LearnLabApp:
         ttk.Button(formula_bar, text="Nạp", command=self._load_selected_formula).pack(side=tk.LEFT, padx=(0, 8))
         ttk.Button(formula_bar, text="Làm mới danh sách", command=self._refresh_formula_combo).pack(side=tk.LEFT, padx=(0, 8))
         self.btn_save_formula = ttk.Button(formula_bar, text="Lưu công thức", command=self._save_to_project)
-        self.btn_save_formula.pack(side=tk.LEFT)
+        self.btn_save_formula.pack(side=tk.LEFT, padx=(0, 6))
+        self.btn_delete_formula = ttk.Button(formula_bar, text="Xóa công thức", command=self._delete_selected_formula)
+        self.btn_delete_formula.pack(side=tk.LEFT)
         ttk.Label(formula_bar, textvariable=self.apply_status, foreground="#555").pack(
             side=tk.LEFT, padx=(12, 0)
         )
@@ -252,28 +321,34 @@ class LearnLabApp:
             chip = module_chip_style(mod)
             row = tk.Frame(self._weights_container, bg=chip["bg"], padx=6, pady=4)
             self._weight_rows[eid] = row
-            tk.Label(
+            name_lbl = tk.Label(
                 row,
                 text=meta["label"],
                 bg=chip["bg"],
                 fg=chip["fg"],
-                font=("", 9, "bold"),
+                font=font(9, weight="bold"),
                 anchor=tk.W,
-                width=28,
-            ).pack(side=tk.LEFT)
+                width=entry_width(28),
+            )
+            name_lbl.pack(side=tk.LEFT)
+            self._scaled_font_widgets.append((name_lbl, 9, "bold"))
             var = tk.StringVar(value=str(_DEFAULT_WEIGHTS.get(eid, 0)))
             self._weight_vars[eid] = var
-            ttk.Spinbox(row, from_=-500, to=500, width=8, textvariable=var).pack(side=tk.LEFT, padx=4)
+            w_spin = ttk.Spinbox(row, from_=-500, to=500, width=entry_width(8), textvariable=var)
+            w_spin.pack(side=tk.LEFT, padx=px(4))
+            self._scaled_spinboxes.append((w_spin, 8))
             var.trace_add("write", lambda *_: self._on_weight_edited())
             desc = _REWARD_DESCRIPTIONS.get(eid, "")
-            tk.Label(
+            desc_lbl = tk.Label(
                 row,
                 text="—  " + desc,
                 bg=chip["bg"],
                 fg=chip["fg"],
-                font=("", 9, "italic"),
+                font=font(9, weight="italic"),
                 anchor=tk.W,
-            ).pack(side=tk.LEFT, padx=(12, 0))
+            )
+            desc_lbl.pack(side=tk.LEFT, padx=(12, 0))
+            self._scaled_font_widgets.append((desc_lbl, 9, "italic"))
 
         for eid, tk_keys in _THRESHOLD_FOR_EID.items():
             keys = tk_keys if isinstance(tk_keys, list) else [tk_keys]
@@ -284,28 +359,34 @@ class LearnLabApp:
                 chip = module_chip_style(mod)
                 tr = tk.Frame(self._weights_container, bg=chip["bg"], padx=6, pady=4)
                 self._threshold_rows[tk_key] = tr
-                tk.Label(
+                th_lbl = tk.Label(
                     tr,
                     text=THRESHOLD_LABELS[tk_key],
                     bg=chip["bg"],
                     fg=chip["fg"],
-                    font=("", 9),
+                    font=font(9),
                     anchor=tk.W,
-                    width=28,
-                ).pack(side=tk.LEFT)
+                    width=entry_width(28),
+                )
+                th_lbl.pack(side=tk.LEFT)
+                self._scaled_font_widgets.append((th_lbl, 9, "normal"))
                 tv = tk.StringVar(value="4")
                 self._threshold_vars[tk_key] = tv
-                ttk.Spinbox(tr, from_=0, to=50, width=8, textvariable=tv).pack(side=tk.LEFT, padx=4)
+                t_spin = ttk.Spinbox(tr, from_=0, to=50, width=entry_width(8), textvariable=tv)
+                t_spin.pack(side=tk.LEFT, padx=px(4))
+                self._scaled_spinboxes.append((t_spin, 8))
                 tv.trace_add("write", lambda *_: self._on_weight_edited())
                 desc = _REWARD_DESCRIPTIONS.get(tk_key, "")
-                tk.Label(
+                th_desc = tk.Label(
                     tr,
                     text="—  " + desc,
                     bg=chip["bg"],
                     fg=chip["fg"],
-                    font=("", 9, "italic"),
+                    font=font(9, weight="italic"),
                     anchor=tk.W,
-                ).pack(side=tk.LEFT, padx=(12, 0))
+                )
+                th_desc.pack(side=tk.LEFT, padx=(12, 0))
+                self._scaled_font_widgets.append((th_desc, 9, "italic"))
 
         self._bind_reward_wheel_tree(self._reward_scroll_canvas)
 
@@ -334,11 +415,10 @@ class LearnLabApp:
             self._bind_reward_wheel_tree(child)
 
     def _enabled_modules(self):
-        return {mid for mid, v in self._module_vars.items() if v.get()}
+        return set(DEFAULT_ENABLED_MODULES)
 
     def _enabled_labels(self):
-        enabled = self._enabled_modules()
-        return [REWARD_ELEMENTS[e]["label"] for e, m in REWARD_ELEMENTS.items() if m["module"] in enabled]
+        return [REWARD_ELEMENTS[e]["label"] for e in REWARD_ELEMENTS]
 
     def _formula_reward_eids(self):
         return reward_eids_in_formula(self.formula_builder.get_tokens())
@@ -365,16 +445,8 @@ class LearnLabApp:
 
 
 
-    def _on_modules_changed(self):
-        enabled_modules = self._enabled_modules()
-        reward_config.set_enabled_modules(enabled_modules)
-        
-        # Remove rewards belonging to disabled modules from formula builder
-        allowed_labels = {meta["label"] for meta in REWARD_ELEMENTS.values() if meta["module"] in enabled_modules}
-        tokens = self.formula_builder.get_tokens()
-        filtered_tokens = [t for t in tokens if t["kind"] != "reward" or t["value"] in allowed_labels]
-        self.formula_builder.set_tokens(filtered_tokens)
-
+    def _sync_enabled_modules(self):
+        reward_config.set_enabled_modules(self._enabled_modules())
         self._refresh_reward_panel()
         self._update_state_display()
         self._refresh_export()
@@ -446,7 +518,11 @@ class LearnLabApp:
         ]
         if "obstacle" in enabled:
             state_rows.append(
-                "Tường nhìn thấy: trước=%d trái=%d phải=%d sau=%d" % (n, w, e, s)
+                "Tường nhìn thấy: N=%d W=%d E=%d S=%d" % (n, w, e, s)
+            )
+            visited = snap.get("visited_before", 0)
+            state_rows.append(
+                "Đã qua: %s" % ("1" if visited else "0")
             )
         if "goal" in enabled:
             state_rows.append("Trend goal: %+d" % snap["goal_trend"])
@@ -481,8 +557,7 @@ class LearnLabApp:
         for k, var in self._threshold_vars.items():
             if k in d:
                 var.set(str(d[k]))
-        for mid, var in self._module_vars.items():
-            var.set(mid in reward_config.get_enabled_modules())
+        reward_config.set_enabled_modules(self._enabled_modules())
         self.formula_builder.set_expr(reward_config.get_total_formula_student())
 
     def _refresh_export(self):
@@ -534,6 +609,31 @@ class LearnLabApp:
         except (OSError, ValueError, json.JSONDecodeError) as exc:
             messagebox.showerror("Nạp công thức", str(exc))
 
+    def _delete_selected_formula(self):
+        name = self.formula_pick_var.get().strip()
+        if not name:
+            messagebox.showinfo("Xóa công thức", "Chưa chọn file công thức nào để xóa.")
+            return
+        confirm = messagebox.askyesno(
+            "Xác nhận xóa",
+            f"Bạn có chắc chắn muốn xóa file công thức '{name}' không?",
+            icon="warning"
+        )
+        if not confirm:
+            return
+        try:
+            if delete_formula_file(name):
+                messagebox.showinfo("Đã xóa", f"Đã xóa thành công file công thức '{name}'!")
+                if self._loaded_formula_name == name:
+                    self._loaded_formula_name = ""
+                    reward_config.set_formula_name("")
+                    self.apply_status.set("Đã xóa file hiện tại.")
+                self._refresh_formula_combo()
+            else:
+                messagebox.showerror("Lỗi", f"Không tìm thấy file công thức '{name}' để xóa.")
+        except Exception as e:
+            messagebox.showerror("Lỗi", f"Lỗi khi xóa file: {str(e)}")
+
     def load_and_compile_formula(self, name):
         """Nạp công thức từ file và compile/apply vào dự án (reward_config.py)."""
         try:
@@ -566,6 +666,7 @@ class LearnLabApp:
                 pass
 
             self.apply_status.set("Đã áp dụng công thức: %s" % self._loaded_formula_name)
+            self._notify_formula_applied()
             return True
         except Exception as exc:
             messagebox.showerror("Nạp công thức", "Lỗi nạp công thức: %s" % exc, parent=self.root)
@@ -577,12 +678,6 @@ class LearnLabApp:
         data = migrate_formula_snapshot(data)
         self._loading = True
         try:
-            modules = set(data.get("enabled_modules") or [])
-            if not modules:
-                modules = set(self._module_vars.keys())
-            for mid, var in self._module_vars.items():
-                var.set(mid in modules)
-
             weights = data.get("element_weights") or {}
             for eid, var in self._weight_vars.items():
                 if eid in weights:
@@ -596,7 +691,7 @@ class LearnLabApp:
             expr = data.get("total_formula") or ""
             self.formula_builder.set_labels(self._enabled_labels())
             self.formula_builder.set_expr(expr)
-            self._on_modules_changed()
+            self._sync_enabled_modules()
         finally:
             self._loading = False
 
@@ -672,13 +767,12 @@ class LearnLabApp:
                 "Đã lưu %s + áp dụng Train — %s"
                 % (os.path.basename(json_path), save_name)
             )
+            self._notify_formula_applied()
         except Exception as exc:
             self.apply_status.set("Lỗi lưu: %s" % exc)
             messagebox.showerror("Lưu công thức", str(exc), parent=self.root)
 
     def _reset_defaults(self):
-        for mid, var in self._module_vars.items():
-            var.set(True)
         for eid, var in self._weight_vars.items():
             var.set(str(_DEFAULT_WEIGHTS.get(eid, 0)))
         for k, var in self._threshold_vars.items():
@@ -688,14 +782,61 @@ class LearnLabApp:
                 "MAX_CELL_REPEAT": 3,
                 "MAX_PING_PONG_CYCLES": 1,
                 "MAX_PING_PONG_SPAN": 5,
-                "MAX_STRAIGHT_STREAK": 3,
+                "MAX_STRAIGHT_REACH": 3,
+                "MAX_STRAIGHT_CAP": 3,
             }.get(k, var.get())))
-        self.formula_builder.set_tokens(default_total_formula(set(self._module_vars.keys())))
+        self.formula_builder.set_tokens(default_total_formula(self._enabled_modules()))
         self.world.reset_scenario()
         self.scenario_map.redraw()
-        self._on_modules_changed()
-        self._loaded_formula_name = "Mặc định"
-        reward_config.set_formula_name("Mặc định")
+        self._sync_enabled_modules()
+        self._loaded_formula_name = ""
+        reward_config.set_formula_name("")
+
+    def refresh_ui_scale(self):
+        try:
+            self._main_layout.pack_configure(padx=px(6), pady=px(6))
+        except (tk.TclError, AttributeError):
+            pass
+        for w, sz, wt in self._scaled_font_widgets:
+            try:
+                w.configure(font=font(sz, weight=wt))
+            except tk.TclError:
+                pass
+        for spin, cw in self._scaled_spinboxes:
+            try:
+                spin.configure(width=entry_width(cw))
+            except tk.TclError:
+                pass
+        for row in self._weight_rows.values():
+            for child in row.winfo_children():
+                if isinstance(child, tk.Label):
+                    try:
+                        wval = child.cget("width")
+                        if wval and int(wval) > 1:
+                            child.configure(width=entry_width(28))
+                    except (tk.TclError, ValueError):
+                        pass
+        for tr in self._threshold_rows.values():
+            for child in tr.winfo_children():
+                if isinstance(child, tk.Label):
+                    try:
+                        wval = child.cget("width")
+                        if wval and int(wval) > 1:
+                            child.configure(width=entry_width(28))
+                    except (tk.TclError, ValueError):
+                        pass
+        try:
+            self.formula_combo.configure(width=entry_width(28))
+        except tk.TclError:
+            pass
+        try:
+            self.formula_builder.refresh_scale()
+        except Exception:
+            pass
+        try:
+            self.scenario_map.redraw()
+        except Exception:
+            pass
 
     def run(self):
         if self._standalone:

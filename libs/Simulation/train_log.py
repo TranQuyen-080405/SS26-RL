@@ -3,14 +3,14 @@
 import os
 import textwrap
 
-_WIDTH = 46
+_WIDTH = 80
 TITLE_TRAIN = "SummerSchool 2026 - Train"
 TITLE_INFER = "SummerSchool 2026 - Inference"
 
 _MODE_LABELS = {
     "random": "random",
-    "sequential": "sequential",
-    "single": "single map",
+    "sequential": "sequence",
+    "single": "single",
 }
 
 
@@ -51,6 +51,7 @@ def print_train_header(
     checkpoint_label,
     export_path,
     resuming,
+    reward_formula=None,
 ):
     global _episode_header_printed
     _episode_header_printed = False
@@ -58,6 +59,8 @@ def print_train_header(
     banner(TITLE_TRAIN)
     line("Mode", _MODE_LABELS.get(map_mode, map_mode))
     line("Episodes", n_episodes)
+    reward_name = (reward_formula or "").strip()
+    line("Reward formula", reward_name if reward_name else "(chưa đặt tên)")
     if resuming:
         line("Load Q from", _basename(checkpoint_label))
     else:
@@ -86,11 +89,36 @@ def print_infer_header(sim_map, policy_path):
     )
 
 
-def print_infer_step(step, x, y, direction, state, action):
-    print(
-        "step %3d  pos (%d,%d) %s  s=%d  action %s"
-        % (step, x, y, direction, state, action)
+def format_step_log_header():
+    return "%-5s  %-8s  %-3s  %5s  %-14s  %8s" % (
+        "step",
+        "pos",
+        "dir",
+        "s",
+        "action",
+        "reward",
     )
+
+
+def print_step_log_header():
+    print(format_step_log_header())
+
+
+def format_step_log_line(step, x, y, direction, state, action, reward=None):
+    reward_val = 0.0 if reward is None else float(reward)
+    pos = "(%d,%d)" % (x, y)
+    return "%-5d  %-8s  %-3s  %5d  %-14s  %+8.1f" % (
+        step,
+        pos,
+        direction,
+        state,
+        action,
+        reward_val,
+    )
+
+
+def print_infer_step(step, x, y, direction, state, action, reward=None):
+    print(format_step_log_line(step, x, y, direction, state, action, reward=reward))
 
 
 def print_infer_summary(status, steps):
@@ -120,14 +148,14 @@ def print_episode_table_header():
     if _episode_header_printed:
         return
     _episode_header_printed = True
-    print("%-8s %-16s %s" % ("Episode", "Map", "Goals"))
-    print("%-8s %-16s %s" % ("-------", "----------------", "-----"))
+    print("%-8s  %-20s  %5s" % ("Episode", "Map", "Goals"))
+    print("%-8s  %-20s  %5s" % ("-------", "--------------------", "-----"))
 
 
 def print_episode(ep_index, map_name, goals_in_block):
     print_episode_table_header()
     tag = map_name or "?"
-    print("%-8d %-16s %d" % (ep_index, tag, goals_in_block))
+    print("%-8d  %-20s  %5d" % (ep_index, tag, goals_in_block))
 
 
 def print_stopped_at(ep_index):

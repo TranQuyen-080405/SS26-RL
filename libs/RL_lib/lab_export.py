@@ -12,6 +12,7 @@ def export_reward_config_py(values):
     for k in (
         "R_STEP",
         "R_COLLISION",
+        "R_EXCESS_ROTATE",
         "R_GOAL_CLOSER",
         "R_GOAL_FARTHER",
         "R_CP_CLOSER",
@@ -22,7 +23,15 @@ def export_reward_config_py(values):
         "R_FACING_CLEAR",
         "R_FORWARD_CLEAR",
         "R_WASTED_ROTATE",
+        "R_BLOCKED_ROTATE",
+        "R_STRAIGHT",
+        "R_STRAIGHT_REACH",
+        "R_STRAIGHT_CAP",
+        "R_WALL_DETECT",
+        "R_WALL_VISIBLE",
+        "R_WALL_ON_ENTRY",
         "R_VISIT_WINDOW",
+        "R_VISIT_REPEAT",
         "R_PING_PONG",
     ):
         v = values.get(k, 0)
@@ -38,6 +47,8 @@ def export_reward_config_py(values):
         "MAX_CELL_REPEAT",
         "MAX_PING_PONG_CYCLES",
         "MAX_PING_PONG_SPAN",
+        "MAX_STRAIGHT_REACH",
+        "MAX_STRAIGHT_CAP",
         "MAX_STEPS_PER_EPISODE",
     ):
         lines.append("%s = %d" % (k, int(values.get(k, 0))))

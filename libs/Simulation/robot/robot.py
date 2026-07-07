@@ -117,21 +117,17 @@ def update_rotate_streak(robot, result):
 
 
 def update_straight_streak(robot, result):
-    """Đếm số lần đi thẳng hoặc giữ nguyên hướng liên tiếp (không xoay thành công); reset khi xoay."""
-    rotated = bool(
-        result.get("success")
-        and not result.get("moved")
-        and not result.get("collision")
-    )
-    if rotated:
-        robot["straight_streak"] = 0
-    else:
+    """Đếm số lần đi thẳng liên tiếp thành công (chỉ forward thành công mới tăng; reset khi xoay thành công hoặc va chạm)."""
+    moved = bool(result.get("success") and result.get("moved") and not result.get("collision"))
+    if moved:
         robot["straight_streak"] = robot.get("straight_streak", 0) + 1
+    else:
+        robot["straight_streak"] = 0
 
 
 def reset_explore_tracking(robot):
     """Reset đếm lặp ô / ping-pong đầu episode."""
-    robot["node_visits"] = {}
+    robot["node_visits"] = {(robot["x"], robot["y"]): 1}
     robot["pos_history"] = [(robot["x"], robot["y"])]
     robot["ping_pong_count"] = 0
     robot["_ping_pong_hist_len"] = 1
@@ -150,6 +146,12 @@ def update_explore_on_move(robot):
     hist.append(key)
     if len(hist) > 128:
         del hist[:-128]
+
+
+def current_cell_visited_before(robot):
+    """1 nếu ô hiện tại đã từng vào trước đó trong episode; ngược lại 0."""
+    visits = (robot.get("node_visits") or {}).get((robot["x"], robot["y"]), 0)
+    return 1 if visits > 1 else 0
 
 
 def bump_ping_pong_count(robot, max_cells_per_leg):
@@ -180,12 +182,15 @@ def build_encoded_state(robot):
     if node is None:
         return 0
     obs = get_obstacle_nwes(node)
-    return encode_state(
+    visited_before = current_cell_visited_before(robot)
+    encoded = encode_state(
         obs,
         robot["dist_goal_trend"],
         robot["dist_cp_trend"],
         robot["direct"],
+        visited_before=visited_before,
     )
+    return encoded
 
 
 def perceive_edge(robot, is_blocked):
@@ -199,11 +204,41 @@ def clear_obstacle_memory(robot):
         node["W_obstacle"] = 0
         node["E_obstacle"] = 0
         node["S_obstacle"] = 0
+    robot["_wall_discovered_edges"] = set()
+    robot["_reward_wall_first"] = False
+    robot["_reward_wall_facing"] = False
+    robot["_reward_wall_on_cell_entry"] = False
 
 
-def perceive_facing_from_sim(robot, sim_map):
-    """Cập nhật obstacle hướng đang nhìn — muốn quét S phải rotate tới S trước."""
+def note_walls_on_cell_entry(robot):
+    """
+    Vừa tiến vào ô: cộng điểm nếu bộ nhớ tường tại ô có ≥1 hướng = 1.
+    Chỉ đọc memory (state), không đọc sim; mỗi lần vào ô đều tính lại.
+    """
+    node = get_node(robot["robot_map"], robot["x"], robot["y"])
+    if node is None:
+        robot["_reward_wall_on_cell_entry"] = False
+        return
+    robot["_reward_wall_on_cell_entry"] = any(get_obstacle_nwes(node))
+
+
+def perceive_facing_from_sim(robot, sim_map, *, for_reward=True):
+    """Cập nhật obstacle hướng đang nhìn; gắn cờ reward khi for_reward (hành động thật)."""
     from map import sim_map as sm
 
-    is_wall = sm.get_block(sim_map, robot["x"], robot["y"], robot["direct"])
+    x, y, d = robot["x"], robot["y"], robot["direct"]
+    is_wall = sm.get_block(sim_map, x, y, d)
     perceive_edge(robot, is_wall)
+
+    if not for_reward:
+        robot["_reward_wall_first"] = False
+        robot["_reward_wall_facing"] = False
+        return
+
+    edge = (x, y, d)
+    discovered = robot.setdefault("_wall_discovered_edges", set())
+    first = bool(is_wall and edge not in discovered)
+    if first:
+        discovered.add(edge)
+    robot["_reward_wall_first"] = first
+    robot["_reward_wall_facing"] = bool(is_wall)

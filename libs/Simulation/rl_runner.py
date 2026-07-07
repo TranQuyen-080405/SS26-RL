@@ -5,7 +5,7 @@ Train / infer — đọc map JSON từ map/train/ và map/infer/.
 import os
 
 N_EPISODES_DEFAULT = 10000
-MAX_STEPS_INFER = 800
+MAX_STEPS_INFER = 200
 
 
 def load_train_and_eval_maps():
@@ -26,6 +26,7 @@ def run_train(
     on_step=None,
     step_wait=None,
     should_stop=None,
+    pause_gate=None,
     checkpoint=None,
     train_map_mode="random",
     train_sims=None,
@@ -46,6 +47,8 @@ def run_train(
         raise FileNotFoundError("Không có map train được chọn")
 
     initial_q, ck_label = resolve_checkpoint(checkpoint)
+    from RL_lib.reward_config import get_formula_name
+
     train_log.print_train_header(
         train_names=[s.get("name", "?") for s in train_sims],
         eval_names=[s.get("name", "?") for s in eval_sims] if infer_paths else [],
@@ -54,6 +57,7 @@ def run_train(
         checkpoint_label=ck_label,
         export_path=export_policy_path,
         resuming=initial_q is not None,
+        reward_formula=get_formula_name(),
     )
 
     result = trainer.train_multi(
@@ -64,6 +68,7 @@ def run_train(
         on_step=on_step,
         step_wait=step_wait,
         should_stop=should_stop,
+        pause_gate=pause_gate,
         initial_q=initial_q,
         map_mode=train_map_mode,
         sequential_plan=sequential_plan,
@@ -119,7 +124,7 @@ def _reset_at_start(robot, sim_map):
     rb.reset_explore_tracking(robot)
     rb.clear_obstacle_memory(robot)
     rb.inject_distances_from_map(robot)
-    rb.perceive_facing_from_sim(robot, sim_map)
+    rb.perceive_facing_from_sim(robot, sim_map, for_reward=False)
 
 
 def _episode_at_goal(robot, sim_map):
@@ -132,9 +137,10 @@ def _episode_at_goal(robot, sim_map):
     return rb.is_at_goal(robot)
 
 
-def run_infer_episode(sim_map, q_table, max_steps=MAX_STEPS_INFER, verbose=True, on_step=None):
+def run_infer_episode(sim_map, q_table, max_steps=MAX_STEPS_INFER, verbose=True, on_step=None, pause_gate=None):
     """Chạy policy thuần (argmax Q). Trả dict status, steps, log."""
     import train_log
+    from robot.trainer import _gate_pause
     from RL_lib.rl_core import get_policy
     from robot import robot as rb
     from robot import action as act
@@ -143,8 +149,10 @@ def run_infer_episode(sim_map, q_table, max_steps=MAX_STEPS_INFER, verbose=True,
     bot = rb.make_robot(sim_map["start"][0], sim_map["start"][1], "N", rmap)
     _reset_at_start(bot, sim_map)
     log = []
+    step_header_printed = False
 
     for step in range(1, max_steps + 1):
+        _gate_pause(pause_gate)
         if _episode_at_goal(bot, sim_map):
             if verbose:
                 train_log.print_infer_summary("goal", step - 1)
@@ -153,11 +161,19 @@ def run_infer_episode(sim_map, q_table, max_steps=MAX_STEPS_INFER, verbose=True,
         s = rb.build_encoded_state(bot)
         a_name = get_policy(s, q_table)
         x, y, d = bot["x"], bot["y"], bot["direct"]
+        from map import sim_map as sm
+        from RL_lib.reward_config import compute_reward
 
-        if verbose:
-            train_log.print_infer_step(step, x, y, d, s, a_name)
-
+        could_fwd = sm.can_move(sim_map, x, y, d)
         result = act.execute_action_sim(bot, sim_map, a_name)
+        reward = compute_reward(
+            bot, sim_map, result, action_name=a_name, could_forward_before=could_fwd
+        )
+        if verbose:
+            if not step_header_printed:
+                train_log.print_step_log_header()
+                step_header_printed = True
+            train_log.print_infer_step(step, x, y, d, s, a_name, reward=reward)
         entry = {
             "step": step,
             "x": x,
@@ -166,6 +182,7 @@ def run_infer_episode(sim_map, q_table, max_steps=MAX_STEPS_INFER, verbose=True,
             "s": s,
             "action": a_name,
             "result": result,
+            "reward": reward,
             "nx": bot["x"],
             "ny": bot["y"],
             "ndirect": bot["direct"],
@@ -195,6 +212,7 @@ def run_infer_episode_for_map(
     verbose=True,
     on_step=None,
     policy_bin=None,
+    pause_gate=None,
 ):
     """Nạp map + policy, chạy một episode infer."""
     import train_log
@@ -206,7 +224,9 @@ def run_infer_episode_for_map(
     sim = build_sim_map_from_file(map_path)
     if verbose:
         train_log.print_infer_header(sim, policy_path)
-    return sim, run_infer_episode(sim, q, max_steps=max_steps, verbose=verbose, on_step=on_step)
+    return sim, run_infer_episode(
+        sim, q, max_steps=max_steps, verbose=verbose, on_step=on_step, pause_gate=pause_gate
+    )
 
 
 def run_infer(map_path=None, max_steps=MAX_STEPS_INFER, verbose=True, policy_bin=None):

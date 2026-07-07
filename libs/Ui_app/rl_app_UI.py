@@ -8,7 +8,7 @@ import sys
 import queue
 import threading
 import tkinter as tk
-from tkinter import ttk, messagebox, scrolledtext
+from tkinter import ttk, messagebox, scrolledtext, filedialog
 
 _ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 _SIM = os.path.join(_ROOT, "Simulation")
@@ -19,7 +19,9 @@ if _SIM not in sys.path:
 
 from map.map_io import list_map_files, build_sim_map_from_file
 from Ui_app.map_view import SimMapCanvas
+from Ui_app.ui_scale import configure_window, entry_width, font, init as init_ui_scale, px, text_lines
 from Ui_app.ui_widgets import SegmentGroup, box_button, style_train_treeview, train_map_mark, train_row_tags
+import train_log
 
 
 class TextRedirector:
@@ -45,11 +47,12 @@ class TextRedirector:
 
 
 class RlApp:
-    def __init__(self, parent=None, root=None):
+    def __init__(self, parent=None, root=None, on_maps_changed=None):
         if parent is None:
             self.root = tk.Tk()
             self.root.title("SS26 RL — Train / Inference")
-            self.root.minsize(720, 560)
+            init_ui_scale(self.root)
+            configure_window(self.root, width=1200, height=720, min_width=720, min_height=560)
             self.container = self.root
             self._standalone = True
         else:
@@ -66,6 +69,7 @@ class RlApp:
         self.infer_policy_var = tk.StringVar(value="policy.bin")
         self._running = False
         self._stop_requested = False
+        self._paused = False
         self._map_paths = []
         self._train_rows = []
         self._anim_after_id = None
@@ -80,6 +84,7 @@ class RlApp:
         self._eps_edit_iid = None
         self._start_queue_processing()
         self.learn_lab_app = None
+        self._on_maps_changed = on_maps_changed
 
         self._build_toolbar()
         self._build_checkpoint_bar()
@@ -90,14 +95,11 @@ class RlApp:
         self.mode.trace_add("write", lambda *_: self._on_mode_change())
         self.view.trace_add("write", lambda *_: self._on_view_change())
         self._on_mode_change()
-
-        if not self._standalone:
-            self.container.bind("<Visibility>", self.update_formula_name)
-        self.update_formula_name()
+        self._sync_formula_combo()
 
     def _build_toolbar(self):
-        bar = ttk.LabelFrame(self.container, text="Điều khiển chung", padding=8)
-        bar.pack(fill=tk.X, padx=8, pady=(8, 4))
+        bar = ttk.LabelFrame(self.container, text="Bảng điều khiển chung", padding=px(8))
+        bar.pack(fill=tk.X, padx=px(8), pady=(px(8), px(4)))
 
         ttk.Label(bar, text="Mode").grid(row=0, column=0, padx=(0, 8), sticky=tk.W)
         self.mode_group = SegmentGroup(
@@ -118,7 +120,7 @@ class RlApp:
         self.view_group.grid(row=0, column=5, columnspan=2, sticky=tk.W, padx=(0, 12))
 
         ttk.Label(bar, text="Episodes").grid(row=0, column=7, padx=(0, 4))
-        self.spin_ep = ttk.Spinbox(bar, from_=100, to=200000, increment=100, width=8)
+        self.spin_ep = ttk.Spinbox(bar, from_=100, to=200000, increment=100, width=entry_width(8))
         self.spin_ep.set(str(self.episodes.get()))
         self.spin_ep.grid(row=0, column=8, padx=(0, 12))
 
@@ -130,33 +132,38 @@ class RlApp:
         )
         self.delay_group.grid(row=0, column=10, padx=(0, 8))
 
-        # Row 1: Công thức reward hiện tại
-        ttk.Label(bar, text="Công thức reward:").grid(row=1, column=0, columnspan=2, sticky=tk.W, pady=(8, 0))
-        self.formula_name_var = tk.StringVar(value="")
+        ttk.Label(bar, text="Reward").grid(row=1, column=0, sticky=tk.W, pady=(6, 0))
+        self.formula_var = tk.StringVar(value="")
         self.combo_formula = ttk.Combobox(
             bar,
-            textvariable=self.formula_name_var,
+            textvariable=self.formula_var,
             state="readonly",
-            width=48,
+            width=entry_width(24),
             postcommand=self.refresh_formula_list,
         )
-        self.combo_formula.grid(row=1, column=2, columnspan=9, sticky=tk.W, pady=(8, 0))
+        self.combo_formula.grid(row=1, column=1, columnspan=4, sticky=tk.W, pady=(6, 0), padx=(0, 8))
         self.combo_formula.bind("<<ComboboxSelected>>", self._on_formula_selected)
 
     def _build_checkpoint_bar(self):
-        self.ck_frame = ttk.LabelFrame(self.container, text="Policy train", padding=(8, 6))
+        self.ck_frame = ttk.LabelFrame(self.container, text="Nạp Policy", padding=(8, 6))
         row1 = ttk.Frame(self.ck_frame)
         row1.pack(fill=tk.X)
-        ttk.Label(row1, text="Nạp Q từ").pack(side=tk.LEFT, padx=(0, 4))
+        ttk.Label(row1, text="Nạp từ").pack(side=tk.LEFT, padx=(0, 4))
         self.combo_checkpoint = ttk.Combobox(
             row1,
             textvariable=self.checkpoint_var,
-            width=22,
+            width=entry_width(22),
             state="readonly",
         )
         self.combo_checkpoint.pack(side=tk.LEFT, padx=(0, 8))
         self.combo_checkpoint.bind("<<ComboboxSelected>>", self._on_checkpoint_selected)
-        box_button(row1, text="Refresh Q", command=self.refresh_checkpoints, role="secondary").pack(
+        box_button(row1, text="Refresh list", command=self.refresh_checkpoints, role="secondary").pack(
+            side=tk.LEFT, padx=(0, 4)
+        )
+        box_button(row1, text="Delete policy", command=self._delete_selected_train_policy, role="secondary").pack(
+            side=tk.LEFT, padx=(0, 4)
+        )
+        box_button(row1, text="Xuất policy ra CSV", command=self._export_policy_to_csv, role="secondary").pack(
             side=tk.LEFT, padx=(0, 4)
         )
 
@@ -166,10 +173,36 @@ class RlApp:
         self.combo_export_policy = ttk.Combobox(
             row2,
             textvariable=self.export_policy_var,
-            width=22,
+            width=entry_width(22),
         )
         self.combo_export_policy.pack(side=tk.LEFT, padx=(0, 4))
         ttk.Label(row2, text=".bin").pack(side=tk.LEFT, padx=(0, 8))
+        ttk.Separator(row2, orient=tk.VERTICAL).pack(side=tk.RIGHT, fill=tk.Y, padx=6)
+        box_button(
+            row2,
+            text="Random init",
+            command=lambda: self._create_init_policy("random"),
+            role="secondary",
+        ).pack(side=tk.RIGHT, padx=(4, 0))
+        box_button(
+            row2,
+            text="Right init",
+            command=lambda: self._create_init_policy("right"),
+            role="secondary",
+        ).pack(side=tk.RIGHT, padx=(4, 0))
+        box_button(
+            row2,
+            text="Left init",
+            command=lambda: self._create_init_policy("left"),
+            role="secondary",
+        ).pack(side=tk.RIGHT, padx=(4, 0))
+        box_button(
+            row2,
+            text="Forward init",
+            command=lambda: self._create_init_policy("forward"),
+            role="secondary",
+        ).pack(side=tk.RIGHT, padx=(4, 0))
+        ttk.Label(row2, text="Init policy:").pack(side=tk.RIGHT, padx=(0, 4))
         # ttk.Label(
         #     row2,
         #     text="Train mới → đặt tên file; train tiếp → có thể giữ hoặc đổi tên",
@@ -182,18 +215,115 @@ class RlApp:
         self.combo_infer_policy = ttk.Combobox(
             self.infer_policy_frame,
             textvariable=self.infer_policy_var,
-            width=28,
+            width=entry_width(28),
             state="readonly",
         )
         self.combo_infer_policy.pack(side=tk.LEFT, padx=(0, 8))
         box_button(
-            self.infer_policy_frame, text="Refresh list", command=self.refresh_infer_policies, role="secondary"
+            self.infer_policy_frame, text="Làm mới", command=self.refresh_infer_policies, role="secondary"
         ).pack(side=tk.LEFT, padx=(0, 4))
-        ttk.Label(
-            self.infer_policy_frame,
-            text="Chọn file checkpoints/*.bin để inference",
-        ).pack(side=tk.LEFT, padx=8)
+        box_button(
+            self.infer_policy_frame, text="Xóa policy", command=self._delete_selected_policy, role="secondary"
+        ).pack(side=tk.LEFT, padx=(0, 4))
+        box_button(
+            self.infer_policy_frame, text="Xuất file CSV", command=self._export_policy_to_csv, role="secondary"
+        ).pack(side=tk.LEFT, padx=(0, 4))
         self.refresh_infer_policies()
+
+    def _export_policy_to_csv(self):
+        if self._is_busy():
+            messagebox.showinfo("Xuất policy", "Đang chạy train/inference — vui lòng bấm Stop hoặc đợi chạy xong.")
+            return
+
+        if self.mode.get() == "infer":
+            name = self.infer_policy_var.get().strip()
+        else:
+            name = self.checkpoint_var.get().strip()
+            if not name or name == "(mới)":
+                name = self.export_policy_var.get().strip()
+        if not name:
+            messagebox.showwarning("Xuất policy", "Chưa chọn policy để xuất.")
+            return
+
+        from robot.policy_io import load_policy_bin, policy_bin_path, export_policy_csv
+
+        bin_path = policy_bin_path(name)
+        if not os.path.isfile(bin_path):
+            messagebox.showerror("Xuất policy", "Không tìm thấy policy: %s" % bin_path)
+            return
+
+        base_name = os.path.splitext(os.path.basename(bin_path))[0]
+        csv_path = filedialog.asksaveasfilename(
+            parent=self.root,
+            title="Xuất policy dùng để nộp Kaggle",
+            defaultextension=".csv",
+            initialfile=base_name + ".csv",
+            filetypes=[("CSV files", "*.csv")],
+        )
+        if not csv_path:
+            return
+        try:
+            export_policy_csv(load_policy_bin(bin_path), csv_path)
+            messagebox.showinfo("Xuất policy", "Đã xuất file CSV:\n%s" % csv_path)
+        except Exception as exc:
+            messagebox.showerror("Xuất policy", "Không thể xuất CSV:\n%s" % exc)
+
+    def _delete_selected_policy(self):
+        if self._is_busy():
+            messagebox.showinfo("Xóa policy", "Đang chạy train/inference — vui lòng bấm Stop hoặc đợi chạy xong.")
+            return
+        name = self.infer_policy_var.get().strip()
+        if not name:
+            messagebox.showinfo("Xóa policy", "Chưa chọn file policy nào để xóa.")
+            return
+        confirm = messagebox.askyesno(
+            "Xác nhận xóa",
+            f"Bạn có chắc chắn muốn xóa file policy '{name}' không?",
+            icon="warning"
+        )
+        if not confirm:
+            return
+        from robot.policy_io import policy_bin_path
+        path = policy_bin_path(name)
+        try:
+            if os.path.exists(path):
+                os.remove(path)
+                messagebox.showinfo("Đã xóa", f"Đã xóa thành công file policy '{name}'!")
+                self.refresh_infer_policies()
+                self.refresh_checkpoints()
+            else:
+                messagebox.showerror("Lỗi", f"Không tìm thấy file policy '{name}' để xóa.")
+        except Exception as e:
+            messagebox.showerror("Lỗi", f"Lỗi khi xóa file: {str(e)}")
+
+    def _delete_selected_train_policy(self):
+        if self._is_busy():
+            messagebox.showinfo("Xóa policy", "Đang chạy train/inference — vui lòng bấm Stop hoặc đợi chạy xong.")
+            return
+        name = self.checkpoint_var.get().strip()
+        if not name or name == "(mới)":
+            messagebox.showinfo("Xóa policy", "Chưa chọn file policy hợp lệ để xóa.")
+            return
+        confirm = messagebox.askyesno(
+            "Xác nhận xóa",
+            f"Bạn có chắc chắn muốn xóa file policy '{name}' không?",
+            icon="warning"
+        )
+        if not confirm:
+            return
+        from robot.policy_io import policy_bin_path
+        path = policy_bin_path(name)
+        try:
+            if os.path.exists(path):
+                os.remove(path)
+                messagebox.showinfo("Đã xóa", f"Đã xóa thành công file policy '{name}'!")
+                self.refresh_checkpoints()
+                self.refresh_infer_policies()
+            else:
+                messagebox.showerror("Lỗi", f"Không tìm thấy file policy '{name}' để xóa.")
+        except Exception as e:
+            messagebox.showerror("Lỗi", f"Lỗi khi xóa file: {str(e)}")
+
 
     def refresh_infer_policies(self):
         from robot.policy_io import list_policy_bin_files
@@ -252,6 +382,44 @@ class RlApp:
         base = normalize_policy_base_name(self.export_policy_var.get())
         return checkpoint_bin_path(base)
 
+    def _create_init_policy(self, mode):
+        if self._is_busy():
+            messagebox.showinfo("Init policy", "Đang chạy train/inference — vui lòng bấm Stop hoặc đợi chạy xong.")
+            return
+        try:
+            from robot.policy_io import (
+                normalize_policy_base_name,
+                checkpoint_bin_path,
+                export_policy,
+                biased_q_table,
+                random_q_table,
+            )
+
+            base = normalize_policy_base_name(self.export_policy_var.get())
+            path = checkpoint_bin_path(base)
+            if mode == "forward":
+                q_table = biased_q_table("forward", preferred_value=0.5, other_value=0.0)
+                label = "forward"
+            elif mode == "left":
+                q_table = biased_q_table("rotate left", preferred_value=0.5, other_value=0.0)
+                label = "rotate left"
+            elif mode == "right":
+                q_table = biased_q_table("rotate right", preferred_value=0.5, other_value=0.0)
+                label = "rotate right"
+            else:
+                q_table = random_q_table(-0.5, 0.5)
+                label = "random"
+            export_policy(q_table, path)
+            self.refresh_checkpoints()
+            self.refresh_infer_policies()
+            self.checkpoint_var.set(base)
+            self.export_policy_var.set(base)
+            self.infer_policy_var.set(base + ".bin")
+            self.status.set("Init policy '%s' (%s)" % (base, label))
+            messagebox.showinfo("Init policy", "Đã tạo policy khởi tạo:\n%s" % os.path.basename(path))
+        except Exception as exc:
+            messagebox.showerror("Init policy", str(exc))
+
     def _infer_policy_bin(self):
         from robot.policy_io import policy_bin_path
 
@@ -265,32 +433,96 @@ class RlApp:
 
     def _build_workspace(self):
         self.workspace = ttk.Frame(self.container)
-        self.workspace.pack(fill=tk.BOTH, expand=True, padx=8, pady=4)
+        self.workspace.pack(fill=tk.BOTH, expand=True, padx=px(8), pady=px(4))
 
-        self.log_frame = ttk.LabelFrame(self.workspace, text="Output", padding=8)
-        self.log = scrolledtext.ScrolledText(self.log_frame, height=16, state=tk.DISABLED, font=("Monospace", 10))
+        self._side_col_minsize = px(240)
+        self._log_col_minsize = px(220)
+        self._map_col_minsize = px(180)
+
+        try:
+            pane_bg = ttk.Style().lookup("TFrame", "background")
+        except tk.TclError:
+            pane_bg = "#f0f0f0"
+
+        self._paned = tk.PanedWindow(
+            self.workspace,
+            orient=tk.HORIZONTAL,
+            sashwidth=px(6),
+            sashrelief=tk.RAISED,
+            opaqueresize=False,
+            bg=pane_bg,
+            bd=0,
+            showhandle=False,
+        )
+        self._paned.pack(fill=tk.BOTH, expand=True)
+        self._paned.bind("<ButtonRelease-1>", self._on_paned_resize)
+
+        self.log_frame = ttk.LabelFrame(self._paned, text="Log", padding=px(8))
+        self.log = scrolledtext.ScrolledText(
+            self.log_frame,
+            height=text_lines(16),
+            state=tk.DISABLED,
+            font=font(9, family="Monospace"),
+            wrap=tk.NONE,
+        )
         self.log.pack(fill=tk.BOTH, expand=True)
 
-        self.map_frame = ttk.LabelFrame(self.workspace, text="Map", padding=8)
+        self.map_frame = ttk.LabelFrame(self._paned, text="Map", padding=px(8))
         self.map_view = SimMapCanvas(self.map_frame)
         self.map_view.pack(fill=tk.BOTH, expand=True)
 
-        self.maps_frame = ttk.LabelFrame(self.workspace, text="List map", padding=8)
+        self.maps_frame = ttk.LabelFrame(self._paned, text="List map", padding=px(8))
+        self.maps_frame.columnconfigure(0, weight=1)
+        self.maps_frame.rowconfigure(0, weight=1)
 
-        self.workspace.columnconfigure(0, weight=3, minsize=360)
-        self.workspace.columnconfigure(1, weight=2, minsize=300)
-        self.workspace.rowconfigure(0, weight=1)
+    def _on_paned_resize(self, _event=None):
+        if self.view.get() != "map":
+            return
+        try:
+            self.root.after_idle(self.map_view.redraw)
+        except Exception:
+            pass
+
+    def _apply_pane_minsizes(self):
+        try:
+            self._paned.paneconfigure(self.log_frame, minsize=self._log_col_minsize)
+            self._paned.paneconfigure(self.maps_frame, minsize=self._side_col_minsize)
+            if self.view.get() == "map":
+                self._paned.paneconfigure(self.map_frame, minsize=self._map_col_minsize)
+        except tk.TclError:
+            pass
+
+    def _rebuild_paned_panes(self):
+        """Sắp xếp lại pane Log | Map | List map — Map ẩn khi View = Log."""
+        for child in (self.log_frame, self.map_frame, self.maps_frame):
+            try:
+                self._paned.forget(child)
+            except tk.TclError:
+                pass
+
+        is_map = self.view.get() == "map"
+        stretch = "always"
+        self._paned.add(self.log_frame, minsize=self._log_col_minsize, stretch=stretch)
+        if is_map:
+            self._paned.add(self.map_frame, minsize=self._map_col_minsize, stretch=stretch)
+        self._paned.add(self.maps_frame, minsize=self._side_col_minsize, stretch=stretch)
+        self._apply_pane_minsizes()
+
+        if is_map:
+            self.delay_group.set_enabled(True)
+            self._preview_map_from_selection()
+        else:
+            self.delay_group.set_enabled(False)
 
     def _build_map_list(self):
         frame = self.maps_frame
 
         self.map_hint = ttk.Label(frame, text="")
-        self.map_hint.pack(anchor=tk.W, pady=(0, 4))
 
         self.train_cfg_frame = ttk.LabelFrame(frame, text="Danh sách map train", padding=6)
         self.train_cfg_frame.columnconfigure(0, weight=1)
-        self.train_cfg_frame.rowconfigure(1, weight=1, minsize=72)
-        self.train_cfg_frame.rowconfigure(2, weight=0, minsize=48)
+        self.train_cfg_frame.rowconfigure(1, weight=1, minsize=px(72))
+        self.train_cfg_frame.rowconfigure(2, weight=0, minsize=px(48))
 
         mode_row = ttk.Frame(self.train_cfg_frame)
         mode_row.grid(row=0, column=0, sticky="ew", pady=(0, 6))
@@ -298,7 +530,7 @@ class RlApp:
         self.train_mode_group = SegmentGroup(
             mode_row,
             self.train_map_mode,
-            [("Random", "random"), ("Lần lượt", "sequential"), ("Đơn map", "single")],
+            [("Random", "random"), ("Sequence", "sequential"), ("Single", "single")],
             command=self._on_train_mode_change,
         )
         self.train_mode_group.pack(side=tk.LEFT)
@@ -308,38 +540,40 @@ class RlApp:
         tree_wrap.columnconfigure(0, weight=1)
         tree_wrap.rowconfigure(0, weight=1)
         scroll_t = ttk.Scrollbar(tree_wrap, orient=tk.VERTICAL)
+        scroll_x = ttk.Scrollbar(tree_wrap, orient=tk.HORIZONTAL)
         self.train_tree = ttk.Treeview(
             tree_wrap,
             columns=("on", "ord", "name", "eps"),
             show="headings",
-            height=8,
+            height=text_lines(8),
             yscrollcommand=scroll_t.set,
+            xscrollcommand=scroll_x.set,
             selectmode="browse",
         )
         scroll_t.config(command=self.train_tree.yview)
+        scroll_x.config(command=self.train_tree.xview)
         style_train_treeview(self.train_tree, self.root)
         self.train_tree.heading("ord", text="≡")
         self.train_tree.heading("name", text="File map")
         self.train_tree.heading("eps", text="Episodes")
-        self.train_tree.column("ord", width=32, anchor=tk.CENTER, stretch=False)
-        self.train_tree.column("name", width=200, anchor=tk.W, stretch=True)
-        self.train_tree.column("eps", width=80, anchor=tk.CENTER, stretch=False)
+        self.train_tree.column("ord", width=px(32), anchor=tk.CENTER, stretch=False, minwidth=px(28))
+        self.train_tree.column("name", width=px(160), anchor=tk.W, stretch=True, minwidth=px(72))
+        self.train_tree.column("eps", width=px(72), anchor=tk.CENTER, stretch=False, minwidth=px(56))
         self.train_tree.grid(row=0, column=0, sticky="nsew")
         scroll_t.grid(row=0, column=1, sticky="ns")
+        scroll_x.grid(row=1, column=0, sticky="ew")
         self.train_tree.bind("<<TreeviewSelect>>", self._on_train_tree_select)
         self.train_tree.bind("<Button-1>", self._on_train_tree_click, add=True)
         self.train_tree.bind("<ButtonRelease-1>", self._on_train_drag_release, add=True)
         self.train_tree.bind("<B1-Motion>", self._on_train_drag_motion, add=True)
 
-        btn_row = tk.Frame(self.train_cfg_frame, height=44)
-        btn_row.grid(row=2, column=0, sticky="ew", pady=(6, 0))
+        btn_row = tk.Frame(self.train_cfg_frame, height=px(44))
+        btn_row.grid(row=2, column=0, sticky="ew", pady=(px(6), 0))
         btn_row.grid_propagate(False)
-        box_button(btn_row, text="Tất cả", command=self._train_select_all, role="accent").pack(
-            side=tk.LEFT, padx=(0, 4), pady=4
-        )
-        box_button(btn_row, text="Bỏ chọn", command=self._train_select_none, role="secondary").pack(
-            side=tk.LEFT, padx=4, pady=4
-        )
+        self.btn_train_select_all = box_button(btn_row, text="Chọn tất cả", command=self._train_select_all, role="accent")
+        self.btn_train_select_all.pack(side=tk.LEFT, padx=(0, 4), pady=4)
+        self.btn_train_select_none = box_button(btn_row, text="Bỏ chọn tất cả", command=self._train_select_none, role="secondary")
+        self.btn_train_select_none.pack(side=tk.LEFT, padx=4, pady=4)
 
         self.infer_list_frame = ttk.LabelFrame(frame, text="Chọn map inference", padding=6)
         list_frame = ttk.Frame(self.infer_list_frame)
@@ -347,7 +581,7 @@ class RlApp:
         scroll = ttk.Scrollbar(list_frame, orient=tk.VERTICAL)
         self.map_list = tk.Listbox(
             list_frame,
-            height=14,
+            height=text_lines(12),
             yscrollcommand=scroll.set,
             selectmode=tk.BROWSE,
             relief=tk.GROOVE,
@@ -355,18 +589,22 @@ class RlApp:
             highlightthickness=1,
             selectbackground="#89b4fa",
             selectforeground="#11111b",
-            font=("", 10),
+            font=font(10),
         )
         scroll.config(command=self.map_list.yview)
         self.map_list.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         scroll.pack(side=tk.RIGHT, fill=tk.Y)
         self.map_list.bind("<<ListboxSelect>>", self._on_map_select)
 
+        self._rebuild_paned_panes()
+
     def _build_actions(self):
-        bar = ttk.LabelFrame(self.container, text="Train / Inference", padding=8)
-        bar.pack(side=tk.BOTTOM, fill=tk.X, padx=8, pady=(4, 8))
+        bar = ttk.LabelFrame(self.container, text="Train / Inference", padding=px(8))
+        bar.pack(side=tk.BOTTOM, fill=tk.X, padx=px(8), pady=(px(4), px(8)))
         self.btn_run = ttk.Button(bar, text="▶ Run", command=self.on_run)
         self.btn_run.pack(side=tk.LEFT, padx=(0, 8))
+        self.btn_pause = ttk.Button(bar, text="⏸ Pause", command=self.on_pause, state=tk.DISABLED)
+        self.btn_pause.pack(side=tk.LEFT, padx=(0, 8))
         self.btn_stop = ttk.Button(bar, text="■ Stop", command=self.on_stop, state=tk.DISABLED)
         self.btn_stop.pack(side=tk.LEFT)
         ttk.Button(bar, text="Refresh map", command=self.refresh_map_view).pack(side=tk.LEFT, padx=(8, 0))
@@ -375,10 +613,74 @@ class RlApp:
 
     def _on_train_mode_change(self):
         mode = self.train_map_mode.get()
+        if mode == "single":
+            enabled = [r for r in self._train_rows if r["enabled"]]
+            if len(enabled) > 1:
+                keep = enabled[0]
+                for r in self._train_rows:
+                    r["enabled"] = r is keep
+            elif len(enabled) == 0 and self._train_rows:
+                sel = self.train_tree.selection()
+                pick = self._train_row_by_iid(sel[0]) if sel else self._train_rows[0]
+                if pick:
+                    for r in self._train_rows:
+                        r["enabled"] = r is pick
+        self._apply_train_mode_ui()
+        self._refresh_train_tree()
+
+    def _train_tree_display_columns(self):
+        if self.train_map_mode.get() == "random":
+            return ("on", "ord", "name")
+        return ("on", "ord", "eps", "name")
+
+    def _train_eps_column_index(self):
+        cols = self._train_tree_display_columns()
+        if "eps" not in cols:
+            return None
+        return "#%d" % (cols.index("eps") + 1)
+
+    def _train_drag_column_indices(self):
+        cols = self._train_tree_display_columns()
+        out = set()
+        for key in ("ord", "name"):
+            if key in cols:
+                out.add("#%d" % (cols.index(key) + 1))
+        return out
+
+    def _apply_train_mode_ui(self):
+        mode = self.train_map_mode.get()
+        self.train_tree.configure(displaycolumns=self._train_tree_display_columns())
+        if mode != "random":
+            self.train_tree.heading("eps", text="Episodes")
+            self.train_tree.column(
+                "eps",
+                width=px(72),
+                anchor=tk.CENTER,
+                stretch=False,
+                minwidth=px(56),
+            )
+        if mode == "single":
+            self.btn_train_select_all.pack_forget()
+            self.btn_train_select_none.pack_forget()
+        else:
+            self.btn_train_select_all.pack(side=tk.LEFT, padx=(0, 4), pady=4)
+            self.btn_train_select_none.pack(side=tk.LEFT, padx=4, pady=4)
         if mode == "random":
             self.spin_ep.configure(state=tk.NORMAL)
         else:
-            self.spin_ep.configure(state=tk.DISABLED)
+            self._update_train_episodes_total()
+
+    def _train_enabled_rows(self):
+        return [r for r in self._train_rows if r["enabled"]]
+
+    def _update_train_episodes_total(self):
+        mode = self.train_map_mode.get()
+        if mode == "random":
+            return
+        enabled = self._train_enabled_rows()
+        total = sum(max(1, int(r["episodes"])) for r in enabled)
+        self.spin_ep.configure(state=tk.DISABLED)
+        self.spin_ep.set(str(max(1, total) if total else 1))
 
     def _train_row_by_iid(self, iid):
         if not iid:
@@ -404,6 +706,7 @@ class RlApp:
                 values=(mark, i + 1, row["name"], row["episodes"]),
                 tags=tags,
             )
+        self._update_train_episodes_total()
 
     def _cancel_eps_edit(self):
         if self._eps_entry is not None:
@@ -413,7 +716,7 @@ class RlApp:
 
     def _start_eps_edit(self, iid):
         self._cancel_eps_edit()
-        bbox = self.train_tree.bbox(iid, column="#4")
+        bbox = self.train_tree.bbox(iid, column="eps")
         if not bbox:
             return
         row = self._train_row_by_iid(iid)
@@ -459,6 +762,7 @@ class RlApp:
         row["episodes"] = n
         self._refresh_train_tree()
         self.train_tree.selection_set(iid)
+        self._update_train_episodes_total()
 
     def _on_train_tree_select(self, _event=None):
         if self._eps_entry is not None:
@@ -477,11 +781,12 @@ class RlApp:
             self.train_tree.selection_set(iid)
             self._train_toggle_selected()
             return "break"
-        if col == "#4":
+        eps_col = self._train_eps_column_index()
+        if eps_col and col == eps_col and self.train_map_mode.get() != "random":
             self.train_tree.selection_set(iid)
             self.root.after_idle(lambda i=iid: self._start_eps_edit(i))
             return "break"
-        if col in ("#2", "#3"):
+        if col in self._train_drag_column_indices():
             self._drag_src_iid = iid
             self.train_tree.selection_set(iid)
 
@@ -553,30 +858,43 @@ class RlApp:
         if not sel:
             return
         row = self._train_row_by_iid(sel[0])
-        if row:
+        if not row:
+            return
+        if self.train_map_mode.get() == "single":
+            if row["enabled"]:
+                return
+            for r in self._train_rows:
+                r["enabled"] = False
+            row["enabled"] = True
+        else:
             row["enabled"] = not row["enabled"]
-            self._refresh_train_tree()
-            self.train_tree.selection_set(sel[0])
+        self._refresh_train_tree()
+        self.train_tree.selection_set(sel[0])
+        self._update_train_episodes_total()
 
     def _train_select_all(self):
+        if self.train_map_mode.get() == "single":
+            return
         for row in self._train_rows:
             row["enabled"] = True
         self._refresh_train_tree()
+        self._update_train_episodes_total()
 
     def _train_select_none(self):
+        if self.train_map_mode.get() == "single":
+            return
         for row in self._train_rows:
             row["enabled"] = False
         self._refresh_train_tree()
+        self._update_train_episodes_total()
 
     def _build_train_run_config(self):
         mode = self.train_map_mode.get()
         if mode == "single":
-            sel = self.train_tree.selection()
-            if not sel:
-                raise ValueError("Chế độ Đơn map — chọn một dòng trong bảng.")
-            row = self._train_row_by_iid(sel[0])
-            if not row:
-                raise ValueError("Map không hợp lệ.")
+            enabled = self._train_enabled_rows()
+            if len(enabled) != 1:
+                raise ValueError("Chế độ Single — chọn đúng một map (bấm [ ]).")
+            row = enabled[0]
             sim = build_sim_map_from_file(row["path"])
             n_ep = max(1, int(row["episodes"]))
             return "random", [sim], None, n_ep
@@ -620,33 +938,45 @@ class RlApp:
             self._run_train_log(export_path)
 
     def notify_map_saved(self, kind, path):
-        """Gọi từ tab Tạo map sau khi Save JSON."""
-        self.root.after(0, lambda: self._handle_map_saved(kind, path))
+        """Gọi từ tab Tạo map sau khi lưu / xóa map."""
+        self.handle_maps_changed(kind, path)
 
-    def _handle_map_saved(self, kind, path):
+    def handle_maps_changed(self, kind=None, path=None):
+        """Cập nhật danh sách map train/infer khi có thay đổi trên đĩa."""
+        basename = os.path.basename(path) if path else None
+        self.refresh_maps()
         if self._is_busy():
+            if basename and (kind is None or kind == self.mode.get()):
+                self.status.set("Map cập nhật: %s" % basename)
             return
-        basename = os.path.basename(path)
-        if kind == "train" or (kind == "infer" and self.mode.get() == "infer"):
-            self.refresh_maps()
-            if kind == "train":
-                for i, row in enumerate(self._train_rows):
-                    if row["name"] == basename:
-                        row["enabled"] = True
-                        self._refresh_train_tree()
-                        self.train_tree.selection_set(str(i))
-                        self.train_tree.see(str(i))
-                        break
-            elif self._map_paths:
-                for i, p in enumerate(self._map_paths):
-                    if os.path.basename(p) == basename:
-                        self.map_list.selection_clear(0, tk.END)
-                        self.map_list.selection_set(i)
-                        self.map_list.see(i)
-                        break
-            if self.view.get() == "map":
-                self._preview_map_from_selection()
-            self.status.set("Đã refresh — map mới: %s" % basename)
+        if not basename or kind is None:
+            return
+        if kind == "train":
+            for i, row in enumerate(self._train_rows):
+                if row["name"] == basename:
+                    row["enabled"] = True
+                    self._refresh_train_tree()
+                    self.train_tree.selection_set(str(i))
+                    self.train_tree.see(str(i))
+                    break
+        elif kind == "infer" and self._map_paths:
+            for i, p in enumerate(self._map_paths):
+                if os.path.basename(p) == basename:
+                    self.map_list.selection_clear(0, tk.END)
+                    self.map_list.selection_set(i)
+                    self.map_list.see(i)
+                    break
+        if self.view.get() == "map" and (kind is None or kind == self.mode.get()):
+            self._preview_map_from_selection()
+        if basename and (kind is None or kind == self.mode.get()):
+            self.status.set("Đã refresh — map: %s" % basename)
+
+    def _emit_maps_changed(self, kind, path):
+        if self._on_maps_changed:
+            try:
+                self._on_maps_changed(kind, path)
+            except Exception:
+                pass
 
     def _step_delay_ms(self):
         try:
@@ -680,12 +1010,49 @@ class RlApp:
         self.log.delete("1.0", tk.END)
         self.log.configure(state=tk.DISABLED)
 
+    def _append_log_text(self, text):
+        if not text:
+            return
+        if not text.endswith("\n"):
+            text += "\n"
+        self.log.configure(state=tk.NORMAL)
+        at_bottom = self.log.yview()[1] >= 0.98
+        self.log.insert(tk.END, text)
+        if at_bottom:
+            self.log.see(tk.END)
+        self.log.configure(state=tk.DISABLED)
+
+    def _format_step_log(self, entry):
+        return (
+            train_log.format_step_log_line(
+                entry.get("step", 0),
+                entry.get("x", 0),
+                entry.get("y", 0),
+                entry.get("direct", "?"),
+                entry.get("s", 0),
+                entry.get("action", "?"),
+                reward=entry.get("reward"),
+            )
+            + "\n"
+        )
+
+    def _append_step_log(self, entry):
+        line = self._format_step_log(entry)
+        self.log.configure(state=tk.NORMAL)
+        at_bottom = self.log.yview()[1] >= 0.98
+        self.log.insert(tk.END, line)
+        if at_bottom:
+            self.log.see(tk.END)
+        self.log.configure(state=tk.DISABLED)
+
     def _begin_run(self):
         self._running = True
         self._stop_requested = False
+        self._paused = False
         self._locked_view = self.view.get()
         self._locked_mode = self.mode.get()
-        self.btn_run.configure(state=tk.DISABLED)
+        self.btn_run.configure(state=tk.DISABLED, text="▶ Run")
+        self.btn_pause.configure(state=tk.NORMAL)
         self.btn_stop.configure(state=tk.NORMAL)
         self.view_group.set_enabled(False)
         self.mode_group.set_enabled(False)
@@ -693,12 +1060,39 @@ class RlApp:
     def _end_run(self):
         self._running = False
         self._stop_requested = False
+        self._paused = False
         self._locked_view = None
         self._locked_mode = None
-        self.btn_run.configure(state=tk.NORMAL)
+        self.btn_run.configure(state=tk.NORMAL, text="▶ Run")
+        self.btn_pause.configure(state=tk.DISABLED)
         self.btn_stop.configure(state=tk.DISABLED)
         self.view_group.set_enabled(True)
         self.mode_group.set_enabled(True)
+
+    def _set_paused_ui(self, paused):
+        self._paused = paused
+        if paused:
+            self.btn_run.configure(state=tk.NORMAL, text="▶ Continue")
+            self.btn_pause.configure(state=tk.DISABLED)
+            self.status.set("Paused")
+            if self.view.get() == "map":
+                if self.mode.get() == "train":
+                    self.map_view.set_status("Train tạm dừng — bấm Continue để chạy tiếp")
+                else:
+                    self.map_view.set_status("Inference tạm dừng — bấm Continue để chạy tiếp")
+        else:
+            self.btn_run.configure(state=tk.DISABLED, text="▶ Run")
+            self.btn_pause.configure(state=tk.NORMAL)
+            if self.mode.get() == "train":
+                self.status.set("Training..." if self.view.get() == "map" else "Running...")
+            else:
+                self.status.set("Playing..." if self.view.get() == "map" else "Running...")
+
+    def _pause_gate(self):
+        import time
+
+        while self._paused and not self._stop_requested:
+            time.sleep(0.05)
 
     def _on_view_change(self):
         if self._running and self._locked_view and self.view.get() != self._locked_view:
@@ -753,35 +1147,40 @@ class RlApp:
             self.map_view.set_status("Lỗi load map: %s" % exc)
 
     def _update_view_widgets(self):
-        is_map = self.view.get() == "map"
-        self.log_frame.grid_remove()
-        self.map_frame.grid_remove()
-        if is_map:
-            self.map_frame.grid(row=0, column=0, sticky="nsew", padx=(0, 6))
-            self.delay_group.set_enabled(True)
-            self._preview_map_from_selection()
+        self._rebuild_paned_panes()
+
+    def _set_map_hint(self, text):
+        text = (text or "").strip()
+        if text:
+            self.map_hint.configure(text=text)
+            if not self.map_hint.winfo_ismapped():
+                self.map_hint.pack(anchor=tk.W, pady=(0, px(4)))
         else:
-            self.log_frame.grid(row=0, column=0, sticky="nsew", padx=(0, 6))
-            self.delay_group.set_enabled(False)
-        self.maps_frame.grid(row=0, column=1, sticky="nsew")
+            self.map_hint.pack_forget()
 
     def refresh_maps(self):
-        kind = "train" if self.mode.get() == "train" else "infer"
-        self._map_paths = list_map_files(kind)
+        train_paths = list_map_files("train")
+        infer_paths = list_map_files("infer")
+
         if self.mode.get() == "train":
+            self._map_paths = train_paths
             self._sync_train_rows_from_paths()
-            self.map_hint.config(
-                text="[ ] bật/tắt map | kéo ≡/tên đổi thứ tự | bấm Episodes sửa | Đơn map = 1 dòng đang chọn"
-            )
-            self.spin_ep.configure(state=tk.NORMAL if self.train_map_mode.get() == "random" else tk.DISABLED)
+            self._set_map_hint("")
+            self._apply_train_mode_ui()
         else:
+            self._map_paths = infer_paths
             self.map_list.delete(0, tk.END)
             for path in self._map_paths:
                 self.map_list.insert(tk.END, os.path.basename(path))
-            self.map_hint.config(text="Inference: chọn map. Map + Run để xem robot inference từng bước.")
+            self._set_map_hint("")
             self.spin_ep.configure(state=tk.DISABLED)
             if self._map_paths:
                 self.map_list.selection_set(0)
+            # Giữ danh sách train đồng bộ khi đang xem tab infer
+            saved_paths = self._map_paths
+            self._map_paths = train_paths
+            self._sync_train_rows_from_paths()
+            self._map_paths = saved_paths
         if self.view.get() == "map":
             self.root.after_idle(self._preview_map_from_selection)
 
@@ -829,6 +1228,9 @@ class RlApp:
             self.status.set("Refresh map — %d file trong map/%s/ (chọn View Map để xem)" % (n, kind))
 
     def on_run(self):
+        if self._running and self._paused:
+            self._set_paused_ui(False)
+            return
         if self._running:
             return
 
@@ -879,6 +1281,15 @@ class RlApp:
         if self._current_sync_evt is not None:
             self._current_sync_evt.set()
 
+    def _release_sync_event(self, evt):
+        if self._stop_requested:
+            evt.set()
+            return
+        if self._paused:
+            self._sync_after_id = self.root.after(50, lambda e=evt: self._release_sync_event(e))
+            return
+        evt.set()
+
     def _process_ui_queue(self):
         while not self._ui_queue.empty():
             try:
@@ -898,11 +1309,11 @@ class RlApp:
                 def _release_delayed():
                     self._sync_after_id = None
                     self._sync_after_evt = None
-                    evt.set()
+                    self._release_sync_event(evt)
 
                 self._sync_after_id = self.root.after(delay_ms, _release_delayed)
             else:
-                evt.set()
+                self._release_sync_event(evt)
 
             self._ui_queue.task_done()
 
@@ -910,6 +1321,9 @@ class RlApp:
 
     def _ui_sync(self, fn):
         """Chạy fn trên main thread và chờ xong (dùng từ thread train)."""
+        if self._stop_requested:
+            return
+        self._pause_gate()
         if self._stop_requested:
             return
         evt = threading.Event()
@@ -921,6 +1335,9 @@ class RlApp:
             self._current_sync_evt = None
 
     def _ui_sync_after_delay(self, fn, delay_ms):
+        if self._stop_requested:
+            return
+        self._pause_gate()
         if self._stop_requested:
             return
         evt = threading.Event()
@@ -938,12 +1355,20 @@ class RlApp:
     def _should_stop_train(self):
         return self._stop_requested
 
+    def on_pause(self):
+        if not self._running or self._paused or self._stop_requested:
+            return
+        self._set_paused_ui(True)
+
     def on_stop(self):
         if not self._running:
             return
         self._stop_requested = True
+        self._paused = False
         self._cancel_pending_ui_sync()
         self.btn_stop.configure(state=tk.DISABLED)
+        self.btn_pause.configure(state=tk.DISABLED)
+        self.btn_run.configure(state=tk.DISABLED, text="▶ Run")
         if self.mode.get() == "train":
             self.status.set("Stopping...")
             if self.view.get() == "map":
@@ -992,6 +1417,10 @@ class RlApp:
                     "Episode %d/%d | map: %s | ε=%.3f" % (ep + 1, total, name, eps)
                 )
                 self.status.set("Training episode %d/%d" % (ep + 1, total))
+                self._append_log_text(
+                    "--- episode %d/%d | map: %s | eps=%.3f ---\n%s"
+                    % (ep + 1, total, name, eps, train_log.format_step_log_header())
+                )
 
             self._ui_sync(show)
 
@@ -1002,6 +1431,7 @@ class RlApp:
 
             def show():
                 self.map_view.show_step(entry)
+                self._append_step_log(entry)
 
             self._ui_sync_after_delay(show, delay)
 
@@ -1028,6 +1458,7 @@ class RlApp:
                 result = rl_runner.run_train(
                     n_episodes=n_ep,
                     should_stop=self._should_stop_train,
+                    pause_gate=self._pause_gate,
                     checkpoint=self._train_checkpoint_spec(),
                     train_map_mode=mode,
                     train_sims=sims,
@@ -1075,6 +1506,7 @@ class RlApp:
                     on_step=on_step,
                     step_wait=None,
                     should_stop=self._should_stop_train,
+                    pause_gate=self._pause_gate,
                     checkpoint=self._train_checkpoint_spec(),
                     train_map_mode=mode,
                     train_sims=sims,
@@ -1107,7 +1539,7 @@ class RlApp:
             sys.stdout = TextRedirector(self.log, self.root)
             try:
                 rl_runner.run_infer_episode_for_map(
-                    map_path, verbose=True, policy_bin=policy_bin
+                    map_path, verbose=True, policy_bin=policy_bin, pause_gate=self._pause_gate
                 )
             except Exception as exc:
                 print("ERROR:", exc)
@@ -1134,7 +1566,7 @@ class RlApp:
             sys.stdout = TextRedirector(self.log, self.root)
             try:
                 sim, outcome = rl_runner.run_infer_episode_for_map(
-                    map_path, verbose=True, policy_bin=policy_bin
+                    map_path, verbose=False, policy_bin=policy_bin, pause_gate=self._pause_gate
                 )
                 self._ui_async(lambda s=sim, o=outcome: self._start_animation(s, o))
             except Exception as exc:
@@ -1156,6 +1588,20 @@ class RlApp:
         self.map_view.load_sim_map(sim_map)
         self.map_view.reset_path()
         self.status.set("Playing...")
+        cps = sim_map.get("checkpoints") or []
+        cp_txt = ("  cp %s" % (cps,)) if cps else ""
+        self._append_log_text(
+            "infer %s %dx%d  start %s  goal %s%s\n%s"
+            % (
+                sim_map.get("name", "?"),
+                sim_map["width"],
+                sim_map["height"],
+                sim_map.get("start"),
+                sim_map.get("goal"),
+                cp_txt,
+                train_log.format_step_log_header(),
+            )
+        )
         log = outcome.get("log") or []
         self._play_steps(log, 0, outcome, delay)
 
@@ -1164,6 +1610,11 @@ class RlApp:
             self.map_view.set_status("Đã dừng inference")
             self.status.set("Stopped")
             self._end_run()
+            return
+        if self._paused:
+            self._anim_after_id = self.root.after(
+                50, lambda: self._play_steps(log, index, outcome, delay)
+            )
             return
         if index >= len(log):
             status = outcome.get("status", "?")
@@ -1176,11 +1627,13 @@ class RlApp:
                 msg = "Kết thúc: %s (%d bước)" % (status, steps)
             self.map_view.set_status(msg)
             self.status.set("Done — " + msg)
+            self._append_log_text("result: %s" % msg)
             self._end_run()
             return
 
         entry = log[index]
         self.map_view.show_step(entry)
+        self._append_step_log(entry)
         self._anim_after_id = self.root.after(delay, lambda: self._play_steps(log, index + 1, outcome, delay))
 
     def _run_done(self):
@@ -1193,77 +1646,117 @@ class RlApp:
     def refresh_formula_list(self):
         try:
             from RL_lib.formula_store import list_saved_formulas
-            names = list_saved_formulas()
-            self.combo_formula["values"] = names
+
+            self.combo_formula["values"] = list_saved_formulas()
         except Exception:
             pass
 
-    def _on_formula_selected(self, _event=None):
-        name = self.formula_name_var.get().strip()
-        if not name:
-            return
-        if self.learn_lab_app:
-            self.learn_lab_app.load_and_compile_formula(name)
-        else:
-            # Standalone fallback: load to memory & compile to reward_config.py
-            try:
-                from RL_lib.formula_store import load_formula_file, normalize_formula_basename
-                from RL_lib import reward_config
-                import importlib
-                
-                data = load_formula_file(name)
-                # Apply in memory
-                weights = data.get("element_weights") or {}
-                reward_config.sync_weights_from_elements(weights)
-                
-                thresholds = data.get("thresholds") or {}
-                for k, v in thresholds.items():
-                    if k in reward_config.REWARD_KEYS:
-                        setattr(reward_config, k, v)
-                
-                reward_config.set_total_formula_student(data.get("total_formula") or "")
-                reward_config.set_enabled_modules(data.get("enabled_modules") or [])
-                
-                norm_name = normalize_formula_basename(name)
-                reward_config.set_formula_name(norm_name)
-                
-                # Patch file
-                pc_path = os.path.join(os.path.dirname(reward_config.__file__), "reward_config.py")
-                with open(pc_path, "r", encoding="utf-8") as f:
-                    src = f.read()
-                
-                from Ui_app.learn_lab_UI import _patch_line, _patch_enabled_modules, _patch_total_formula, _patch_formula_name
-                
-                for k, v in reward_config.get_reward_dict().items():
-                    if k in reward_config.REWARD_KEYS:
-                        src = _patch_line(src, k, v)
-                src = _patch_enabled_modules(src, sorted(data.get("enabled_modules") or []))
-                src = _patch_total_formula(src, data.get("total_formula") or "")
-                src = _patch_formula_name(src, norm_name)
-                
-                with open(pc_path, "w", encoding="utf-8") as f:
-                    f.write(src)
-                
-                importlib.reload(reward_config)
-                try:
-                    import Simulation.robot.trainer as trainer
-                    importlib.reload(trainer)
-                except Exception:
-                    pass
-                self.status.set("Đã nạp công thức: %s" % norm_name)
-            except Exception as exc:
-                messagebox.showerror("Nạp công thức", "Lỗi nạp công thức: %s" % exc)
-
-    def update_formula_name(self, event=None):
-        if event and event.widget is not self.container:
-            return
+    def _sync_formula_combo(self):
         self.refresh_formula_list()
         try:
             from RL_lib import reward_config
-            name = reward_config.get_formula_name()
-            self.formula_name_var.set(name)
+
+            name = (reward_config.get_formula_name() or "").strip()
         except Exception:
-            self.formula_name_var.set("Không xác định")
+            name = ""
+        values = self.combo_formula["values"]
+        self.formula_var.set(name if name in values else "")
+
+    def _on_formula_selected(self, _event=None):
+        name = self.formula_var.get().strip()
+        if not name:
+            return
+        if self.learn_lab_app:
+            if not self.learn_lab_app.load_and_compile_formula(name):
+                self._sync_formula_combo()
+            return
+        try:
+            from RL_lib.formula_store import load_formula_file, normalize_formula_basename
+            from RL_lib import reward_config
+            import importlib
+
+            data = load_formula_file(name)
+            reward_config.sync_weights_from_elements(data.get("element_weights") or {})
+            for k, v in (data.get("thresholds") or {}).items():
+                if k in reward_config.REWARD_KEYS:
+                    setattr(reward_config, k, v)
+            reward_config.set_total_formula_student(data.get("total_formula") or "")
+            reward_config.set_enabled_modules(data.get("enabled_modules") or [])
+            norm_name = normalize_formula_basename(name)
+            reward_config.set_formula_name(norm_name)
+
+            pc_path = os.path.join(os.path.dirname(reward_config.__file__), "reward_config.py")
+            with open(pc_path, "r", encoding="utf-8") as f:
+                src = f.read()
+            from Ui_app.learn_lab_UI import _patch_line, _patch_enabled_modules, _patch_total_formula, _patch_formula_name
+
+            for k, v in reward_config.get_reward_dict().items():
+                if k in reward_config.REWARD_KEYS:
+                    src = _patch_line(src, k, v)
+            src = _patch_enabled_modules(src, sorted(data.get("enabled_modules") or []))
+            src = _patch_total_formula(src, data.get("total_formula") or "")
+            src = _patch_formula_name(src, norm_name)
+            with open(pc_path, "w", encoding="utf-8") as f:
+                f.write(src)
+            importlib.reload(reward_config)
+            try:
+                import Simulation.robot.trainer as trainer
+                importlib.reload(trainer)
+            except Exception:
+                pass
+        except Exception as exc:
+            messagebox.showerror("Reward", str(exc))
+            self._sync_formula_combo()
+
+    def refresh_ui_scale(self):
+        for grp in (self.mode_group, self.view_group, self.delay_group, self.train_mode_group):
+            try:
+                grp.refresh_scale()
+            except Exception:
+                pass
+        try:
+            style_train_treeview(self.train_tree, self.root)
+            self.train_tree.configure(height=text_lines(8))
+            self.train_tree.column("ord", width=px(32), minwidth=px(28))
+            self.train_tree.column("name", width=px(160), minwidth=px(72))
+            self.train_tree.column("eps", width=px(72), minwidth=px(56))
+            self._apply_train_mode_ui()
+        except tk.TclError:
+            pass
+        try:
+            self.log.configure(height=text_lines(16), font=font(9, family="Monospace"))
+        except tk.TclError:
+            pass
+        try:
+            self.map_list.configure(height=text_lines(12), font=font(10))
+        except tk.TclError:
+            pass
+        try:
+            self.workspace.pack_configure(padx=px(8), pady=px(4))
+            self._side_col_minsize = px(240)
+            self._log_col_minsize = px(220)
+            self._map_col_minsize = px(180)
+            self._paned.configure(sashwidth=px(6))
+            self._apply_pane_minsizes()
+        except tk.TclError:
+            pass
+        try:
+            self.spin_ep.configure(width=entry_width(8))
+            self.combo_formula.configure(width=entry_width(24))
+            self.combo_checkpoint.configure(width=entry_width(22))
+            self.combo_export_policy.configure(width=entry_width(22))
+            self.combo_infer_policy.configure(width=entry_width(28))
+        except tk.TclError:
+            pass
+        try:
+            self.train_cfg_frame.rowconfigure(1, minsize=px(72))
+            self.train_cfg_frame.rowconfigure(2, minsize=px(48))
+        except tk.TclError:
+            pass
+        try:
+            self.map_view.redraw()
+        except Exception:
+            pass
 
     def run(self):
         if self._standalone:

@@ -28,6 +28,7 @@ def make_robot(x, y, direction, robot_map):
         "cp_visited": [False] * n_cp,
         "rotate_streak": 0,
         "straight_streak": 0,
+        "node_visits": {(x, y): 1},
     }
 
 
@@ -91,6 +92,20 @@ def mark_moved(robot):
     robot["has_prev_node"] = True
 
 
+def mark_current_cell_visit(robot):
+    visits = robot.get("node_visits")
+    if visits is None:
+        visits = {}
+        robot["node_visits"] = visits
+    key = (robot["x"], robot["y"])
+    visits[key] = visits.get(key, 0) + 1
+
+
+def current_cell_visited_before(robot):
+    visits = (robot.get("node_visits") or {}).get((robot["x"], robot["y"]), 0)
+    return 1 if visits > 1 else 0
+
+
 def clear_move_trends(robot):
     """Xóa trend sau rotate / collision — chỉ forward mới cập nhật trend."""
     robot["dist_goal_trend"] = 0
@@ -110,16 +125,12 @@ def update_rotate_streak(robot, result):
 
 
 def update_straight_streak(robot, result):
-    """Đếm số lần đi thẳng hoặc giữ nguyên hướng liên tiếp (không xoay thành công); reset khi xoay."""
-    rotated = bool(
-        result.get("success")
-        and not result.get("moved")
-        and not result.get("collision")
-    )
-    if rotated:
-        robot["straight_streak"] = 0
-    else:
+    """Đếm số lần đi thẳng liên tiếp thành công (chỉ forward thành công mới tăng; reset khi xoay thành công hoặc va chạm)."""
+    moved = bool(result.get("success") and result.get("moved") and not result.get("collision"))
+    if moved:
         robot["straight_streak"] = robot.get("straight_streak", 0) + 1
+    else:
+        robot["straight_streak"] = 0
 
 
 def build_encoded_state(robot):
@@ -127,12 +138,15 @@ def build_encoded_state(robot):
     if node is None:
         return 0
     obs = get_obstacle_nwes(node)
-    return encode_state(
+    visited_before = current_cell_visited_before(robot)
+    encoded = encode_state(
         obs,
         robot["dist_goal_trend"],
         robot["dist_cp_trend"],
         robot["direct"],
+        visited_before=visited_before,
     )
+    return encoded
 
 
 def perceive_edge(robot, is_blocked):
@@ -146,3 +160,4 @@ def clear_obstacle_memory(robot):
         node["W_obstacle"] = 0
         node["E_obstacle"] = 0
         node["S_obstacle"] = 0
+    robot["node_visits"] = {(robot["x"], robot["y"]): 1}

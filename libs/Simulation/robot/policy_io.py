@@ -1,6 +1,8 @@
 """Load / export policy — PC only (.bin)."""
 
+import csv
 import os
+import random
 import struct
 
 from RL_lib.rl_core import N_ROWS, ACTIONS
@@ -10,6 +12,7 @@ _REPO_ROOT = os.path.abspath(os.path.join(_LIBS, ".."))
 CHECKPOINTS_DIR = os.path.join(_REPO_ROOT, "checkpoints")
 DEFAULT_POLICY_BASE = "policy"
 DEFAULT_POLICY_BIN = os.path.join(CHECKPOINTS_DIR, "policy.bin")
+POLICY_CSV_COLUMNS = ("q_forward", "q_rotate_left", "q_rotate_right")
 
 
 def normalize_policy_base_name(name):
@@ -150,6 +153,16 @@ def export_policy(q_table, bin_path=None):
         f.write(struct.pack("<%df" % len(flat), *flat))
 
 
+def export_policy_csv(q_table, csv_path):
+    """Export Q-table using the Kaggle submission schema: id + three Q-values."""
+    validate_q_table(q_table)
+    with open(csv_path, "w", newline="", encoding="utf-8") as f:
+        writer = csv.writer(f)
+        writer.writerow(("id",) + POLICY_CSV_COLUMNS)
+        for state_id, row in enumerate(q_table):
+            writer.writerow((state_id,) + tuple(row))
+
+
 def export_checkpoint(q_table, base_name):
     """Export checkpoint đặt tên — ghi .bin trong checkpoints/."""
     export_policy(q_table, bin_path=checkpoint_bin_path(base_name))
@@ -158,3 +171,23 @@ def export_checkpoint(q_table, base_name):
 def empty_q_table(forward_bias=0.05):
     """forward_bias nhẹ — tránh kẹt xoay khi Q còn toàn 0."""
     return [[forward_bias, 0.0, 0.0] for _ in range(N_ROWS)]
+
+
+def biased_q_table(preferred_action="forward", preferred_value=0.5, other_value=0.0):
+    """Q-table ưu tiên một action cho mọi state."""
+    action_to_idx = {name: i for i, name in enumerate(ACTIONS)}
+    idx = action_to_idx.get(preferred_action, 0)
+    row = [float(other_value)] * len(ACTIONS)
+    row[idx] = float(preferred_value)
+    return [list(row) for _ in range(N_ROWS)]
+
+
+def random_q_table(choices=(-0.5, 0.0, 0.5)):
+    """Q-table ngẫu nhiên rời rạc: mỗi ô chọn từ choices."""
+    vals = [float(v) for v in choices]
+    if not vals:
+        vals = [-0.5, 0.0, 0.5]
+    table = []
+    for _ in range(N_ROWS):
+        table.append([random.choice(vals) for _ in ACTIONS])
+    return table

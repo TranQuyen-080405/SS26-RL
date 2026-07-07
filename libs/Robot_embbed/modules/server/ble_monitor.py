@@ -7,7 +7,7 @@ BLE UART — Robot (MicroPython bluetooth.BLE)
 import bluetooth
 from micropython import const
 
-BLE_NAME = "Robot"
+BLE_NAME = "Robot_1"
 _SVC = bluetooth.UUID("6E400001-B5A3-F393-E0A9-E50E24DCCA9E")
 _CHAR_RX = bluetooth.UUID("6E400002-B5A3-F393-E0A9-E50E24DCCA9E")
 _CHAR_TX = bluetooth.UUID("6E400003-B5A3-F393-E0A9-E50E24DCCA9E")
@@ -28,6 +28,13 @@ _start_flag = False
 _stop_flag = False
 _adv_name = BLE_NAME
 _map_cfg = None
+
+# File upload globals
+_file = None
+_filepath = None
+_total_size = 0
+_written_bytes = 0
+
 
 
 def is_stopped():
@@ -56,6 +63,26 @@ def _advertise(name):
 
 
 _MAX_NOTIFY = 240
+_published_walls = set()
+
+
+def reset_wall_publish_state(robot=None):
+    """Đặt lại bộ tường đã gửi — gọi khi idle / bắt đầu episode mới."""
+    global _published_walls
+    _published_walls = set()
+    if robot is not None and "robot_map" in robot:
+        for item in _walls_from_map(robot["robot_map"]):
+            _published_walls.add((int(item[0]), int(item[1]), str(item[2])))
+
+
+def _walls_delta_from_map(rmap):
+    global _published_walls
+    current = set()
+    for item in _walls_from_map(rmap):
+        current.add((int(item[0]), int(item[1]), str(item[2])))
+    delta = current - _published_walls
+    _published_walls = current
+    return [[x, y, d] for x, y, d in sorted(delta)]
 
 
 def _notify(line):
@@ -80,10 +107,68 @@ def publish_log(text):
 
 
 def _on_rx(data):
-    global _start_flag, _stop_flag
+    global _start_flag, _stop_flag, _map_cfg, _file, _filepath, _total_size, _written_bytes
     if not data:
         return
-    cmd = data.strip().upper()
+
+    if _file is not None:
+        try:
+            _file.write(data)
+            _written_bytes += len(data)
+            publish_log("F_ACK %d" % _written_bytes)
+            if _written_bytes >= _total_size:
+                _file.close()
+                _file = None
+                publish_log("F_DONE %s" % _filepath)
+        except Exception as exc:
+            if _file is not None:
+                try:
+                    _file.close()
+                except Exception:
+                    pass
+                _file = None
+            publish_log("F_ERR: " + str(exc))
+        return
+
+    raw_cmd = data.strip()
+    cmd_upper = raw_cmd.upper()
+    if cmd_upper.startswith(b"F_START "):
+        try:
+            parts = raw_cmd.split()
+            if len(parts) >= 2:
+                total_size = int(parts[1])
+                filepath = "modules/logics/Q_table/policy.bin"
+                
+                import os
+                for folder in ["modules", "modules/logics", "modules/logics/Q_table"]:
+                    try:
+                        os.mkdir(folder)
+                    except OSError:
+                        pass
+                
+                try:
+                    for name in os.listdir("modules/logics/Q_table"):
+                        if name.endswith(".bin"):
+                            os.remove("modules/logics/Q_table/" + name)
+                except OSError:
+                    pass
+                
+                _file = open(filepath, "wb")
+                _filepath = filepath
+                _total_size = total_size
+                _written_bytes = 0
+                publish_log("F_ACK 0")
+        except Exception as exc:
+            if _file is not None:
+                try:
+                    _file.close()
+                except Exception:
+                    pass
+                _file = None
+            publish_log("F_ERR: " + str(exc))
+        return
+
+    cmd = cmd_upper
     if cmd in (b"S", b"START"):
         _start_flag = True
         _stop_flag = False
@@ -91,14 +176,46 @@ def _on_rx(data):
     elif cmd in (b"T", b"STOP"):
         _stop_flag = True
         publish_log("RX STOP (PC)")
+    elif cmd.startswith(b"C "):
+        try:
+            parts = cmd.split()
+            if len(parts) >= 5:
+                sx = int(parts[1])
+                sy = int(parts[2])
+                gx = int(parts[3])
+                gy = int(parts[4])
+                cps = []
+                for i in range(5, len(parts), 2):
+                    if i + 1 < len(parts):
+                        cps.append((int(parts[i]), int(parts[i+1])))
+                if _map_cfg is not None:
+                    _map_cfg["start"] = (sx, sy)
+                    _map_cfg["goal"] = (gx, gy)
+                    _map_cfg["checkpoints"] = cps
+                    publish_log("CFG: Start=(%d,%d) Goal=(%d,%d) CPs=%s" % (sx, sy, gx, gy, str(cps)))
+                    publish_idle()
+        except Exception as exc:
+            publish_log("CFG ERR: " + str(exc))
+    elif cmd in (b"R", b"RESET"):
+        try:
+            publish_log("RX RESET (PC)")
+            publish_idle()
+        except Exception as exc:
+            publish_log("RESET ERR: " + str(exc))
 
 
 def _irq(event, data):
-    global _conn
+    global _conn, _file
     if event == _IRQ_CENTRAL_CONNECT:
         _conn, _, _ = data
     elif event == _IRQ_CENTRAL_DISCONNECT:
         _conn = None
+        if _file is not None:
+            try:
+                _file.close()
+            except Exception:
+                pass
+            _file = None
         try:
             _advertise(_adv_name)
         except OSError:
@@ -182,8 +299,7 @@ def _walls_from_map(rmap):
 
 
 def _compact_state(robot, phase="i", step=0, action=None):
-    # Không gửi walls — vượt 240 byte BLE notify limit.
-    # PC tự vẽ tường biên; walls gửi qua M: (publish_map_meta) khi idle.
+    # Tường gửi dạng delta "w" — tránh vượt 240 byte BLE notify limit.
     out = {
         "x": robot["x"],
         "y": robot["y"],
@@ -194,6 +310,10 @@ def _compact_state(robot, phase="i", step=0, action=None):
         out["n"] = step
     if action:
         out["a"] = action
+    if robot and "robot_map" in robot:
+        delta = _walls_delta_from_map(robot["robot_map"])
+        if delta:
+            out["w"] = delta
     return out
 
 
@@ -213,7 +333,7 @@ def publish_state(robot, phase="r", step=0, action=None):
     _publish_json_state(_compact_state(robot, phase=phase, step=step, action=action))
 
 
-def publish_map_meta():
+def publish_map_meta(robot=None):
     """Gửi khung map (w/h/start/goal/checkpoints) — PC Robot Monitor đồng bộ layout."""
     import json
 
@@ -226,12 +346,16 @@ def publish_map_meta():
         "g": list(_map_cfg["goal"]),
         "c": [list(cp) for cp in _map_cfg["checkpoints"]],
     }
+    if robot and "robot_map" in robot:
+        obj["walls"] = _walls_from_map(robot["robot_map"])
+    elif _map_cfg.get("walls"):
+        obj["walls"] = _map_cfg["walls"]
     try:
         payload = json.dumps(obj, separators=(",", ":"))
     except Exception:
         return
     if len(("M:" + payload + "\n").encode()) > _MAX_NOTIFY:
-        return
+        pass
     _notify("M:" + payload)
 
 
@@ -247,8 +371,9 @@ def publish_idle(robot=None):
                               checkpoints=_map_cfg["checkpoints"], start=s)
         apply_walls_from_spec(rmap, _map_cfg["walls"])
         robot = make_robot(s[0], s[1], "N", rmap)
+    reset_wall_publish_state(robot)
     publish_state(robot, phase="i", step=0)
-    publish_map_meta()
+    publish_map_meta(robot)
 
 
 def pump(poll_ms=0):
@@ -296,12 +421,6 @@ def wait_for_start(poll_ms=80):
             while not is_connected():
                 pump(poll_ms)
             print("PC da ket noi lai")
-            try:
-                publish_idle()
-            except Exception:
-                pass
-            last_idle = time.ticks_ms()
-        elif time.ticks_diff(time.ticks_ms(), last_idle) > 3000:
             try:
                 publish_idle()
             except Exception:

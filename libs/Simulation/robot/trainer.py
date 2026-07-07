@@ -91,14 +91,14 @@ def _maybe_save_best(q, train_sims, eval_sims, label, best_q, best_label, best_s
         ok, steps, fail = eval_greedy_maps(eval_sims, q)
         if ok and (best_tier < 2 or (best_tier == 2 and steps < best_steps)):
             names = ", ".join(s.get("name", "?") for s in eval_sims)
-            return copy_q_table(q), "%s → eval [%s] (%d worst steps)" % (label, names, steps), steps, 2
+            return copy_q_table(q), "%s -> eval [%s] (%d worst steps)" % (label, names, steps), steps, 2
         if not ok:
             pass
 
     ok, steps, fail = eval_greedy_maps(train_sims, q)
     if ok and best_tier < 2:
         if best_q is None or steps < best_steps:
-            return copy_q_table(q), "%s → all train (%d worst steps)" % (label, steps), steps, 1
+            return copy_q_table(q), "%s -> all train (%d worst steps)" % (label, steps), steps, 1
 
     return best_q, best_label, best_steps, best_tier
 
@@ -128,7 +128,18 @@ def _reset_episode_at_start(robot, sim_map):
     rb.reset_explore_tracking(robot)
     rb.clear_obstacle_memory(robot)
     rb.inject_distances_from_map(robot)
-    rb.perceive_facing_from_sim(robot, sim_map)
+    rb.perceive_facing_from_sim(robot, sim_map, for_reward=False)
+
+
+def _gate_pause(pause_gate, should_stop=None):
+    if not pause_gate:
+        return
+    import time
+
+    while pause_gate():
+        if should_stop and should_stop():
+            return
+        time.sleep(0.05)
 
 
 def run_episode(
@@ -140,6 +151,7 @@ def run_episode(
     on_step=None,
     step_wait=None,
     should_stop=None,
+    pause_gate=None,
 ):
     if max_steps is None:
         max_steps = _max_steps_for_map(sim_map)
@@ -148,6 +160,7 @@ def run_episode(
     total_r = 0.0
     reached_goal = False
     for step in range(1, max_steps + 1):
+        _gate_pause(pause_gate, should_stop)
         if should_stop and should_stop():
             break
         if _episode_at_goal(robot, sim_map):
@@ -162,6 +175,9 @@ def run_episode(
         could_fwd = sm.can_move(sim_map, robot["x"], robot["y"], robot["direct"])
         x, y, d = robot["x"], robot["y"], robot["direct"]
         result = act.execute_action_sim(robot, sim_map, a_name)
+        r = compute_reward(
+            robot, sim_map, result, action_name=a_name, could_forward_before=could_fwd
+        )
         if on_step:
             on_step(
                 {
@@ -172,6 +188,7 @@ def run_episode(
                     "s": s,
                     "action": a_name,
                     "result": result,
+                    "reward": r,
                     "nx": robot["x"],
                     "ny": robot["y"],
                     "ndirect": robot["direct"],
@@ -182,9 +199,6 @@ def run_episode(
             if should_stop and should_stop():
                 break
         s_prime = rb.build_encoded_state(robot)
-        r = compute_reward(
-            robot, sim_map, result, action_name=a_name, could_forward_before=could_fwd
-        )
         collision = result.get("collision")
         at_goal = _episode_at_goal(robot, sim_map)
         q_update(q_table, s, _action_idx(a_name), r, s_prime, done=(collision or at_goal))
@@ -208,6 +222,7 @@ def train_multi(
     on_step=None,
     step_wait=None,
     should_stop=None,
+    pause_gate=None,
     initial_q=None,
     map_mode="random",
     sequential_plan=None,
@@ -252,6 +267,7 @@ def train_multi(
         if should_stop and should_stop():
             stopped = True
             return False
+        _gate_pause(pause_gate, should_stop)
         if ep_index % LOG_EVERY_EPISODES == 0:
             block_start = ep_index
             block_map = sim.get("name", "?")
@@ -271,6 +287,7 @@ def train_multi(
             on_step=on_step,
             step_wait=step_wait,
             should_stop=should_stop,
+            pause_gate=pause_gate,
         )
         episodes_done = ep_index + 1
         block_episodes += 1
@@ -280,16 +297,17 @@ def train_multi(
         if reached_goal:
             n_goal += 1
             block_goals += 1
-            best_q, best_label, best_steps, best_tier = _maybe_save_best(
-                q,
-                train_sims,
-                eval_sims,
-                "episode %d" % ep_index,
-                best_q,
-                best_label,
-                best_steps,
-                best_tier,
-            )
+            if ep_index % 500 == 0 or ep_index == total_eps - 1:
+                best_q, best_label, best_steps, best_tier = _maybe_save_best(
+                    q,
+                    train_sims,
+                    eval_sims,
+                    "episode %d" % ep_index,
+                    best_q,
+                    best_label,
+                    best_steps,
+                    best_tier,
+                )
         if (ep_index + 1) % LOG_EVERY_EPISODES == 0:
             train_log.print_episode(block_start, block_map, block_goals)
         return True
@@ -307,6 +325,7 @@ def train_multi(
             if stopped:
                 break
             for _ in range(n_map_ep):
+                _gate_pause(pause_gate, should_stop)
                 if stopped:
                     break
                 eps = epsilon_min + (epsilon - epsilon_min) * (
@@ -322,6 +341,7 @@ def train_multi(
                 map_mode, n_episodes, len(train_sims), len(q) if resuming else None, resuming
             )
             for ep in range(n_episodes):
+                _gate_pause(pause_gate, should_stop)
                 if should_stop and should_stop():
                     stopped = True
                     train_log.print_stopped_at(ep)

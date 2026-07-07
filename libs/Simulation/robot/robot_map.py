@@ -45,7 +45,6 @@ def init_robot_map(width, height, goal=None, checkpoints=None, start=None):
     for y in range(height):
         for x in range(width):
             rmap["nodes"][(x, y)] = _empty_robot_node(x, y)
-    apply_boundary_walls(rmap)
     populate_all_distances(rmap)
     return rmap
 

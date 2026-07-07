@@ -1,5 +1,5 @@
 """
-UI tạo / chỉnh map — grid, bấm cạnh để chặn / mở, lưu JSON train hoặc infer.
+UI tạo / chỉnh map — grid, bấm cạnh để chặn / mở, lưu train hoặc infer.
 """
 
 import os
@@ -16,6 +16,7 @@ if _SIM not in sys.path:
     sys.path.insert(0, _SIM)
 
 from map.map_io import (
+    MAP_ROOT,
     TRAIN_MAPS_DIR,
     INFER_MAPS_DIR,
     default_spec,
@@ -26,11 +27,8 @@ from map.map_io import (
     list_map_files,
 )
 from RL_lib.grid import DIRECTIONS, neighbor_xy, is_valid
-
-CELL_MIN = 36
-CELL_MAX = 80
-CANVAS_PAD = 28
-EDGE_HIT = 10
+from Ui_app.map_layout import apply_fixed_canvas, avail_from_wrap, fit_grid_layout
+from Ui_app.ui_scale import configure_window, init as init_ui_scale, px, font
 
 
 class MapEditorApp:
@@ -38,7 +36,8 @@ class MapEditorApp:
         if parent is None:
             self.root = tk.Tk()
             self.root.title("SS26 Map Editor")
-            self.root.minsize(720, 560)
+            init_ui_scale(self.root)
+            configure_window(self.root, width=1000, height=700, min_width=720, min_height=560)
             self.container = self.root
             self._standalone = True
         else:
@@ -48,55 +47,74 @@ class MapEditorApp:
 
         self._on_saved = on_saved
 
-        self.width = 10
-        self.height = 10
+        self.width = 5
+        self.height = 5
         self.walls = set()
         self.map_name = tk.StringVar(value="custom_01")
-        self.kind = tk.StringVar(value="train")
         self.start_x = tk.IntVar(value=0)
         self.start_y = tk.IntVar(value=0)
-        self.goal_x = tk.IntVar(value=9)
-        self.goal_y = tk.IntVar(value=9)
+        self.goal_x = tk.IntVar(value=4)
+        self.goal_y = tk.IntVar(value=4)
         self.checkpoints = []
         self._selection = None  # ('start',) | ('goal',) | ('cp', index)
         self._await_new_cp = False
         self._pos_label = tk.StringVar(value="")
         self._cell = 52
-        self._offset_x = CANVAS_PAD
-        self._offset_y = CANVAS_PAD
-        self._edge_hit = EDGE_HIT
+        self._offset_x = 0
+        self._offset_y = 0
+        self._edge_hit = 10
+        self._last_wrap_size = None
         self._resize_after_id = None
+        self._train_map_paths = []
+        self._infer_map_paths = []
+        self._train_list_selected = None
+        self._infer_list_selected = None
+        self._map_list_select_bg = {}
+        self._suppress_list_events = False
+        self._active_list_kind = None
 
         self._build_toolbar()
-        self._build_canvas()
+        self._build_workspace()
         self._build_status()
         self.apply_size()
+        self.refresh_map_lists()
         self.root.after_idle(self.redraw)
+
+    _MAX_TRAIN = 5
+    _MAX_INFER = 10
+
+    @staticmethod
+    def _max_size_for_kind(kind):
+        return MapEditorApp._MAX_TRAIN if kind == "train" else MapEditorApp._MAX_INFER
+
+    @staticmethod
+    def _kind_from_path(path):
+        norm = os.path.abspath(path).replace("\\", "/")
+        if "/map/infer/" in norm:
+            return "infer"
+        return "train"
 
     def _build_toolbar(self):
         bar = ttk.Frame(self.container, padding=8)
         bar.pack(fill=tk.X)
 
         ttk.Label(bar, text="Width").grid(row=0, column=0, padx=(0, 4))
-        self.spin_w = ttk.Spinbox(bar, from_=3, to=40, width=4, command=self._noop)
+        self.spin_w = ttk.Spinbox(bar, from_=1, to=self._MAX_INFER, width=4, command=self._noop)
         self.spin_w.set(str(self.width))
         self.spin_w.grid(row=0, column=1, padx=(0, 12))
 
         ttk.Label(bar, text="Height").grid(row=0, column=2, padx=(0, 4))
-        self.spin_h = ttk.Spinbox(bar, from_=3, to=40, width=4)
+        self.spin_h = ttk.Spinbox(bar, from_=1, to=self._MAX_INFER, width=4)
         self.spin_h.set(str(self.height))
         self.spin_h.grid(row=0, column=3, padx=(0, 12))
 
-        ttk.Button(bar, text="Apply size", command=self.apply_size).grid(row=0, column=4, padx=4)
+        self.btn_apply_size = ttk.Button(bar, text="Apply size", command=self.apply_size)
+        self.btn_apply_size.grid(row=0, column=4, padx=4)
 
         ttk.Separator(bar, orient=tk.VERTICAL).grid(row=0, column=5, sticky="ns", padx=12)
 
         ttk.Label(bar, text="Name").grid(row=0, column=6, padx=(0, 4))
         ttk.Entry(bar, textvariable=self.map_name, width=14).grid(row=0, column=7, padx=(0, 12))
-
-        ttk.Label(bar, text="Save as").grid(row=0, column=8, padx=(0, 4))
-        ttk.Radiobutton(bar, text="train", variable=self.kind, value="train").grid(row=0, column=9)
-        ttk.Radiobutton(bar, text="inference", variable=self.kind, value="infer").grid(row=0, column=10, padx=(0, 12))
 
         row2 = ttk.Frame(self.container, padding=(8, 0, 8, 8))
         row2.pack(fill=tk.X)
@@ -108,28 +126,300 @@ class MapEditorApp:
         self.btn_remove_cp = ttk.Button(row2, text="Xóa checkpoint", command=self.remove_selected_checkpoint)
         self.btn_remove_cp.pack(side=tk.LEFT, padx=(0, 12))
 
-        ttk.Button(row2, text="Load JSON…", command=self.load_json).pack(side=tk.RIGHT, padx=4)
-        ttk.Button(row2, text="Save JSON", command=self.save_json).pack(side=tk.RIGHT, padx=4)
+        ttk.Button(row2, text="Lưu infer", command=self.save_infer).pack(side=tk.RIGHT, padx=4)
+        ttk.Button(row2, text="Lưu train", command=self.save_train).pack(side=tk.RIGHT, padx=4)
+        ttk.Button(row2, text="Load map", command=self.load_map).pack(side=tk.RIGHT, padx=4)
         ttk.Button(row2, text="Clear walls", command=self.clear_walls).pack(side=tk.RIGHT, padx=4)
 
         self._update_pos_label()
 
-    def _build_canvas(self):
-        wrap = ttk.Frame(self.container, padding=8)
-        wrap.pack(fill=tk.BOTH, expand=True)
+    def _build_workspace(self):
+        self._workspace = ttk.Frame(self.container)
+        self._workspace.pack(fill=tk.BOTH, expand=True)
+        self._workspace.columnconfigure(0, weight=2)
+        self._workspace.columnconfigure(1, weight=1, minsize=px(320))
+        self._workspace.rowconfigure(0, weight=1)
 
-        self.canvas = tk.Canvas(wrap, bg="#1e1e2e", highlightthickness=0)
+        self._canvas_wrap = ttk.Frame(self._workspace, padding=px(8))
+        self._canvas_wrap.grid(row=0, column=0, sticky="nsew")
+
+        self.canvas = tk.Canvas(self._canvas_wrap, bg="#1e1e2e", highlightthickness=0)
         self.canvas.pack(fill=tk.BOTH, expand=True)
         self.canvas.bind("<Button-1>", self.on_click)
-        self.canvas.bind("<Configure>", self._on_resize_event)
+        self._canvas_wrap.bind("<Configure>", self._on_resize_event)
         self.root.bind("<Escape>", self._on_escape)
         self.root.bind("<Delete>", self._on_delete_key)
         self.root.bind("<BackSpace>", self._on_delete_key)
 
+        side = ttk.LabelFrame(self._workspace, text="List map", padding=px(6))
+        side.grid(row=0, column=1, sticky="nsew", padx=(0, px(8)), pady=px(8))
+        side.columnconfigure(0, weight=1)
+        side.rowconfigure(1, weight=1)
+        side.rowconfigure(3, weight=1)
+
+        ttk.Label(side, text="Train Map").grid(row=0, column=0, sticky=tk.W, pady=(0, 2))
+        train_wrap = self._build_map_scroll_list(side, "train")
+        train_wrap.grid(row=1, column=0, sticky="nsew", pady=(0, px(8)))
+
+        ttk.Label(side, text="Inference Map").grid(row=2, column=0, sticky=tk.W, pady=(0, 2))
+        infer_wrap = self._build_map_scroll_list(side, "infer")
+        infer_wrap.grid(row=3, column=0, sticky="nsew")
+
+    def _build_map_scroll_list(self, parent, kind):
+        wrap = ttk.Frame(parent)
+        wrap.columnconfigure(0, weight=1)
+        wrap.rowconfigure(0, weight=1)
+        canvas = tk.Canvas(wrap, highlightthickness=0, borderwidth=0)
+        scroll = ttk.Scrollbar(wrap, orient=tk.VERTICAL, command=canvas.yview)
+        inner = ttk.Frame(canvas)
+        win = canvas.create_window((0, 0), window=inner, anchor=tk.NW)
+
+        def _on_inner_configure(_event):
+            canvas.configure(scrollregion=canvas.bbox("all"))
+
+        def _on_canvas_configure(event):
+            canvas.itemconfigure(win, width=event.width)
+
+        def _on_wheel(event):
+            if event.delta:
+                canvas.yview_scroll(int(-event.delta / 120), "units")
+            elif event.num == 4:
+                canvas.yview_scroll(-1, "units")
+            elif event.num == 5:
+                canvas.yview_scroll(1, "units")
+            return "break"
+
+        inner.bind("<Configure>", _on_inner_configure)
+        canvas.bind("<Configure>", _on_canvas_configure)
+        for seq in ("<MouseWheel>", "<Button-4>", "<Button-5>"):
+            canvas.bind(seq, _on_wheel)
+            inner.bind(seq, _on_wheel)
+        canvas.configure(yscrollcommand=scroll.set)
+        scroll.config(command=canvas.yview)
+        canvas.grid(row=0, column=0, sticky="nsew")
+        scroll.grid(row=0, column=1, sticky="ns")
+
+        if kind == "train":
+            self._train_list_canvas = canvas
+            self._train_list_inner = inner
+            self._train_list_rows = {}
+            select_bg = "#a6e3a1"
+        else:
+            self._infer_list_canvas = canvas
+            self._infer_list_inner = inner
+            self._infer_list_rows = {}
+            select_bg = "#89b4fa"
+        self._map_list_select_bg[kind] = select_bg
+        return wrap
+
+    def _map_list_inner(self, kind):
+        return self._train_list_inner if kind == "train" else self._infer_list_inner
+
+    def _map_list_rows(self, kind):
+        return self._train_list_rows if kind == "train" else self._infer_list_rows
+
+    def _map_list_selected(self, kind):
+        return self._train_list_selected if kind == "train" else self._infer_list_selected
+
+    def _set_map_list_selected(self, kind, path):
+        path = os.path.abspath(path) if path else None
+        if kind == "train":
+            self._train_list_selected = path
+        else:
+            self._infer_list_selected = path
+
+    def _clear_other_map_selection(self, kind):
+        other = "infer" if kind == "train" else "train"
+        if self._map_list_selected(other):
+            self._set_map_list_selected(other, None)
+            self._highlight_map_list_rows(other)
+
+    def _rebuild_map_list(self, kind, paths, select_path=None):
+        paths = [os.path.abspath(p) for p in paths]
+        inner = self._map_list_inner(kind)
+        rows = self._map_list_rows(kind)
+        rows.clear()
+        for child in inner.winfo_children():
+            child.destroy()
+
+        selected = os.path.abspath(select_path) if select_path else None
+        if selected not in paths:
+            selected = None
+        if selected is None and paths:
+            prev = self._map_list_selected(kind)
+            if prev and os.path.abspath(prev) in paths:
+                selected = os.path.abspath(prev)
+
+        for path in paths:
+            self._add_map_list_row(kind, path, path == selected)
+
+        if selected:
+            self._set_map_list_selected(kind, selected)
+        else:
+            cur = self._map_list_selected(kind)
+            if cur and os.path.abspath(cur) not in paths:
+                self._set_map_list_selected(kind, None)
+
+    def _add_map_list_row(self, kind, path, selected=False):
+        path = os.path.abspath(path)
+        inner = self._map_list_inner(kind)
+        rows = self._map_list_rows(kind)
+        name = os.path.basename(path)
+        bg = self._map_list_select_bg[kind] if selected else "#313244"
+        fg = "#11111b" if selected else "#cdd6f4"
+
+        row = tk.Frame(inner, bg=bg)
+        row.pack(fill=tk.X, pady=1)
+
+        name_lbl = tk.Label(
+            row,
+            text=name,
+            bg=bg,
+            fg=fg,
+            anchor=tk.W,
+            font=font(10),
+            padx=px(6),
+            pady=px(4),
+            cursor="hand2",
+        )
+        name_lbl.pack(side=tk.LEFT, fill=tk.X, expand=True)
+
+        del_btn = tk.Button(
+            row,
+            text="🗑",
+            bg=bg,
+            fg="#f38ba8" if not selected else "#c9184a",
+            activebackground=bg,
+            activeforeground="#eba0ac",
+            relief=tk.FLAT,
+            bd=0,
+            font=font(11),
+            cursor="hand2",
+            padx=px(4),
+            pady=px(2),
+        )
+        del_btn.pack(side=tk.RIGHT)
+
+        def _activate(_event=None):
+            if self._suppress_list_events:
+                return
+            other = "infer" if kind == "train" else "train"
+            self._set_map_list_selected(kind, path)
+            self._clear_other_map_selection(kind)
+            self._active_list_kind = kind
+            self._highlight_map_list_rows(kind)
+            self._load_from_path(path, kind, from_list=True)
+
+        def _delete(_event=None):
+            self._delete_map_path(kind, path)
+
+        name_lbl.bind("<Button-1>", _activate)
+        row.bind("<Button-1>", lambda e: _activate() if e.widget is row else None)
+        del_btn.configure(command=_delete)
+        rows[path] = row
+
+    def _highlight_map_list_rows(self, kind):
+        selected = self._map_list_selected(kind)
+        rows = self._map_list_rows(kind)
+        for path, row in rows.items():
+            is_sel = path == selected
+            bg = self._map_list_select_bg[kind] if is_sel else "#313244"
+            fg = "#11111b" if is_sel else "#cdd6f4"
+            row.configure(bg=bg)
+            for child in row.winfo_children():
+                if isinstance(child, tk.Label):
+                    child.configure(bg=bg, fg=fg)
+                elif isinstance(child, tk.Button):
+                    child.configure(
+                        bg=bg,
+                        fg="#c9184a" if is_sel else "#f38ba8",
+                        activebackground=bg,
+                    )
+
+    def refresh_map_lists(self, kind=None, select_path=None):
+        """Đọc lại map/train + map/infer; giữ selection nếu file còn tồn tại."""
+        prev_train = self._selected_map_path("train")
+        prev_infer = self._selected_map_path("infer")
+        if select_path:
+            if self._kind_from_path(select_path) == "infer":
+                prev_infer = select_path
+            else:
+                prev_train = select_path
+
+        self._suppress_list_events = True
+        try:
+            self._train_map_paths = [os.path.abspath(p) for p in list_map_files("train")]
+            self._infer_map_paths = [os.path.abspath(p) for p in list_map_files("infer")]
+
+            train_select = prev_train
+            infer_select = prev_infer
+
+            self._rebuild_map_list("train", self._train_map_paths, train_select)
+            self._rebuild_map_list("infer", self._infer_map_paths, infer_select)
+        finally:
+            self._suppress_list_events = False
+
+    def _selected_map_path(self, kind):
+        return self._map_list_selected(kind)
+
+    def _select_in_list(self, kind, path):
+        if not path:
+            return
+        paths = self._train_map_paths if kind == "train" else self._infer_map_paths
+        abs_path = os.path.abspath(path)
+        if abs_path not in paths:
+            base = os.path.basename(path)
+            match = next((p for p in paths if os.path.basename(p) == base), None)
+            if match is None:
+                return
+            abs_path = match
+        self._set_map_list_selected(kind, abs_path)
+        self._highlight_map_list_rows(kind)
+        row = self._map_list_rows(kind).get(abs_path)
+        if row is not None:
+            try:
+                self._map_list_inner(kind).update_idletasks()
+                canvas = self._train_list_canvas if kind == "train" else self._infer_list_canvas
+                y = row.winfo_y()
+                canvas.yview_moveto(max(0, min(1, y / max(1, self._map_list_inner(kind).winfo_height()))))
+            except tk.TclError:
+                pass
+
+    def _notify_maps_changed(self, kind, path=None):
+        self.refresh_map_lists(kind=kind, select_path=path)
+        if self._on_saved:
+            try:
+                self._on_saved(kind, path)
+            except Exception:
+                pass
+
+    def _load_from_path(self, path, kind, from_list=False):
+        try:
+            spec = load_map_json(path)
+            w = int(spec.get("width", 0))
+            h = int(spec.get("height", 0))
+            max_val = self._max_size_for_kind(kind)
+            if w > max_val or h > max_val:
+                label = "train" if kind == "train" else "infer"
+                messagebox.showerror(
+                    "Load",
+                    "Map %s chỉ được tối đa %dx%d." % (label, max_val, max_val),
+                )
+                return
+            self.load_spec(spec)
+            if from_list:
+                self._select_in_list(kind, path)
+        except (OSError, ValueError, KeyError, json.JSONDecodeError) as e:
+            messagebox.showerror("Load", str(e))
+
     def _on_resize_event(self, event):
+        size = (event.width, event.height)
+        if size[0] < 2 or size[1] < 2 or size == self._last_wrap_size:
+            return
+        self._last_wrap_size = size
         if self._resize_after_id:
-            self.canvas.after_cancel(self._resize_after_id)
-        self._resize_after_id = self.canvas.after(50, self._throttled_redraw)
+            self._canvas_wrap.after_cancel(self._resize_after_id)
+        self._resize_after_id = self._canvas_wrap.after(50, self._throttled_redraw)
 
     def _throttled_redraw(self):
         self._resize_after_id = None
@@ -172,21 +462,14 @@ class MapEditorApp:
         return px, py
 
     def _update_layout(self):
-        """Scale ô map vừa canvas và căn giữa."""
-        c = self.canvas
-        c.update_idletasks()
-        cw = max(c.winfo_width(), 320)
-        ch = max(c.winfo_height(), 280)
-        avail_w = max(cw - 2 * CANVAS_PAD, self.width * CELL_MIN)
-        avail_h = max(ch - 2 * CANVAS_PAD, self.height * CELL_MIN)
-        cell = int(min(avail_w / self.width, avail_h / self.height, CELL_MAX))
-        self._cell = max(cell, CELL_MIN)
-        map_w = self.width * self._cell
-        map_h = self.height * self._cell
-        self._offset_x = max(CANVAS_PAD, (cw - map_w) // 2)
-        self._offset_y = max(CANVAS_PAD, (ch - map_h) // 2)
-        self._edge_hit = max(8, min(18, self._cell // 4))
-        c.config(scrollregion=(0, 0, cw, ch))
+        """Phóng map tối đa trong khung, căn giữa."""
+        aw, ah = avail_from_wrap(self._canvas_wrap, min_w=200, min_h=160)
+        cell, ox, oy, cw, ch = fit_grid_layout(self.width, self.height, aw, ah)
+        self._cell = cell
+        self._offset_x = ox
+        self._offset_y = oy
+        self._edge_hit = max(px(6), min(px(18), self._cell // 4))
+        apply_fixed_canvas(self.canvas, cw, ch)
         return cw, ch
 
     def apply_size(self):
@@ -196,8 +479,13 @@ class MapEditorApp:
         except ValueError:
             messagebox.showerror("Size", "Width / height phải là số nguyên.")
             return
-        if w < 3 or h < 3 or w > 40 or h > 40:
-            messagebox.showerror("Size", "Kích thước map: 3–40.")
+        max_val = self._MAX_INFER
+        if w < 1 or h < 1 or w > max_val or h > max_val:
+            messagebox.showerror(
+                "Size",
+                "Kích thước map tối đa khi chỉnh là %dx%d (train lưu tối đa %dx%d)."
+                % (max_val, max_val, self._MAX_TRAIN, self._MAX_TRAIN),
+            )
             return
         self.width = w
         self.height = h
@@ -344,25 +632,42 @@ class MapEditorApp:
     def _load_checkpoints(self, cps):
         self.checkpoints = [list(c) for c in (cps or [])][:3]
 
-    def current_spec(self):
+    def current_spec(self, kind="train"):
         return spec_from_walls(
             self.width,
             self.height,
             self.walls,
             name=self.map_name.get().strip() or "custom",
-            kind=self.kind.get(),
+            kind=kind,
             start=[self.start_x.get(), self.start_y.get()],
             goal=[self.goal_x.get(), self.goal_y.get()],
             checkpoints=self._parse_checkpoints(),
         )
 
+    def _validate_size_for_kind(self, kind, width=None, height=None):
+        w = self.width if width is None else width
+        h = self.height if height is None else height
+        max_val = self._max_size_for_kind(kind)
+        if w < 1 or h < 1 or w > max_val or h > max_val:
+            label = "train" if kind == "train" else "infer"
+            messagebox.showerror(
+                "Size",
+                "Map %s chỉ được tối đa %dx%d (hiện tại %dx%d)."
+                % (label, max_val, max_val, w, h),
+            )
+            return False
+        return True
+
     def load_spec(self, spec):
+        raw_name = spec.get("name", "custom")
+        for pref in ("map_train_", "map_infer_"):
+            if raw_name.startswith(pref):
+                raw_name = raw_name[len(pref) :]
+        self.map_name.set(raw_name or "custom")
         self.width = int(spec["width"])
         self.height = int(spec["height"])
         self.spin_w.set(str(self.width))
         self.spin_h.set(str(self.height))
-        self.map_name.set(spec.get("name", "custom"))
-        self.kind.set(spec.get("kind", "train"))
         self.start_x.set(spec["start"][0])
         self.start_y.set(spec["start"][1])
         self.goal_x.set(spec["goal"][0])
@@ -374,39 +679,92 @@ class MapEditorApp:
         self.redraw()
         self.status.set("Loaded: %s" % spec.get("name", "?"))
 
-    def save_json(self):
-        spec = self.current_spec()
+    def _save_map(self, kind):
+        if not self._validate_size_for_kind(kind):
+            return
+        spec = self.current_spec(kind=kind)
         try:
-            path = save_map_json(spec, kind=self.kind.get())
+            path = save_map_json(spec, kind=kind)
             path = os.path.abspath(path)
+            self.map_name.set(spec["name"])
         except (OSError, ValueError, tk.TclError) as e:
             messagebox.showerror("Save", str(e))
             return
+        folder = "train" if kind == "train" else "infer"
         self.status.set("Saved: %s" % path)
-        folder = "train" if self.kind.get() == "train" else "infer"
-        if self._on_saved:
-            try:
-                self._on_saved(self.kind.get(), path)
-            except Exception:
-                pass
+        self._notify_maps_changed(kind, path)
         messagebox.showinfo("Saved", "Đã lưu vào map/%s/\n%s" % (folder, path))
 
-    def load_json(self):
-        kind = self.kind.get()
-        initial = TRAIN_MAPS_DIR if kind == "train" else INFER_MAPS_DIR
-        os.makedirs(initial, exist_ok=True)
+    def save_train(self):
+        self._save_map("train")
+
+    def save_infer(self):
+        self._save_map("infer")
+
+    def load_map(self):
+        os.makedirs(TRAIN_MAPS_DIR, exist_ok=True)
+        os.makedirs(INFER_MAPS_DIR, exist_ok=True)
         path = filedialog.askopenfilename(
-            title="Load map JSON",
-            initialdir=initial,
-            filetypes=[("Map JSON", "map_*.json"), ("JSON", "*.json")],
+            title="Load map",
+            initialdir=MAP_ROOT,
+            filetypes=[("Map files", "map_*.json"), ("All", "*.json")],
         )
         if not path:
             return
+        kind = self._kind_from_path(path)
+        self._load_from_path(path, kind, from_list=True)
+
+    def _confirm_yes_no(self, title, message):
+        """Hộp xác nhận Tk — không dùng messagebox hệ thống (tránh tiếng beep)."""
+        result = {"value": False}
+        dlg = tk.Toplevel(self.root)
+        dlg.title(title)
+        dlg.transient(self.root)
+        dlg.grab_set()
+        dlg.resizable(False, False)
+
+        ttk.Label(dlg, text=message, padding=12, wraplength=px(320), justify=tk.LEFT).pack()
+        btn_row = ttk.Frame(dlg, padding=(12, 0, 12, 12))
+        btn_row.pack(fill=tk.X)
+
+        def _yes():
+            result["value"] = True
+            dlg.destroy()
+
+        def _no():
+            dlg.destroy()
+
+        ttk.Button(btn_row, text="Không", command=_no).pack(side=tk.RIGHT)
+        ttk.Button(btn_row, text="Có", command=_yes).pack(side=tk.RIGHT, padx=(8, 0))
+        dlg.protocol("WM_DELETE_WINDOW", _no)
+        dlg.bind("<Escape>", lambda _e: _no())
+
+        dlg.update_idletasks()
+        rx = self.root.winfo_rootx() + (self.root.winfo_width() - dlg.winfo_width()) // 2
+        ry = self.root.winfo_rooty() + (self.root.winfo_height() - dlg.winfo_height()) // 2
+        dlg.geometry("+%d+%d" % (max(0, rx), max(0, ry)))
+        self.root.wait_window(dlg)
+        return result["value"]
+
+    def _delete_map_path(self, kind, path):
+        if not path or not os.path.isfile(path):
+            messagebox.showerror("Lỗi", "Không tìm thấy file bản đồ.")
+            return
+        filename = os.path.basename(path)
+        if not self._confirm_yes_no(
+            "Xác nhận xóa",
+            "Bạn có chắc chắn muốn xóa bản đồ '%s' không?" % filename,
+        ):
+            return
         try:
-            spec = load_map_json(path)
-            self.load_spec(spec)
-        except (OSError, ValueError, KeyError, json.JSONDecodeError) as e:
-            messagebox.showerror("Load", str(e))
+            os.remove(path)
+        except OSError as exc:
+            messagebox.showerror("Lỗi", "Không thể xóa file: %s" % exc)
+            return
+        if self._map_list_selected(kind) == os.path.abspath(path):
+            self._set_map_list_selected(kind, None)
+        self.status.set("Đã xóa: %s" % filename)
+        self._notify_maps_changed(kind)
 
     def clear_walls(self):
         self.walls.clear()

@@ -2,7 +2,7 @@
 
 
 def run(cfg):
-    from modules.logics.robot_map import init_robot_map, apply_walls_from_spec
+    from modules.logics.robot_map import init_robot_map
     from modules.logics.robot_state import make_robot, inject_distances_from_map, is_at_goal, clear_obstacle_memory
     from modules.logics.policy_io import load_policy_bin, loaded_name
     from modules.logics.action import run_policy_step
@@ -11,9 +11,9 @@ def run(cfg):
     publish_state = None
     publish_log = None
     try:
-        from modules.server.ble_monitor import pump, publish_idle, publish_log, publish_state
+        from modules.server.ble_monitor import pump, publish_idle, publish_log, publish_state, reset_wall_publish_state
     except ImportError:
-        pass
+        reset_wall_publish_state = None
 
     def _log(msg):
         print(msg)
@@ -34,10 +34,11 @@ def run(cfg):
     s = cfg["start"]
     _log("SW: Initializing local robot map %dx%d starting at %s" % (w, h, s))
     rmap = init_robot_map(w, h, goal=cfg["goal"], checkpoints=cfg["checkpoints"], start=s)
-    apply_walls_from_spec(rmap, cfg["walls"])
     bot = make_robot(s[0], s[1], "N", rmap)
     clear_obstacle_memory(bot)
     inject_distances_from_map(bot)
+    if reset_wall_publish_state:
+        reset_wall_publish_state(bot)
 
     step = 0
     _log("SW: Inference loop started - policy loaded")
@@ -99,6 +100,6 @@ def run(cfg):
 
     _log("SW: Episode finished. Waiting for new Start command...")
     try:
-        publish_idle()
+        publish_idle(bot)
     except Exception:
         pass

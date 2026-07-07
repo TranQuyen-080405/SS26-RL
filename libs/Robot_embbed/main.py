@@ -11,10 +11,10 @@ from modules.server.ble_monitor import (
 
 # ---- Cấu hình map deploy (sửa ở đây) ----
 MAP_CFG = {
-    "w": 10,
-    "h": 10,
-    "start": (5, 0),
-    "goal": (5, 9),
+    "w": 9,
+    "h": 9,
+    "start": (4, 0),
+    "goal": (4, 8),
     "checkpoints": [],
     "walls": [],
 }
@@ -41,6 +41,5 @@ if __name__ == "__main__":
             sys.print_exception(exc)
         try:
             publish_log("Episode ket thuc — cho Start de chay lai")
-            publish_idle()
         except Exception:
             pass
