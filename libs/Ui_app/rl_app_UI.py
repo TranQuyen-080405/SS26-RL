@@ -1905,6 +1905,7 @@ class RlApp:
             for k, v in (data.get("thresholds") or {}).items():
                 if k in reward_config.REWARD_KEYS:
                     setattr(reward_config, k, v)
+            reward_config.set_instance_configs(data.get("instance_configs") or {})
             reward_config.set_total_formula_student(data.get("total_formula") or "")
             reward_config.set_enabled_modules(data.get("enabled_modules") or [])
             norm_name = normalize_formula_basename(name)
@@ -1924,6 +1925,7 @@ class RlApp:
             with open(pc_path, "w", encoding="utf-8") as f:
                 f.write(src)
             importlib.reload(reward_config)
+            reward_config.set_instance_configs(data.get("instance_configs") or {})
             try:
                 import Simulation.robot.trainer as trainer
                 importlib.reload(trainer)

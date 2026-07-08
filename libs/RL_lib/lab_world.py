@@ -123,10 +123,36 @@ class LabWorld5:
         self.robot = rb.make_robot(DEFAULT_START[0], DEFAULT_START[1], "N", self.rmap)
         self._reset_robot_state()
 
-    def reset_checkpoint_state(self):
-        """Đánh dấu lại checkpoint chưa ăn — giữ nguyên tường, vị trí CP và robot."""
+    def reset_runtime_state(self):
+        """
+        Reset state nội bộ về đầu episode nhưng giữ nguyên:
+        - Vị trí/hướng robot hiện tại
+        - Bản đồ sim (tường, goal, checkpoint)
+        """
         rb.reset_cp_visited(self.robot, n_checkpoints(self.rmap))
+        self.robot["has_prev_node"] = False
+        self.robot["dist_goal_trend"] = 0
         self.robot["dist_cp_trend"] = [0, 0, 0]
+        self.robot["rotate_streak"] = 0
+        self.robot["straight_streak"] = 0
+        rb.reset_explore_tracking(self.robot)
+        rb.clear_obstacle_memory(self.robot)
+        # Đồng bộ distance theo vị trí hiện tại, không di chuyển robot.
+        rb.inject_distances_from_map(self.robot)
+        # Ở trạng thái ban đầu episode, cảm nhận 1 cạnh đang nhìn hiện tại.
+        rb.perceive_facing_from_sim(self.robot, self.sim_map, for_reward=False)
+
+        # Reset thêm reward-only memory (anti-loop) nếu có.
+        self.robot["_reward_spin_anchor"] = None
+        self.robot["_reward_spin_streak"] = 0
+        self.robot["_reward_no_progress_streak"] = 0
+        self.last_total = 0.0
+        self.last_parts = {}
+        self.last_action = None
+
+    def reset_checkpoint_state(self):
+        """Tương thích cũ: map về reset state runtime đầy đủ."""
+        self.reset_runtime_state()
 
     def do_action(self, action_name):
         could_fwd = can_move(self.sim_map, self.robot["x"], self.robot["y"], self.robot["direct"])

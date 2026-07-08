@@ -15,6 +15,7 @@ _MODULE_CHIP = {
     "goal": {"bg": "#89b4fa", "fg": "#11111b", "active": "#74a8fc"},
     "checkpoint": {"bg": "#fab387", "fg": "#11111b", "active": "#f5a876"},
     "rotation": {"bg": "#cba6f7", "fg": "#11111b", "active": "#b794f6"},
+    "memory_loop": {"bg": "#f2cdcd", "fg": "#1e1e2e", "active": "#eebebe"},
     "explore_penalty": {"bg": "#f9e2af", "fg": "#1e1e2e", "active": "#f5d87a"},
 }
 _DEFAULT_REWARD = {"bg": "#b4befe", "fg": "#11111b", "active": "#a6b4f4"}

@@ -40,6 +40,6 @@ if __name__ == "__main__":
 
             sys.print_exception(exc)
         try:
-            publish_log("Episode ket thuc — cho Start de chay lai")
+            publish_log("Episode finished — waiting for next Start command")
         except Exception:
             pass

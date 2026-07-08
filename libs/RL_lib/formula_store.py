@@ -160,6 +160,16 @@ def migrate_formula_snapshot(data):
     thresholds.pop("MAX_NODE_REVISITS", None)
     out["thresholds"] = thresholds
 
+    instance_configs = dict(out.get("instance_configs") or {})
+    # Backward compatibility: threshold_instances {eid#idx:KEY -> value}
+    for key, val in (out.get("threshold_instances") or {}).items():
+        if ":" not in str(key):
+            continue
+        iid, tk_key = str(key).split(":", 1)
+        cfg = instance_configs.setdefault(iid, {"eid": iid.split("#", 1)[0], "weight": 0.0, "thresholds": {}})
+        cfg.setdefault("thresholds", {})[tk_key] = val
+    out["instance_configs"] = instance_configs
+
     expr = str(out.get("total_formula") or "")
     for old, new in _LEGACY_REWARD_LABELS.items():
         expr = expr.replace(old, new)

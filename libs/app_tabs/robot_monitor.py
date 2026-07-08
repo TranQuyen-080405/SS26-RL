@@ -71,6 +71,7 @@ _PHASE_LABEL = {
     "r": "Đang inference",
     "g": "Goal",
     "c": "Collision",
+    "s": "Stopped",
 }
 
 
@@ -988,6 +989,8 @@ class RobotMonitorApp:
         elif phase == "i":
             if not self._infer_running:
                 self._set_infer_status("Inference: idle — bấm Start inference", running=False)
+        elif phase == "s":
+            self._set_infer_status("Inference: stopped — bấm Start inference để chạy lại", running=False)
 
     def _handle_ble_log(self, text):
         self.append_log(text)
@@ -1002,7 +1005,7 @@ class RobotMonitorApp:
             self._set_infer_status("Inference: dừng (stop) — bấm Chạy lại rồi Start inference", running=False)
         elif line.startswith("GOAL"):
             self._set_infer_status("Inference: GOAL ✓ — bấm Chạy lại rồi Start inference", running=False)
-        elif "Episode ket thuc" in line or "Het episode" in line:
+        elif "Episode finished" in line or "Episode ket thuc" in line or "Het episode" in line:
             self._set_infer_status("Inference: sẵn sàng — bấm Start inference", running=False)
             self.status_var.set("Robot chờ Start — bấm Chạy lại (map) rồi Start inference.")
 
@@ -1246,7 +1249,7 @@ class RobotMonitorApp:
                 self._address = device.address
                 self._tx_buf = ""
                 client = await self._connect_with_gatt(device)
-                self.root.after(0, lambda a=device.address: self.append_log("Ket noi MAC: %s\n" % a))
+                self.root.after(0, lambda a=device.address: self.append_log("Connected MAC: %s\n" % a))
 
                 tx_char, rx_char = _find_io_chars(client)
                 if not tx_char or not rx_char:

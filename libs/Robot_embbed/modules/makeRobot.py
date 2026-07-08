@@ -2,7 +2,7 @@
 
 
 def run(cfg):
-    from modules.logics.grid import OBSTACLE_KEYS
+    from modules.logics.grid import OBSTACLE_KEYS, neighbor_xy
     from modules.logics.robot_map import init_robot_map, can_move
     from modules.logics.robot_state import make_robot, inject_distances_from_map, is_at_goal, clear_obstacle_memory
     from modules.logics.policy_io import load_policy_bin, loaded_name
@@ -34,10 +34,16 @@ def run(cfg):
     inject_distances_from_map(bot)
     if reset_wall_publish_state:
         reset_wall_publish_state(bot)
+    # Reset monitor map only when a new START begins.
+    if publish_idle:
+        try:
+            publish_idle(bot)
+        except Exception:
+            pass
 
     step = 0
     _log("Inference | policy=%s | map=%dx%d start=%s goal=%s" % (loaded_name(), w, h, s, cfg["goal"]))
-    _log("step   pos       dir      s  action            reward")
+    _log("step   pos       dir      s  action")
     if publish_state:
         publish_state(bot, phase="r", step=0)
     if pump:
@@ -73,6 +79,8 @@ def run(cfg):
     while True:
         if is_stopped and is_stopped():
             end_status = "stopped"
+            if publish_state:
+                publish_state(bot, phase="s", step=step)
             if _stop:
                 _stop()
             break
@@ -96,12 +104,12 @@ def run(cfg):
         if publish_state:
             publish_state(bot, phase="r", step=step, action=action)
         _log(
-            "%-5d  (%d,%d)   %-3s  %5d  %-14s  %+8.1f"
-            % (step, bot["x"], bot["y"], bot["direct"], state_s, action, 0.0)
+            "%-5d  (%d,%d)   %-3s  %5d  %-14s"
+            % (step, bot["x"], bot["y"], bot["direct"], state_s, action)
         )
         if sensor_wall:
             seen_walls = _collect_seen_walls()
-            _log("Sensor: phát hiện tường (%d cạnh đã thấy)" % len(seen_walls))
+            _log("Sensor: wall detected (%d edges seen)" % len(seen_walls))
         if result.get("collision"):
             end_status = "collision"
             if publish_state:
@@ -114,14 +122,18 @@ def run(cfg):
         if not seen_walls:
             seen_walls = _collect_seen_walls()
         node_visits = bot.get("node_visits") or {}
-        unique_cells = len(node_visits.keys())
+        # MicroPython dict_view không hỗ trợ len(dict.keys()).
+        unique_cells = len(node_visits) if isinstance(node_visits, dict) else 0
         moved_new_cells = max(0, unique_cells - 1)
         cp_visited = bot.get("cp_visited") or []
         cp_count = sum(1 for v in cp_visited if v)
         _log("Result: %s | steps=%d" % (end_status, step))
         _log("Stats: walls_seen=%d | new_cells=%d | checkpoints=%d" % (len(seen_walls), moved_new_cells, cp_count))
+    elif end_status == "stopped":
+        _log("Result: stopped | steps=%d" % step)
     _log("SW: Episode finished. Waiting for new Start command...")
-    try:
-        publish_idle(bot)
-    except Exception:
-        pass
+    if end_status in ("goal", "collision"):
+        try:
+            publish_idle(bot)
+        except Exception:
+            pass

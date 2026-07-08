@@ -40,7 +40,7 @@ class LabScenarioMap5:
         self.btn_add_cp.pack(side=tk.LEFT, padx=scale_px(2))
         self.btn_remove_cp = ttk.Button(tools, text="Xóa checkpoint", command=self.remove_selected_checkpoint)
         self.btn_remove_cp.pack(side=tk.LEFT, padx=scale_px(2))
-        ttk.Button(tools, text="Reset CP", command=self._reset_cp_state).pack(
+        ttk.Button(tools, text="Reset State", command=self._reset_state).pack(
             side=tk.RIGHT, padx=scale_px(2)
         )
         ttk.Button(tools, text="Reset map", command=self._reset).pack(side=tk.RIGHT, padx=scale_px(2))
@@ -334,8 +334,8 @@ class LabScenarioMap5:
         self.redraw()
         self._notify()
 
-    def _reset_cp_state(self):
-        self.world.reset_checkpoint_state()
+    def _reset_state(self):
+        self.world.reset_runtime_state()
         self.redraw()
         self._notify()
 

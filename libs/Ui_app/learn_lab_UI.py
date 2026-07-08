@@ -126,6 +126,14 @@ class LearnLabApp:
         self._threshold_vars = {}
         self._weight_rows = {}
         self._threshold_rows = {}
+        self._weight_instance_vars = {}
+        self._weight_instance_rows = []
+        self._active_reward_instance_keys = []
+        self._weight_instance_saved_values = {}
+        self._threshold_instance_vars = {}
+        self._threshold_instance_rows = []
+        self._active_threshold_instance_keys = []
+        self._threshold_instance_saved_values = {}
         self._save_after_id = None
         self._loading = False
         self._loaded_formula_name = None
@@ -348,43 +356,15 @@ class LearnLabApp:
             desc_lbl.pack(side=tk.LEFT, padx=(12, 0))
             self._scaled_font_widgets.append((desc_lbl, 9, "italic"))
 
-        for eid, tk_keys in _THRESHOLD_FOR_EID.items():
+        seen_thresholds = set()
+        for tk_keys in _THRESHOLD_FOR_EID.values():
             keys = tk_keys if isinstance(tk_keys, list) else [tk_keys]
             for tk_key in keys:
-                if tk_key not in THRESHOLD_LABELS:
-                    continue
-                mod = REWARD_ELEMENTS[eid]["module"]
-                chip = module_chip_style(mod)
-                tr = tk.Frame(self._weights_container, bg=chip["bg"], padx=6, pady=4)
-                self._threshold_rows[tk_key] = tr
-                th_lbl = tk.Label(
-                    tr,
-                    text=THRESHOLD_LABELS[tk_key],
-                    bg=chip["bg"],
-                    fg=chip["fg"],
-                    font=font(9),
-                    anchor=tk.W,
-                    width=entry_width(28),
-                )
-                th_lbl.pack(side=tk.LEFT)
-                self._scaled_font_widgets.append((th_lbl, 9, "normal"))
-                tv = tk.StringVar(value="4")
-                self._threshold_vars[tk_key] = tv
-                t_spin = ttk.Spinbox(tr, from_=0, to=50, width=entry_width(8), textvariable=tv)
-                t_spin.pack(side=tk.LEFT, padx=px(4))
-                self._scaled_spinboxes.append((t_spin, 8))
-                tv.trace_add("write", lambda *_: self._on_weight_edited())
-                desc = _REWARD_DESCRIPTIONS.get(tk_key, "")
-                th_desc = tk.Label(
-                    tr,
-                    text="—  " + desc,
-                    bg=chip["bg"],
-                    fg=chip["fg"],
-                    font=font(9, weight="italic"),
-                    anchor=tk.W,
-                )
-                th_desc.pack(side=tk.LEFT, padx=(12, 0))
-                self._scaled_font_widgets.append((th_desc, 9, "italic"))
+                if tk_key in THRESHOLD_LABELS and tk_key not in seen_thresholds:
+                    seen_thresholds.add(tk_key)
+                    tv = tk.StringVar(value="4")
+                    tv.trace_add("write", lambda *_: self._on_weight_edited())
+                    self._threshold_vars[tk_key] = tv
 
         self._bind_reward_wheel_tree(self._reward_scroll_canvas)
 
@@ -421,25 +401,159 @@ class LearnLabApp:
     def _formula_reward_eids(self):
         return reward_eids_in_formula(self.formula_builder.get_tokens())
 
+    def _reward_instance_id(self, eid, idx):
+        return "%s#%d" % (eid, idx)
+
+    def _threshold_instance_id(self, eid, idx, tk_key):
+        return "%s#%d:%s" % (eid, idx, tk_key)
+
+    def _weight_seed_value(self, eid, idx):
+        iid = self._reward_instance_id(eid, idx)
+        if iid in self._weight_instance_saved_values:
+            return self._weight_instance_saved_values[iid]
+        base_var = self._weight_vars.get(eid)
+        if base_var is not None:
+            raw = base_var.get().strip()
+            try:
+                return float(raw) if "." in raw else int(raw)
+            except ValueError:
+                pass
+        return _DEFAULT_WEIGHTS.get(eid, 0)
+
+    def _threshold_seed_value(self, eid, idx, tk_key):
+        iid = self._threshold_instance_id(eid, idx, tk_key)
+        if iid in self._threshold_instance_saved_values:
+            return self._threshold_instance_saved_values[iid]
+        base_var = self._threshold_vars.get(tk_key)
+        if base_var is not None:
+            try:
+                return int(base_var.get())
+            except ValueError:
+                pass
+        return reward_config.get_reward_dict().get(tk_key, 0)
+
     def _refresh_weight_panel(self):
-        eids = self._formula_reward_eids()
-        eid_set = set(eids)
+        for row in self._weight_instance_rows:
+            try:
+                row.destroy()
+            except tk.TclError:
+                pass
+        self._weight_instance_rows = []
+        self._active_reward_instance_keys = []
+        for tr in self._threshold_instance_rows:
+            try:
+                tr.destroy()
+            except tk.TclError:
+                pass
+        self._threshold_instance_rows = []
+        self._active_threshold_instance_keys = []
 
-        for row in self._weight_rows.values():
-            row.pack_forget()
-        for tr in self._threshold_rows.values():
-            tr.pack_forget()
+        label_to_eid = {meta["label"]: eid for eid, meta in REWARD_ELEMENTS.items()}
+        seen_count = {}
+        for tok in self.formula_builder.get_tokens():
+            if tok.get("kind") != "reward":
+                continue
+            eid = label_to_eid.get(tok.get("value"))
+            if not eid:
+                continue
 
-        for eid in eids:
-            row = self._weight_rows.get(eid)
-            if row:
-                row.pack(fill=tk.X, pady=2, padx=2)
-            tk_key = _THRESHOLD_FOR_EID.get(eid)
-            if tk_key:
-                keys = tk_key if isinstance(tk_key, list) else [tk_key]
-                for k in keys:
-                    if k in self._threshold_rows and eid in eid_set:
-                        self._threshold_rows[k].pack(fill=tk.X, pady=(0, 2), padx=2)
+            seen_count[eid] = seen_count.get(eid, 0) + 1
+            idx = seen_count[eid]
+            iid = self._reward_instance_id(eid, idx)
+            self._active_reward_instance_keys.append((eid, idx))
+
+            w_var = self._weight_instance_vars.get((eid, idx))
+            if w_var is None:
+                w_var = tk.StringVar(value=str(self._weight_seed_value(eid, idx)))
+                w_var.trace_add("write", lambda *_: self._on_weight_edited())
+                self._weight_instance_vars[(eid, idx)] = w_var
+
+            mod = REWARD_ELEMENTS[eid]["module"]
+            chip = module_chip_style(mod)
+            wr = tk.Frame(self._weights_container, bg=chip["bg"], padx=6, pady=4)
+            self._weight_instance_rows.append(wr)
+            wr.pack(fill=tk.X, pady=2, padx=2)
+
+            w_lbl = tk.Label(
+                wr,
+                text="%s #%d" % (REWARD_ELEMENTS[eid]["label"], idx),
+                bg=chip["bg"],
+                fg=chip["fg"],
+                font=font(9, weight="bold"),
+                anchor=tk.W,
+                width=entry_width(28),
+            )
+            w_lbl.pack(side=tk.LEFT)
+            self._scaled_font_widgets.append((w_lbl, 9, "bold"))
+
+            w_spin = ttk.Spinbox(wr, from_=-500, to=500, width=entry_width(8), textvariable=w_var)
+            w_spin.pack(side=tk.LEFT, padx=px(4))
+            self._scaled_spinboxes.append((w_spin, 8))
+
+            w_desc = tk.Label(
+                wr,
+                text="—  " + _REWARD_DESCRIPTIONS.get(eid, ""),
+                bg=chip["bg"],
+                fg=chip["fg"],
+                font=font(9, weight="italic"),
+                anchor=tk.W,
+            )
+            w_desc.pack(side=tk.LEFT, padx=(12, 0))
+            self._scaled_font_widgets.append((w_desc, 9, "italic"))
+
+            tk_keys = _THRESHOLD_FOR_EID.get(eid)
+            if not tk_keys:
+                continue
+            keys = tk_keys if isinstance(tk_keys, list) else [tk_keys]
+            for tk_key in keys:
+                if tk_key not in THRESHOLD_LABELS:
+                    continue
+                row_key = (eid, idx, tk_key)
+                self._active_threshold_instance_keys.append(row_key)
+
+                var = self._threshold_instance_vars.get(row_key)
+                if var is None:
+                    var = tk.StringVar(value=str(self._threshold_seed_value(eid, idx, tk_key)))
+                    var.trace_add("write", lambda *_: self._on_weight_edited())
+                    self._threshold_instance_vars[row_key] = var
+
+                mod = REWARD_ELEMENTS[eid]["module"]
+                chip = module_chip_style(mod)
+                tr = tk.Frame(self._weights_container, bg=chip["bg"], padx=6, pady=4)
+                self._threshold_instance_rows.append(tr)
+                tr.pack(fill=tk.X, pady=(0, 2), padx=2)
+
+                th_lbl = tk.Label(
+                    tr,
+                    text="%s #%d — %s" % (
+                        REWARD_ELEMENTS[eid]["label"],
+                        idx,
+                        THRESHOLD_LABELS[tk_key],
+                    ),
+                    bg=chip["bg"],
+                    fg=chip["fg"],
+                    font=font(9),
+                    anchor=tk.W,
+                    width=entry_width(28),
+                )
+                th_lbl.pack(side=tk.LEFT)
+                self._scaled_font_widgets.append((th_lbl, 9, "normal"))
+
+                t_spin = ttk.Spinbox(tr, from_=0, to=50, width=entry_width(8), textvariable=var)
+                t_spin.pack(side=tk.LEFT, padx=px(4))
+                self._scaled_spinboxes.append((t_spin, 8))
+
+                desc = _REWARD_DESCRIPTIONS.get(tk_key, "")
+                th_desc = tk.Label(
+                    tr,
+                    text="—  " + desc,
+                    bg=chip["bg"],
+                    fg=chip["fg"],
+                    font=font(9, weight="italic"),
+                    anchor=tk.W,
+                )
+                th_desc.pack(side=tk.LEFT, padx=(12, 0))
+                self._scaled_font_widgets.append((th_desc, 9, "italic"))
 
 
 
@@ -453,13 +567,28 @@ class LearnLabApp:
     def _refresh_reward_panel(self):
         labels = self._enabled_labels()
         self.formula_builder.set_labels(labels)
-        self._sync_config_from_ui()
         self._refresh_weight_panel()
+        self._sync_config_from_ui()
         self._bind_reward_wheel_tree(self._reward_scroll_inner)
 
     def _collect_element_weights(self):
-        out = {}
+        out = dict(_DEFAULT_WEIGHTS)
+        first_instance = {}
+        for eid, idx in self._active_reward_instance_keys:
+            if eid in first_instance:
+                continue
+            var = self._weight_instance_vars.get((eid, idx))
+            if var is None:
+                continue
+            raw = var.get().strip()
+            try:
+                first_instance[eid] = float(raw) if "." in raw else int(raw)
+            except ValueError:
+                first_instance[eid] = _DEFAULT_WEIGHTS.get(eid, 0)
+        out.update(first_instance)
         for eid, var in self._weight_vars.items():
+            if eid in first_instance:
+                continue
             raw = var.get().strip()
             try:
                 out[eid] = float(raw) if "." in raw else int(raw)
@@ -469,19 +598,80 @@ class LearnLabApp:
 
     def _collect_thresholds(self):
         out = {}
-        for k, var in self._threshold_vars.items():
+        first_instance_by_key = {}
+        for eid, idx, tk_key in self._active_threshold_instance_keys:
+            var = self._threshold_instance_vars.get((eid, idx, tk_key))
+            if var is None:
+                continue
+            try:
+                val = int(var.get())
+            except ValueError:
+                val = reward_config.get_reward_dict().get(tk_key, 0)
+            if tk_key not in first_instance_by_key:
+                first_instance_by_key[tk_key] = val
+
+        for k in THRESHOLD_LABELS:
+            if k in first_instance_by_key:
+                out[k] = first_instance_by_key[k]
+                continue
+            var = self._threshold_vars.get(k)
+            if var is None:
+                out[k] = reward_config.get_reward_dict().get(k, 0)
+                continue
             try:
                 out[k] = int(var.get())
             except ValueError:
                 out[k] = reward_config.get_reward_dict().get(k, 0)
         return out
 
+    def _collect_threshold_instances(self):
+        out = {}
+        for eid, idx, tk_key in self._active_threshold_instance_keys:
+            var = self._threshold_instance_vars.get((eid, idx, tk_key))
+            if var is None:
+                continue
+            try:
+                val = int(var.get())
+            except ValueError:
+                val = reward_config.get_reward_dict().get(tk_key, 0)
+            out[self._threshold_instance_id(eid, idx, tk_key)] = val
+        return out
+
+    def _collect_instance_configs(self):
+        out = {}
+        for eid, idx in self._active_reward_instance_keys:
+            iid = self._reward_instance_id(eid, idx)
+            w_var = self._weight_instance_vars.get((eid, idx))
+            if w_var is None:
+                continue
+            raw = w_var.get().strip()
+            try:
+                weight = float(raw) if "." in raw else int(raw)
+            except ValueError:
+                weight = _DEFAULT_WEIGHTS.get(eid, 0)
+
+            thresholds = {}
+            tk_keys = _THRESHOLD_FOR_EID.get(eid)
+            keys = tk_keys if isinstance(tk_keys, list) else ([tk_keys] if tk_keys else [])
+            for tk_key in keys:
+                t_var = self._threshold_instance_vars.get((eid, idx, tk_key))
+                if t_var is None:
+                    continue
+                try:
+                    thresholds[tk_key] = int(t_var.get())
+                except ValueError:
+                    thresholds[tk_key] = reward_config.get_reward_dict().get(tk_key, 0)
+            out[iid] = {"eid": eid, "weight": weight, "thresholds": thresholds}
+        return out
+
     def _sync_config_from_ui(self):
         weights = self._collect_element_weights()
         reward_config.sync_weights_from_elements(weights)
-        for k, v in self._collect_thresholds().items():
+        thresholds = self._collect_thresholds()
+        for k, v in thresholds.items():
             if k in reward_config.REWARD_KEYS:
                 setattr(reward_config, k, v)
+        reward_config.set_instance_configs(self._collect_instance_configs())
         reward_config.set_total_formula_student(self.formula_builder.get_expr())
 
     def _on_weight_edited(self):
@@ -489,8 +679,8 @@ class LearnLabApp:
         self._refresh_export()
 
     def _on_formula_changed(self):
-        self._sync_config_from_ui()
         self._refresh_weight_panel()
+        self._sync_config_from_ui()
         self._refresh_export()
         self._refresh_move_gate()
 
@@ -555,6 +745,15 @@ class LearnLabApp:
         for k, var in self._threshold_vars.items():
             if k in d:
                 var.set(str(d[k]))
+        self._weight_instance_saved_values = {}
+        self._threshold_instance_saved_values = {}
+        for iid, cfg in (reward_config.get_instance_configs() or {}).items():
+            if not isinstance(cfg, dict):
+                continue
+            if "weight" in cfg:
+                self._weight_instance_saved_values[str(iid)] = cfg.get("weight")
+            for tk_key, val in (cfg.get("thresholds") or {}).items():
+                self._threshold_instance_saved_values["%s:%s" % (iid, tk_key)] = val
         reward_config.set_enabled_modules(self._enabled_modules())
         self.formula_builder.set_expr(reward_config.get_total_formula_student())
 
@@ -573,12 +772,15 @@ class LearnLabApp:
     def _collect_formula_snapshot(self):
         weights = self._collect_element_weights()
         thresholds = self._collect_thresholds()
-        return build_snapshot(
+        snap = build_snapshot(
             self._enabled_modules(),
             self.formula_builder.get_expr(),
             weights,
             thresholds,
         )
+        snap["instance_configs"] = self._collect_instance_configs()
+        snap["threshold_instances"] = self._collect_threshold_instances()
+        return snap
 
     def _refresh_formula_combo(self, select_name=None):
         names = list_saved_formulas()
@@ -657,6 +859,7 @@ class LearnLabApp:
                 f.write(src)
 
             importlib.reload(reward_config)
+            reward_config.set_instance_configs(data.get("instance_configs") or {})
             try:
                 import Simulation.robot.trainer as trainer
                 importlib.reload(trainer)
@@ -685,6 +888,16 @@ class LearnLabApp:
             for k, var in self._threshold_vars.items():
                 if k in thresholds:
                     var.set(str(thresholds[k]))
+            self._weight_instance_saved_values = {}
+            self._threshold_instance_saved_values = {}
+            for iid, cfg in (data.get("instance_configs") or {}).items():
+                if not isinstance(cfg, dict):
+                    continue
+                if "weight" in cfg:
+                    self._weight_instance_saved_values[str(iid)] = cfg.get("weight")
+                for tk_key, val in (cfg.get("thresholds") or {}).items():
+                    self._threshold_instance_saved_values["%s:%s" % (iid, tk_key)] = val
+            self._threshold_instance_saved_values.update(dict(data.get("threshold_instances") or {}))
 
             expr = data.get("total_formula") or ""
             self.formula_builder.set_labels(self._enabled_labels())
@@ -756,6 +969,7 @@ class LearnLabApp:
 
             reward_config.set_formula_name(save_name)
             importlib.reload(reward_config)
+            reward_config.set_instance_configs(snapshot.get("instance_configs") or {})
             try:
                 import Simulation.robot.trainer as trainer
                 importlib.reload(trainer)
@@ -783,6 +997,12 @@ class LearnLabApp:
                 "MAX_STRAIGHT_REACH": 3,
                 "MAX_STRAIGHT_CAP": 3,
             }.get(k, var.get())))
+        self._weight_instance_saved_values = {}
+        self._weight_instance_vars = {}
+        self._active_reward_instance_keys = []
+        self._threshold_instance_saved_values = {}
+        self._threshold_instance_vars = {}
+        self._active_threshold_instance_keys = []
         self.formula_builder.set_tokens(default_total_formula(self._enabled_modules()))
         self.world.reset_scenario()
         self.scenario_map.redraw()
@@ -814,7 +1034,7 @@ class LearnLabApp:
                             child.configure(width=entry_width(28))
                     except (tk.TclError, ValueError):
                         pass
-        for tr in self._threshold_rows.values():
+        for tr in self._threshold_instance_rows + self._weight_instance_rows:
             for child in tr.winfo_children():
                 if isinstance(child, tk.Label):
                     try:

@@ -50,6 +50,13 @@ STATE_MODULES = (
         "desc": "Action rotate — sinh reward xoay / xoay lãng phí / facing clear.",
     },
     {
+        "id": "memory_loop",
+        "label": "Memory anti-loop",
+        "in_encode": False,
+        "encode_fields": [],
+        "desc": "Bộ nhớ ngắn hạn cho reward: phạt quay tại chỗ và stagnation lặp.",
+    },
+    {
         "id": "explore_penalty",
         "label": "Lặp lại đường đi",
         "in_encode": False,
@@ -162,25 +169,25 @@ REWARD_ELEMENTS = {
     },
     "excess_rotate": {
         "label": "Xoay tại chỗ liên tục",
-        "module": "rotation",
+        "module": "memory_loop",
         "constants": ["R_EXCESS_ROTATE", "MAX_ROTATE_STREAK"],
         "default_formula": "R_EXCESS_ROTATE if excess_rotate else 0",
     },
     "visit_window": {
         "label": "Lặp ô gần",
-        "module": "explore_penalty",
+        "module": "memory_loop",
         "constants": ["R_VISIT_WINDOW", "MAX_REVISIT_STEPS"],
         "default_formula": "R_VISIT_WINDOW if visit_window_penalty else 0",
     },
     "visit_repeat": {
         "label": "Quay lại ô",
-        "module": "explore_penalty",
+        "module": "memory_loop",
         "constants": ["R_VISIT_REPEAT", "MAX_CELL_REPEAT"],
         "default_formula": "R_VISIT_REPEAT if visit_repeat_penalty else 0",
     },
     "ping_pong": {
         "label": "Đi qua đi lại liên tục",
-        "module": "explore_penalty",
+        "module": "memory_loop",
         "constants": ["R_PING_PONG", "MAX_PING_PONG_CYCLES", "MAX_PING_PONG_SPAN"],
         "default_formula": "R_PING_PONG if ping_pong_penalty else 0",
     },
