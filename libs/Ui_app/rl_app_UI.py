@@ -17,7 +17,14 @@ if _ROOT not in sys.path:
 if _SIM not in sys.path:
     sys.path.insert(0, _SIM)
 
-from map.map_io import build_sim_map_from_file, is_bundled_map_path, list_map_files, maps_dir_for_kind
+from map.map_io import (
+    build_sim_map_from_file,
+    find_oversized_train_maps,
+    format_oversized_train_maps_message,
+    is_bundled_map_path,
+    list_map_files,
+    maps_dir_for_kind,
+)
 from Ui_app.map_view import SimMapCanvas
 from Ui_app.ui_scale import configure_window, entry_width, font, init as init_ui_scale, px, text_lines
 from Ui_app.ui_widgets import SegmentGroup, box_button, style_train_treeview, train_map_mark, train_row_tags
@@ -72,6 +79,7 @@ class RlApp:
         self._paused = False
         self._map_paths = []
         self._train_rows = []
+        self._infer_rows = []
         self._anim_after_id = None
         self._current_sync_evt = None
         self._sync_after_id = None
@@ -79,7 +87,11 @@ class RlApp:
         self._locked_view = None
         self._locked_mode = None
         self.train_map_mode = tk.StringVar(value="random")
+        self.infer_map_mode = tk.StringVar(value="single")
         self.curriculum_goal_hits = tk.StringVar(value="10")
+        self._last_train_mode = "random"
+        self._episodes_by_mode = {"random": self.episodes.get()}
+        self._curriculum_by_mode = {"goal_hits": 10}
         self._drag_src_iid = None
         self._eps_entry = None
         self._eps_edit_iid = None
@@ -125,6 +137,8 @@ class RlApp:
         self.spin_ep = ttk.Spinbox(bar, from_=100, to=200000, increment=100, width=entry_width(8))
         self.spin_ep.set(str(self.episodes.get()))
         self.spin_ep.grid(row=0, column=8, padx=(0, 12))
+        self.spin_ep.bind("<FocusOut>", lambda _e: self._on_random_episodes_changed())
+        self.spin_ep.bind("<Return>", lambda _e: self._on_random_episodes_changed())
 
         ttk.Label(bar, text="Tốc độ").grid(row=0, column=9, padx=(0, 4))
         self.delay_group = SegmentGroup(
@@ -196,7 +210,7 @@ class RlApp:
 
         row2 = ttk.Frame(self.ck_frame)
         row2.pack(fill=tk.X, pady=(6, 0))
-        ttk.Label(row2, text="Lưu policy").pack(side=tk.LEFT, padx=(0, 4))
+        ttk.Label(row2, text="Đặt tên").pack(side=tk.LEFT, padx=(0, 4))
         self.combo_export_policy = ttk.Combobox(
             row2,
             textvariable=self.export_policy_var,
@@ -579,6 +593,7 @@ class RlApp:
         self.train_tree.heading("ord", text="≡")
         self.train_tree.heading("name", text="File map")
         self.train_tree.heading("eps", text="Episodes")
+        self.train_tree.column("on", width=px(34), anchor=tk.CENTER, stretch=False, minwidth=px(30))
         self.train_tree.column("ord", width=px(32), anchor=tk.CENTER, stretch=False, minwidth=px(28))
         self.train_tree.column("name", width=px(160), anchor=tk.W, stretch=True, minwidth=px(72))
         self.train_tree.column("eps", width=px(72), anchor=tk.CENTER, stretch=False, minwidth=px(56))
@@ -599,29 +614,60 @@ class RlApp:
         self.btn_train_select_none.pack(side=tk.LEFT, padx=4, pady=4)
 
         self.infer_list_frame = ttk.LabelFrame(frame, text="Chọn map inference", padding=6)
+        infer_mode_row = ttk.Frame(self.infer_list_frame)
+        infer_mode_row.pack(fill=tk.X, pady=(0, 6))
+        ttk.Label(infer_mode_row, text="Chế độ infer:").pack(side=tk.LEFT, padx=(0, 8))
+        self.infer_mode_group = SegmentGroup(
+            infer_mode_row,
+            self.infer_map_mode,
+            [("Single", "single"), ("Sequence", "sequential")],
+            command=self._on_infer_mode_change,
+        )
+        self.infer_mode_group.pack(side=tk.LEFT)
+
         list_frame = ttk.Frame(self.infer_list_frame)
         list_frame.pack(fill=tk.BOTH, expand=True)
+        list_frame.columnconfigure(0, weight=1)
+        list_frame.rowconfigure(0, weight=1)
         scroll = ttk.Scrollbar(list_frame, orient=tk.VERTICAL)
-        self.map_list = tk.Listbox(
+        scroll_x = ttk.Scrollbar(list_frame, orient=tk.HORIZONTAL)
+        self.infer_tree = ttk.Treeview(
             list_frame,
-            height=text_lines(12),
+            columns=("on", "ord", "name"),
+            show="headings",
+            height=text_lines(8),
             yscrollcommand=scroll.set,
-            selectmode=tk.BROWSE,
-            relief=tk.GROOVE,
-            bd=2,
-            highlightthickness=1,
-            selectbackground="#89b4fa",
-            selectforeground="#11111b",
-            font=font(10),
+            xscrollcommand=scroll_x.set,
+            selectmode="browse",
         )
-        scroll.config(command=self.map_list.yview)
-        self.map_list.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        scroll.pack(side=tk.RIGHT, fill=tk.Y)
-        self.map_list.bind("<<ListboxSelect>>", self._on_map_select)
+        scroll.config(command=self.infer_tree.yview)
+        scroll_x.config(command=self.infer_tree.xview)
+        style_train_treeview(self.infer_tree, self.root)
+        self.infer_tree.heading("on", text="")
+        self.infer_tree.heading("ord", text="≡")
+        self.infer_tree.heading("name", text="File map infer")
+        self.infer_tree.column("on", width=px(34), anchor=tk.CENTER, stretch=False, minwidth=px(30))
+        self.infer_tree.column("ord", width=px(32), anchor=tk.CENTER, stretch=False, minwidth=px(28))
+        self.infer_tree.column("name", width=px(160), anchor=tk.W, stretch=True, minwidth=px(72))
+        self.infer_tree.grid(row=0, column=0, sticky="nsew")
+        scroll.grid(row=0, column=1, sticky="ns")
+        scroll_x.grid(row=1, column=0, sticky="ew")
+        self.infer_tree.bind("<<TreeviewSelect>>", self._on_infer_tree_select)
+        self.infer_tree.bind("<Button-1>", self._on_infer_tree_click, add=True)
+        self.infer_tree.bind("<ButtonRelease-1>", self._on_infer_drag_release, add=True)
+        self.infer_tree.bind("<B1-Motion>", self._on_infer_drag_motion, add=True)
         btn_row_infer = tk.Frame(self.infer_list_frame, height=px(44))
         btn_row_infer.pack(fill=tk.X, pady=(4, 0))
+        self.btn_infer_select_all = box_button(
+            btn_row_infer, text="Chọn tất cả", command=self._infer_select_all, role="accent"
+        )
+        self.btn_infer_select_all.pack(side=tk.LEFT, padx=(0, 4), pady=4)
+        self.btn_infer_select_none = box_button(
+            btn_row_infer, text="Bỏ chọn tất cả", command=self._infer_select_none, role="secondary"
+        )
+        self.btn_infer_select_none.pack(side=tk.LEFT, padx=4, pady=4)
         box_button(btn_row_infer, text="Xóa map", command=self._delete_selected_infer_map, role="secondary").pack(
-            side=tk.LEFT, pady=4
+            side=tk.LEFT, padx=(8, 0), pady=4
         )
         box_button(btn_row_infer, text="Check infer", command=self._run_check_infer_all, role="accent").pack(
             side=tk.LEFT, padx=(8, 0), pady=4
@@ -642,8 +688,54 @@ class RlApp:
         self.status = tk.StringVar(value="Ready")
         ttk.Label(bar, textvariable=self.status).pack(side=tk.LEFT, padx=12)
 
+    def _row_episodes(self, row, mode=None):
+        mode = mode or self.train_map_mode.get()
+        store = row.get("episodes_by_mode")
+        if store is None:
+            return max(1, int(row.get("episodes", 1000)))
+        if mode not in store:
+            store[mode] = 1000
+        return max(1, int(store[mode]))
+
+    def _set_row_episodes(self, row, n, mode=None):
+        mode = mode or self.train_map_mode.get()
+        if mode not in ("sequential", "single"):
+            return
+        store = row.setdefault("episodes_by_mode", {"sequential": 1000, "single": 1000})
+        store[mode] = max(1, int(n))
+
+    def _save_mode_episode_settings(self, mode):
+        if mode == "random":
+            try:
+                self._episodes_by_mode["random"] = max(1, int(self.spin_ep.get()))
+            except ValueError:
+                pass
+        elif mode == "curriculum":
+            try:
+                self._curriculum_by_mode["goal_hits"] = max(1, int(self.curriculum_goal_hits.get()))
+            except ValueError:
+                pass
+
+    def _restore_mode_episode_settings(self, mode=None):
+        mode = mode or self.train_map_mode.get()
+        if mode == "random":
+            self.spin_ep.configure(state=tk.NORMAL)
+            self.spin_ep.set(str(self._episodes_by_mode.get("random", 10000)))
+        elif mode == "curriculum":
+            self.curriculum_goal_hits.set(str(self._curriculum_by_mode.get("goal_hits", 10)))
+            self._update_train_episodes_total()
+        else:
+            self._update_train_episodes_total()
+
+    def _on_random_episodes_changed(self):
+        if self.train_map_mode.get() == "random":
+            self._save_mode_episode_settings("random")
+
     def _on_train_mode_change(self):
+        prev = self._last_train_mode
         mode = self.train_map_mode.get()
+        if prev != mode:
+            self._save_mode_episode_settings(prev)
         if mode == "single":
             enabled = [r for r in self._train_rows if r["enabled"]]
             if len(enabled) > 1:
@@ -657,11 +749,14 @@ class RlApp:
                     for r in self._train_rows:
                         r["enabled"] = r is pick
         self._apply_train_mode_ui()
+        self._restore_mode_episode_settings(mode)
         self._refresh_train_tree()
+        self._last_train_mode = mode
 
     def _on_curriculum_goal_hits_changed(self):
         if self.train_map_mode.get() != "curriculum":
             return
+        self._save_mode_episode_settings("curriculum")
         self._update_train_episodes_total()
 
     def _train_tree_display_columns(self):
@@ -686,6 +781,9 @@ class RlApp:
     def _apply_train_mode_ui(self):
         mode = self.train_map_mode.get()
         self.train_tree.configure(displaycolumns=self._train_tree_display_columns())
+        self.train_tree.column("on", width=px(34), anchor=tk.CENTER, stretch=False, minwidth=px(30))
+        self.train_tree.column("ord", width=px(32), anchor=tk.CENTER, stretch=False, minwidth=px(28))
+        self.train_tree.column("name", anchor=tk.W, stretch=True, minwidth=px(72))
         if mode != "random":
             self.train_tree.heading("eps", text="Episodes")
             self.train_tree.column(
@@ -707,15 +805,6 @@ class RlApp:
         else:
             self.curriculum_cfg_frame.pack_forget()
             self.spin_curriculum_goal_hits.configure(state=tk.DISABLED)
-        if mode == "random":
-            self.spin_ep.configure(state=tk.NORMAL)
-        elif mode == "curriculum":
-            enabled = self._train_enabled_rows()
-            per_map = max(1, int(self.curriculum_goal_hits.get() or "1"))
-            self.spin_ep.configure(state=tk.DISABLED)
-            self.spin_ep.set(str(max(1, per_map * max(1, len(enabled)))))
-        else:
-            self._update_train_episodes_total()
 
     def _train_enabled_rows(self):
         return [r for r in self._train_rows if r["enabled"]]
@@ -734,7 +823,7 @@ class RlApp:
             self.spin_ep.configure(state=tk.DISABLED)
             self.spin_ep.set(str(total_target))
             return
-        total = sum(max(1, int(r["episodes"])) for r in enabled)
+        total = sum(self._row_episodes(r) for r in enabled)
         self.spin_ep.configure(state=tk.DISABLED)
         self.spin_ep.set(str(max(1, total) if total else 1))
 
@@ -759,7 +848,7 @@ class RlApp:
                 "",
                 tk.END,
                 iid=str(i),
-                values=(mark, i + 1, row["name"], row["episodes"]),
+                values=(mark, i + 1, row["name"], self._row_episodes(row)),
                 tags=tags,
             )
         self._update_train_episodes_total()
@@ -781,7 +870,7 @@ class RlApp:
         x, y, w, h = bbox
         self._eps_edit_iid = iid
         self._eps_entry = ttk.Entry(self.train_tree, width=8, justify=tk.CENTER)
-        self._eps_entry.insert(0, str(row["episodes"]))
+        self._eps_entry.insert(0, str(self._row_episodes(row)))
         self._eps_entry.place(x=x, y=y, width=max(w, 64), height=h)
         self._eps_entry.focus_set()
         self._eps_entry.select_range(0, tk.END)
@@ -815,7 +904,7 @@ class RlApp:
             self._refresh_train_tree()
             self.train_tree.selection_set(iid)
             return
-        row["episodes"] = n
+        self._set_row_episodes(row, n)
         self._refresh_train_tree()
         self.train_tree.selection_set(iid)
         self._update_train_episodes_total()
@@ -894,12 +983,16 @@ class RlApp:
         for path in self._map_paths:
             name = os.path.basename(path)
             prev = old.get(name, {})
+            prev_eps = prev.get("episodes_by_mode")
+            if prev_eps is None:
+                legacy = prev.get("episodes", 1000)
+                prev_eps = {"sequential": legacy, "single": legacy}
             rows.append(
                 {
                     "path": path,
                     "name": name,
                     "enabled": prev.get("enabled", True),
-                    "episodes": prev.get("episodes", 1000),
+                    "episodes_by_mode": dict(prev_eps),
                     "order": prev.get("order", len(rows)),
                 }
             )
@@ -944,15 +1037,153 @@ class RlApp:
         self._refresh_train_tree()
         self._update_train_episodes_total()
 
+    def _infer_row_by_iid(self, iid):
+        if not iid:
+            return None
+        try:
+            idx = int(iid)
+        except ValueError:
+            return None
+        if 0 <= idx < len(self._infer_rows):
+            return self._infer_rows[idx]
+        return None
+
+    def _refresh_infer_tree(self):
+        self.infer_tree.delete(*self.infer_tree.get_children())
+        for i, row in enumerate(self._infer_rows):
+            mark = train_map_mark(row["enabled"])
+            tags = train_row_tags(row["enabled"], i)
+            self.infer_tree.insert(
+                "",
+                tk.END,
+                iid=str(i),
+                values=(mark, i + 1, row["name"]),
+                tags=tags,
+            )
+
+    def _sync_infer_rows_from_paths(self):
+        old = {r["name"]: r for r in self._infer_rows}
+        rows = []
+        for path in self._map_paths:
+            name = os.path.basename(path)
+            prev = old.get(name, {})
+            rows.append(
+                {
+                    "path": path,
+                    "name": name,
+                    "enabled": prev.get("enabled", True),
+                    "order": prev.get("order", len(rows)),
+                }
+            )
+        rows.sort(key=lambda r: r["order"])
+        for i, r in enumerate(rows):
+            r["order"] = i
+        self._infer_rows = rows
+        self._refresh_infer_tree()
+        self._on_infer_mode_change()
+
+    def _infer_toggle_selected(self):
+        sel = self.infer_tree.selection()
+        if not sel:
+            return
+        row = self._infer_row_by_iid(sel[0])
+        if not row:
+            return
+        if self.infer_map_mode.get() == "single":
+            if row["enabled"]:
+                return
+            for r in self._infer_rows:
+                r["enabled"] = False
+            row["enabled"] = True
+        else:
+            row["enabled"] = not row["enabled"]
+        self._refresh_infer_tree()
+        self.infer_tree.selection_set(sel[0])
+
+    def _infer_select_all(self):
+        if self.infer_map_mode.get() == "single":
+            return
+        for row in self._infer_rows:
+            row["enabled"] = True
+        self._refresh_infer_tree()
+
+    def _infer_select_none(self):
+        if self.infer_map_mode.get() == "single":
+            return
+        for row in self._infer_rows:
+            row["enabled"] = False
+        self._refresh_infer_tree()
+
+    def _on_infer_tree_select(self, _event=None):
+        self._on_map_select()
+
+    def _on_infer_tree_click(self, event):
+        if self.infer_tree.identify_region(event.x, event.y) != "cell":
+            return
+        col = self.infer_tree.identify_column(event.x)
+        iid = self.infer_tree.identify_row(event.y)
+        if not iid:
+            return
+        if col == "#1":
+            self.infer_tree.selection_set(iid)
+            self._infer_toggle_selected()
+            return "break"
+        if col in ("#2", "#3"):
+            self._drag_src_iid = iid
+            self.infer_tree.selection_set(iid)
+
+    def _on_infer_drag_motion(self, event):
+        if not self._drag_src_iid:
+            return
+        target = self.infer_tree.identify_row(event.y)
+        for iid in self.infer_tree.get_children():
+            tags = list(self.infer_tree.item(iid, "tags"))
+            tags = [t for t in tags if t != "drag_over"]
+            self.infer_tree.item(iid, tags=tags)
+        if target and target != self._drag_src_iid:
+            tags = list(self.infer_tree.item(target, "tags"))
+            if "drag_over" not in tags:
+                tags.append("drag_over")
+            self.infer_tree.item(target, tags=tags)
+
+    def _on_infer_drag_release(self, event):
+        if not self._drag_src_iid:
+            return
+        src = int(self._drag_src_iid)
+        target_iid = self.infer_tree.identify_row(event.y)
+        self._drag_src_iid = None
+        for iid in self.infer_tree.get_children():
+            tags = [t for t in self.infer_tree.item(iid, "tags") if t != "drag_over"]
+            self.infer_tree.item(iid, tags=tags)
+        if not target_iid:
+            return
+        dst = int(target_iid)
+        if src == dst:
+            return
+        self._infer_reorder(src, dst)
+
+    def _infer_reorder(self, src_idx, dst_idx):
+        rows = self._infer_rows
+        if src_idx < 0 or src_idx >= len(rows) or dst_idx < 0 or dst_idx >= len(rows):
+            return
+        item = rows.pop(src_idx)
+        rows.insert(dst_idx, item)
+        for i, r in enumerate(rows):
+            r["order"] = i
+        self._refresh_infer_tree()
+        self.infer_tree.selection_set(str(dst_idx))
+        self.infer_tree.see(str(dst_idx))
+
     def _build_train_run_config(self):
         mode = self.train_map_mode.get()
+        self._save_mode_episode_settings(mode)
         if mode == "single":
             enabled = self._train_enabled_rows()
             if len(enabled) != 1:
                 raise ValueError("Chế độ Single — chọn đúng một map (bấm [ ]).")
             row = enabled[0]
             sim = build_sim_map_from_file(row["path"])
-            n_ep = max(1, int(row["episodes"]))
+            n_ep = self._row_episodes(row, "single")
             return "random", [sim], None, n_ep, None
 
         enabled = [r for r in self._train_rows if r["enabled"]]
@@ -973,15 +1204,15 @@ class RlApp:
             sims = []
             for r in ordered:
                 sim = build_sim_map_from_file(r["path"])
-                plan.append((sim, int(r["episodes"])))
+                plan.append((sim, self._row_episodes(r, "sequential")))
                 sims.append(sim)
-            total = sum(r["episodes"] for r in ordered)
+            total = sum(self._row_episodes(r, "sequential") for r in ordered)
             return mode, sims, plan, total, None
         sims = [build_sim_map_from_file(r["path"]) for r in enabled]
         try:
-            n_ep = int(self.spin_ep.get())
+            n_ep = max(1, int(self.spin_ep.get()))
         except ValueError:
-            n_ep = 10000
+            n_ep = self._episodes_by_mode.get("random", 10000)
         return mode, sims, None, n_ep, None
 
     def _start_train(self):
@@ -989,6 +1220,10 @@ class RlApp:
             return
         if not self._map_paths:
             messagebox.showwarning("Train", "Không có map trong map/train/")
+            return
+        oversized = find_oversized_train_maps()
+        if oversized:
+            messagebox.showwarning("Train", format_oversized_train_maps_message(oversized))
             return
         self._cancel_eps_edit()
         try:
@@ -1025,11 +1260,15 @@ class RlApp:
                     self.train_tree.see(str(i))
                     break
         elif kind == "infer" and self._map_paths:
-            for i, p in enumerate(self._map_paths):
-                if os.path.basename(p) == basename:
-                    self.map_list.selection_clear(0, tk.END)
-                    self.map_list.selection_set(i)
-                    self.map_list.see(i)
+            for i, row in enumerate(self._infer_rows):
+                if row["name"] == basename:
+                    if self.infer_map_mode.get() == "single":
+                        for r in self._infer_rows:
+                            r["enabled"] = False
+                    row["enabled"] = True
+                    self._refresh_infer_tree()
+                    self.infer_tree.selection_set(str(i))
+                    self.infer_tree.see(str(i))
                     break
         if self.view.get() == "map" and (kind is None or kind == self.mode.get()):
             self._preview_map_from_selection()
@@ -1068,7 +1307,54 @@ class RlApp:
             self.infer_list_frame.pack(fill=tk.BOTH, expand=True)
             self.refresh_infer_policies()
             self.spin_ep.configure(state=tk.DISABLED)
+            self._on_infer_mode_change()
         self._update_view_widgets()
+
+    def _on_infer_mode_change(self):
+        if self.mode.get() != "infer":
+            return
+        mode = self.infer_map_mode.get()
+        enabled = [r for r in self._infer_rows if r["enabled"]]
+        if mode == "single":
+            if len(enabled) > 1:
+                keep = enabled[0]
+                for r in self._infer_rows:
+                    r["enabled"] = r is keep
+            elif len(enabled) == 0 and self._infer_rows:
+                pick = self._infer_row_by_iid(self.infer_tree.selection()[0]) if self.infer_tree.selection() else self._infer_rows[0]
+                if pick:
+                    for r in self._infer_rows:
+                        r["enabled"] = r is pick
+            self.btn_infer_select_all.pack_forget()
+            self.btn_infer_select_none.pack_forget()
+        else:
+            self.btn_infer_select_all.pack(side=tk.LEFT, padx=(0, 4), pady=4)
+            self.btn_infer_select_none.pack(side=tk.LEFT, padx=4, pady=4)
+        self._refresh_infer_tree()
+        active = [i for i, r in enumerate(self._infer_rows) if r["enabled"]]
+        if active:
+            self.infer_tree.selection_set(str(active[0]))
+            self.infer_tree.see(str(active[0]))
+        elif self._infer_rows:
+            self.infer_tree.selection_set("0")
+        if self.view.get() == "map":
+            self._preview_map_from_selection()
+
+    def _infer_mode_label(self):
+        return "Single" if self.infer_map_mode.get() == "single" else "Sequence"
+
+    def _infer_target_paths(self):
+        mode = self.infer_map_mode.get()
+        if mode == "single":
+            enabled = [r for r in self._infer_rows if r["enabled"]]
+            if len(enabled) != 1:
+                raise ValueError("Chế độ Single — chọn đúng một map infer (bấm ô [ ]).")
+            return [enabled[0]["path"]]
+        enabled = [r for r in self._infer_rows if r["enabled"]]
+        if not enabled:
+            raise ValueError("Chế độ Sequence — chọn ít nhất một map infer (bấm ô [ ]).")
+        ordered = sorted(enabled, key=lambda r: r["order"])
+        return [r["path"] for r in ordered]
 
     def _clear_log(self):
         self.log.configure(state=tk.NORMAL)
@@ -1185,10 +1471,22 @@ class RlApp:
                         self._preview_map(i)
                         return
             return
-        sel = self.map_list.curselection()
+        sel = self.infer_tree.selection()
         if sel:
-            self._preview_map(sel[0])
-        elif self._map_paths:
+            row = self._infer_row_by_iid(sel[0])
+            if row:
+                for i, path in enumerate(self._map_paths):
+                    if path == row["path"]:
+                        self._preview_map(i)
+                        return
+        enabled = [r for r in self._infer_rows if r["enabled"]]
+        if enabled:
+            target = enabled[0]["path"]
+            for i, path in enumerate(self._map_paths):
+                if path == target:
+                    self._preview_map(i)
+                    return
+        if self._map_paths:
             self._preview_map(0)
 
     def _preview_map(self, idx):
@@ -1234,13 +1532,9 @@ class RlApp:
             self._apply_train_mode_ui()
         else:
             self._map_paths = infer_paths
-            self.map_list.delete(0, tk.END)
-            for path in self._map_paths:
-                self.map_list.insert(tk.END, os.path.basename(path))
+            self._sync_infer_rows_from_paths()
             self._set_map_hint("")
             self.spin_ep.configure(state=tk.DISABLED)
-            if self._map_paths:
-                self.map_list.selection_set(0)
             # Giữ danh sách train đồng bộ khi đang xem tab infer
             saved_paths = self._map_paths
             self._map_paths = train_paths
@@ -1267,9 +1561,11 @@ class RlApp:
                 if row:
                     prev_name = row["name"]
         else:
-            prev_sel = self.map_list.curselection()
-            if prev_sel and prev_sel[0] < len(self._map_paths):
-                prev_name = os.path.basename(self._map_paths[prev_sel[0]])
+            sel = self.infer_tree.selection()
+            if sel:
+                row = self._infer_row_by_iid(sel[0])
+                if row:
+                    prev_name = row["name"]
         self.refresh_maps()
         if prev_name and self._map_paths:
             if self.mode.get() == "train":
@@ -1279,11 +1575,10 @@ class RlApp:
                         self.train_tree.see(str(i))
                         break
             else:
-                for i, path in enumerate(self._map_paths):
-                    if os.path.basename(path) == prev_name:
-                        self.map_list.selection_clear(0, tk.END)
-                        self.map_list.selection_set(i)
-                        self.map_list.see(i)
+                for i, row in enumerate(self._infer_rows):
+                    if row["name"] == prev_name:
+                        self.infer_tree.selection_set(str(i))
+                        self.infer_tree.see(str(i))
                         break
         n = len(self._map_paths)
         if self.view.get() == "map":
@@ -1325,15 +1620,15 @@ class RlApp:
         if self._is_busy():
             messagebox.showinfo("Xóa map", "Đang chạy train/inference — vui lòng bấm Stop hoặc đợi chạy xong.")
             return
-        sel = self.map_list.curselection()
+        sel = self.infer_tree.selection()
         if not sel:
             messagebox.showinfo("Xóa map", "Vui lòng chọn bản đồ trong danh sách inference để xóa.")
             return
-        idx = sel[0]
-        if idx >= len(self._map_paths):
+        row = self._infer_row_by_iid(sel[0])
+        if not row:
             return
-        path = self._map_paths[idx]
-        filename = os.path.basename(path)
+        path = row["path"]
+        filename = row["name"]
         if is_bundled_map_path(path):
             messagebox.showinfo(
                 "Xóa map",
@@ -1364,22 +1659,25 @@ class RlApp:
             return
 
         if self.mode.get() == "infer":
-            sel = self.map_list.curselection()
-            if not self._map_paths:
-                messagebox.showwarning("Inference", "Không có map trong map/infer/")
-                return
-            if not sel:
-                messagebox.showwarning("Inference", "Chọn một map inference.")
+            try:
+                targets = self._infer_target_paths()
+            except ValueError as exc:
+                messagebox.showwarning("Inference", str(exc))
                 return
             try:
                 self._infer_policy_bin()
             except FileNotFoundError as exc:
                 messagebox.showwarning("Inference", str(exc))
                 return
-            if self.view.get() == "map":
-                self._run_infer_map(sel[0])
+
+            if len(targets) == 1:
+                idx = self._map_paths.index(targets[0])
+                if self.view.get() == "map":
+                    self._run_infer_map(idx)
+                else:
+                    self._run_infer_log(idx)
             else:
-                self._run_infer_log(sel[0])
+                self._run_infer_sequence(targets)
             return
 
         self._start_train()
@@ -1657,46 +1955,49 @@ class RlApp:
         threading.Thread(target=work, daemon=True).start()
 
     def _format_check_infer_report(self, label, sim_map, outcome):
-        cps = sim_map.get("checkpoints") or []
-        visited = outcome.get("checkpoints_visited") or []
+        _ = sim_map
+        return self._format_infer_steps_report(label, outcome)
+
+    @staticmethod
+    def _format_infer_map_line(map_label, map_score):
+        return "- %s: %.1f điểm" % (map_label, float(map_score))
+
+    @staticmethod
+    def _format_infer_total_line(total_score):
+        return "Tổng điểm cuối cùng: %.1f" % float(total_score)
+
+    def _format_infer_steps_report(self, map_label, outcome):
         lines = [
             "-" * 80,
-            "%s" % label,
-            "robot start %s  goal %s  checkpoint %s"
-            % (sim_map.get("start"), sim_map.get("goal"), cps),
-            "result %s  steps %d  map_score %.1f  visited_checkpoint %s"
-            % (
-                outcome.get("status", "?"),
-                int(outcome.get("steps", 0)),
-                float(outcome.get("score", 0.0)),
-                visited,
-            ),
-            "%-5s  %-13s  %-13s  %-9s  %-14s  %8s"
-            % ("step", "robot", "next", "dir", "action", "score"),
+            "Map: %s" % map_label,
+            train_log.format_step_log_header(),
         ]
         for entry in outcome.get("log") or []:
-            lines.append(
-                "%-5d  (%d,%d) ->     (%d,%d) ->     %-3s -> %-3s  %-14s  %+8.1f"
-                % (
-                    int(entry.get("step", 0)),
-                    int(entry.get("x", 0)),
-                    int(entry.get("y", 0)),
-                    int(entry.get("nx", entry.get("x", 0))),
-                    int(entry.get("ny", entry.get("y", 0))),
-                    entry.get("direct", "?"),
-                    entry.get("ndirect", "?"),
-                    entry.get("action", "?"),
-                    float(entry.get("reward", 0.0)),
-                )
-            )
+            lines.append(self._format_step_log(entry).rstrip("\n"))
+        status = outcome.get("status", "?")
+        steps = int(outcome.get("steps", 0))
+        if status == "goal":
+            lines.append("Kết quả: GOAL — %d bước" % steps)
+        elif status == "collision":
+            lines.append("Kết quả: COLLISION — dừng ở bước %d" % steps)
+        else:
+            lines.append("Kết quả: %s (%d bước)" % (status, steps))
         return "\n".join(lines) + "\n"
+
+    def _format_infer_score_summary(self, map_scores, total_score):
+        lines = ["", "=== THỐNG KÊ ĐIỂM CUỐI ==="]
+        for map_label, map_score in map_scores:
+            lines.append(self._format_infer_map_line(map_label, map_score))
+        lines.append(self._format_infer_total_line(total_score))
+        return "\n".join(lines)
 
     def _run_check_infer_all(self):
         if self._running:
             return
-        infer_paths = list_map_files("infer")
-        if not infer_paths:
-            messagebox.showwarning("Check infer", "Khong co map trong map/infer/.")
+        try:
+            infer_paths = self._infer_target_paths()
+        except ValueError as exc:
+            messagebox.showwarning("Check infer", str(exc))
             return
         try:
             policy_bin = self._infer_policy_bin()
@@ -1710,7 +2011,8 @@ class RlApp:
         self._clear_log()
         self.status.set("Checking infer...")
         self._append_log_text(
-            "Check infer: map labels are anonymized; file names and dataset paths are hidden."
+            "Check infer (%s) — thống kê theo công thức: đến đích +400, checkpoint +100, va chạm -100, mỗi action -2."
+            % self._infer_mode_label()
         )
 
         def finish(done, total, stopped=False):
@@ -1725,11 +2027,14 @@ class RlApp:
 
             done = 0
             total = len(infer_paths)
+            total_score = 0.0
+            map_scores = []
+            last_sim = None
+            last_outcome = None
             try:
-                for index, map_path in enumerate(infer_paths, start=1):
+                for map_path in infer_paths:
                     if self._stop_requested:
                         break
-                    label = "infer_map_%03d" % index
                     sim, outcome = rl_runner.run_infer_episode_for_map(
                         map_path,
                         verbose=False,
@@ -1737,8 +2042,14 @@ class RlApp:
                         pause_gate=self._pause_gate,
                         should_stop=lambda: self._stop_requested,
                     )
+                    last_sim = sim
+                    last_outcome = outcome
                     done += 1
-                    text = self._format_check_infer_report(label, sim, outcome)
+                    map_label = sim.get("name") or os.path.basename(map_path)
+                    map_score = float(outcome.get("score", 0.0))
+                    total_score += map_score
+                    map_scores.append((map_label, map_score))
+                    text = self._format_check_infer_report(map_label, sim, outcome)
                     self._ui_async(lambda t=text: self._append_log_text(t))
                     if outcome.get("status") == "stopped":
                         break
@@ -1746,7 +2057,75 @@ class RlApp:
                 self._ui_async(lambda err=exc: self._append_log_text("ERROR: %s" % err))
             finally:
                 stopped = bool(self._stop_requested)
+                if last_sim is not None and self.view.get() == "map":
+                    self._ui_async(lambda s=last_sim, o=last_outcome: self._render_infer_result_map(s, o))
+                summary = self._format_infer_score_summary(map_scores, total_score)
+                self._ui_async(lambda t=summary: self._append_log_text(t))
                 self._ui_async(lambda d=done, t=total, s=stopped: finish(d, t, s))
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def _run_infer_sequence(self, infer_paths):
+        if self._running:
+            return
+        try:
+            policy_bin = self._infer_policy_bin()
+        except FileNotFoundError as exc:
+            messagebox.showwarning("Inference", str(exc))
+            return
+        self._begin_run()
+        self._clear_log()
+        self.status.set("Running sequence...")
+        self._append_log_text(
+            "Inference (%s) — thống kê theo công thức: đến đích +400, checkpoint +100, va chạm -100, mỗi action -2."
+            % self._infer_mode_label()
+        )
+
+        def work():
+            import rl_runner
+
+            done = 0
+            total = len(infer_paths)
+            total_score = 0.0
+            map_scores = []
+            last_sim = None
+            last_outcome = None
+            try:
+                for map_path in infer_paths:
+                    if self._stop_requested:
+                        break
+                    sim, outcome = rl_runner.run_infer_episode_for_map(
+                        map_path,
+                        verbose=False,
+                        policy_bin=policy_bin,
+                        pause_gate=self._pause_gate,
+                        should_stop=lambda: self._stop_requested,
+                    )
+                    last_sim = sim
+                    last_outcome = outcome
+                    done += 1
+                    map_label = sim.get("name") or os.path.basename(map_path)
+                    map_score = float(outcome.get("score", 0.0))
+                    total_score += map_score
+                    map_scores.append((map_label, map_score))
+                    text = self._format_infer_steps_report(map_label, outcome)
+                    self._ui_async(lambda t=text: self._append_log_text(t))
+                    if outcome.get("status") == "stopped":
+                        break
+            except Exception as exc:
+                self._ui_async(lambda err=exc: self._append_log_text("ERROR: %s" % err))
+            finally:
+                if last_sim is not None and self.view.get() == "map":
+                    self._ui_async(lambda s=last_sim, o=last_outcome: self._render_infer_result_map(s, o))
+                summary = self._format_infer_score_summary(map_scores, total_score)
+                self._ui_async(lambda t=summary: self._append_log_text(t))
+                self._ui_async(
+                    lambda d=done, t=total: self.status.set(
+                        ("Stopped - checked %d/%d map(s)" if self._stop_requested else "Done - checked %d map(s)")
+                        % ((d, t) if self._stop_requested else (d,))
+                    )
+                )
+                self._ui_async(self._end_run)
 
         threading.Thread(target=work, daemon=True).start()
 
@@ -1756,20 +2135,31 @@ class RlApp:
         self._begin_run()
         self._clear_log()
         self.status.set("Running...")
+        self._append_log_text(
+            "Inference (%s) — thống kê theo công thức: đến đích +400, checkpoint +100, va chạm -100, mỗi action -2."
+            % self._infer_mode_label()
+        )
 
         def work():
             import rl_runner
 
-            old_stdout = sys.stdout
-            sys.stdout = TextRedirector(self.log, self.root)
             try:
-                rl_runner.run_infer_episode_for_map(
-                    map_path, verbose=True, policy_bin=policy_bin, pause_gate=self._pause_gate
+                sim, outcome = rl_runner.run_infer_episode_for_map(
+                    map_path,
+                    verbose=False,
+                    policy_bin=policy_bin,
+                    pause_gate=self._pause_gate,
+                    should_stop=lambda: self._stop_requested,
                 )
+                map_label = sim.get("name") or os.path.basename(map_path)
+                detail = self._format_infer_steps_report(map_label, outcome)
+                total_score = float(outcome.get("score", 0.0))
+                summary = self._format_infer_score_summary([(map_label, total_score)], total_score)
+                self._ui_async(lambda t=detail: self._append_log_text(t))
+                self._ui_async(lambda t=summary: self._append_log_text(t))
             except Exception as exc:
-                print("ERROR:", exc)
+                self._ui_async(lambda err=exc: self._append_log_text("ERROR: %s" % err))
             finally:
-                sys.stdout = old_stdout
                 self._ui_async(self._run_done)
 
         threading.Thread(target=work, daemon=True).start()
@@ -1786,19 +2176,14 @@ class RlApp:
 
         def work():
             import rl_runner
-
-            old_stdout = sys.stdout
-            sys.stdout = TextRedirector(self.log, self.root)
             try:
                 sim, outcome = rl_runner.run_infer_episode_for_map(
                     map_path, verbose=False, policy_bin=policy_bin, pause_gate=self._pause_gate
                 )
-                self._ui_async(lambda s=sim, o=outcome: self._start_animation(s, o))
+                map_label = sim.get("name") or os.path.basename(map_path)
+                self._ui_async(lambda s=sim, o=outcome, m=map_label: self._start_animation(s, o, m))
             except Exception as exc:
-                print("ERROR:", exc)
                 self._ui_async(lambda err=exc: self._infer_error(err))
-            finally:
-                sys.stdout = old_stdout
 
         threading.Thread(target=work, daemon=True).start()
 
@@ -1807,30 +2192,37 @@ class RlApp:
         self.status.set("Error")
         messagebox.showerror("Error", str(exc))
 
-    def _start_animation(self, sim_map, outcome):
+    def _start_animation(self, sim_map, outcome, map_label=None):
         delay = self._step_delay_ms()
+        map_label = map_label or sim_map.get("name", "?")
 
         self.map_view.load_sim_map(sim_map)
         self.map_view.reset_path()
         self.status.set("Playing...")
-        cps = sim_map.get("checkpoints") or []
-        cp_txt = ("  cp %s" % (cps,)) if cps else ""
         self._append_log_text(
-            "infer %s %dx%d  start %s  goal %s%s\n%s"
-            % (
-                sim_map.get("name", "?"),
-                sim_map["width"],
-                sim_map["height"],
-                sim_map.get("start"),
-                sim_map.get("goal"),
-                cp_txt,
-                train_log.format_step_log_header(),
+            "\n".join(
+                [
+                    "-" * 80,
+                    "Map: %s" % map_label,
+                    train_log.format_step_log_header(),
+                ]
             )
         )
         log = outcome.get("log") or []
-        self._play_steps(log, 0, outcome, delay)
+        self._play_steps(log, 0, outcome, delay, map_label)
 
-    def _play_steps(self, log, index, outcome, delay):
+    def _render_infer_result_map(self, sim_map, outcome):
+        self.map_view.load_sim_map(sim_map)
+        self.map_view.reset_path()
+        log = outcome.get("log") or []
+        if log:
+            self.map_view.show_step(log[-1])
+        status = outcome.get("status", "?")
+        steps = int(outcome.get("steps", 0))
+        score = float(outcome.get("score", 0.0))
+        self.map_view.set_status("Kết quả: %s | bước=%d | điểm=%.1f" % (status, steps, score))
+
+    def _play_steps(self, log, index, outcome, delay, map_label):
         if self._stop_requested:
             self.map_view.set_status("Đã dừng inference")
             self.status.set("Stopped")
@@ -1838,12 +2230,13 @@ class RlApp:
             return
         if self._paused:
             self._anim_after_id = self.root.after(
-                50, lambda: self._play_steps(log, index, outcome, delay)
+                50, lambda: self._play_steps(log, index, outcome, delay, map_label)
             )
             return
         if index >= len(log):
             status = outcome.get("status", "?")
             steps = outcome.get("steps", 0)
+            score = float(outcome.get("score", 0.0))
             if status == "goal":
                 msg = "GOAL — %d bước" % steps
             elif status == "collision":
@@ -1852,14 +2245,17 @@ class RlApp:
                 msg = "Kết thúc: %s (%d bước)" % (status, steps)
             self.map_view.set_status(msg)
             self.status.set("Done — " + msg)
-            self._append_log_text("result: %s" % msg)
+            self._append_log_text("Kết quả: %s" % msg)
+            self._append_log_text(self._format_infer_score_summary([(map_label, score)], score))
             self._end_run()
             return
 
         entry = log[index]
         self.map_view.show_step(entry)
         self._append_step_log(entry)
-        self._anim_after_id = self.root.after(delay, lambda: self._play_steps(log, index + 1, outcome, delay))
+        self._anim_after_id = self.root.after(
+            delay, lambda: self._play_steps(log, index + 1, outcome, delay, map_label)
+        )
 
     def _run_done(self):
         self._end_run()
@@ -1944,6 +2340,7 @@ class RlApp:
         try:
             style_train_treeview(self.train_tree, self.root)
             self.train_tree.configure(height=text_lines(8))
+            self.train_tree.column("on", width=px(34), minwidth=px(30), stretch=False)
             self.train_tree.column("ord", width=px(32), minwidth=px(28))
             self.train_tree.column("name", width=px(160), minwidth=px(72))
             self.train_tree.column("eps", width=px(72), minwidth=px(56))
@@ -1955,7 +2352,11 @@ class RlApp:
         except tk.TclError:
             pass
         try:
-            self.map_list.configure(height=text_lines(12), font=font(10))
+            style_train_treeview(self.infer_tree, self.root)
+            self.infer_tree.configure(height=text_lines(8))
+            self.infer_tree.column("on", width=px(34), minwidth=px(30), stretch=False)
+            self.infer_tree.column("ord", width=px(32), minwidth=px(28))
+            self.infer_tree.column("name", width=px(160), minwidth=px(72))
         except tk.TclError:
             pass
         try:

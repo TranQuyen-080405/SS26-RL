@@ -11,6 +11,7 @@ _OP_DISPLAY = {"+": "+", "-": "−", "*": "×", "/": "÷", "^": "^", "(": "(", "
 _BINARY_OPS = {"+", "-", "*", "/", "^"}
 _PAREN_VALS = {"(", ")"}
 _VALUE_KINDS = {"reward", "num"}
+_INSTANCE_SUFFIX_RE = re.compile(r" #(\d+)$")
 _OP_PARSE = {
     "+": "+",
     "-": "-",
@@ -52,15 +53,41 @@ def labels_sorted():
 
 
 def default_total_formula(enabled_modules):
-    tokens = []
-    for eid, meta in REWARD_ELEMENTS.items():
-        if meta["module"] in enabled_modules:
-            if tokens:
-                tokens.append({"kind": "op", "value": "+", "display": "+"})
-            tokens.append({"kind": "reward", "value": meta["label"], "display": meta["label"]})
-    if not tokens:
-        tokens = [{"kind": "reward", "value": "Mỗi bước đi", "display": "Mỗi bước đi"}]
+    """Công thức mặc định trống — học sinh tự kéo block reward vào."""
+    return []
+
+
+def reward_display_label(label, idx):
+    return "%s #%d" % (label, idx)
+
+
+def apply_reward_instance_displays(tokens):
+    """Gán display #1, #2, ... cho từng block reward trùng loại trong công thức."""
+    label_to_eid = {meta["label"]: eid for eid, meta in REWARD_ELEMENTS.items()}
+    counts = {}
+    for tok in tokens or []:
+        if tok.get("kind") != "reward":
+            continue
+        label = tok.get("value") or ""
+        base = _INSTANCE_SUFFIX_RE.sub("", label).strip()
+        if base in label_to_eid:
+            label = base
+            tok["value"] = base
+        eid = label_to_eid.get(label)
+        if not eid:
+            continue
+        counts[eid] = counts.get(eid, 0) + 1
+        tok["display"] = reward_display_label(REWARD_ELEMENTS[eid]["label"], counts[eid])
     return tokens
+
+
+def strip_instance_suffixes_from_expr(expr):
+    """Chuẩn hóa 'Label #2' → 'Label' để biên dịch công thức."""
+    s = migrate_reward_labels(normalize_student_ops(str(expr or "")))
+    labels = sorted({meta["label"] for meta in REWARD_ELEMENTS.values()}, key=len, reverse=True)
+    for lbl in labels:
+        s = re.sub(re.escape(lbl) + r" #\d+", lbl, s)
+    return s
 
 
 def tokens_to_expr(tokens):
@@ -73,7 +100,7 @@ def tokens_to_expr(tokens):
         if kind == "reward":
             if parts and parts[-1] not in "(+-*/^":
                 parts.append(" ")
-            parts.append(val)
+            parts.append(t.get("display") or val)
         elif kind == "num":
             if parts and parts[-1] not in "(+-*/^":
                 parts.append(" ")
@@ -99,8 +126,12 @@ def parse_expr_to_tokens(expr, known_labels):
             continue
         for lbl in labels:
             if s[i:].startswith(lbl):
+                end = i + len(lbl)
+                suffix = re.match(r" #(\d+)", s[end:])
+                if suffix:
+                    end += suffix.end()
                 tokens.append({"kind": "reward", "value": lbl, "display": lbl})
-                i += len(lbl)
+                i = end
                 break
         else:
             ch = s[i]
@@ -123,7 +154,7 @@ def parse_expr_to_tokens(expr, known_labels):
                 i += len(num)
                 continue
             i += 1
-    return tokens
+    return apply_reward_instance_displays(tokens)
 
 
 def _token_parts(token):
@@ -203,7 +234,7 @@ def validate_formula_tokens(tokens):
 def compile_student_formula(expr, enabled_eids):
     if not expr or not str(expr).strip():
         return ""
-    s = migrate_reward_labels(normalize_student_ops(expr))
+    s = strip_instance_suffixes_from_expr(expr)
     for lbl, eid in labels_sorted():
         if lbl not in s:
             continue

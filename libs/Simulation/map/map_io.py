@@ -18,6 +18,7 @@ _REPO_ROOT = app_data_path()
 MAP_ROOT = app_data_path("map")
 TRAIN_MAPS_DIR = os.path.join(MAP_ROOT, "train")
 INFER_MAPS_DIR = os.path.join(MAP_ROOT, "infer")
+MAX_TRAIN_MAP_DIM = 5
 BUNDLED_MAP_ROOT = bundled_path("map")
 BUNDLED_INFER_MAPS_DIR = os.path.join(BUNDLED_MAP_ROOT, "infer")
 # Backward-compatible import name.
@@ -130,6 +131,36 @@ def save_map_json(spec, path=None, kind=None):
 def load_map_json(path):
     with open(path, "r", encoding="utf-8") as f:
         return _normalize_spec(json.load(f))
+
+
+def find_oversized_train_maps(max_dim=MAX_TRAIN_MAP_DIM, paths=None):
+    """Return [(basename, width, height), ...] for train maps larger than max_dim."""
+    paths = paths if paths is not None else list_map_files("train")
+    oversize = []
+    for path in paths:
+        name = os.path.basename(path)
+        try:
+            spec = load_map_json(path)
+            w, h = int(spec["width"]), int(spec["height"])
+            if w > max_dim or h > max_dim:
+                oversize.append((name, w, h))
+        except (OSError, ValueError, KeyError, json.JSONDecodeError, TypeError):
+            oversize.append((name, None, None))
+    return oversize
+
+
+def format_oversized_train_maps_message(oversized, max_dim=MAX_TRAIN_MAP_DIM):
+    lines = []
+    for name, w, h in oversized:
+        if w is None:
+            lines.append("%s (không đọc được file)" % name)
+        else:
+            lines.append("%s (%dx%d)" % (name, w, h))
+    body = "\n".join(lines)
+    return (
+        "Không thể train: mọi map trong map/train phải tối đa %dx%d.\n\n"
+        "Các map vượt giới hạn:\n%s" % (max_dim, max_dim, body)
+    )
 
 
 def build_sim_map(spec):

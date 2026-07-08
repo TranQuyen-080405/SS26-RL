@@ -5,8 +5,22 @@ import tkinter.font as tkfont
 from tkinter import ttk
 
 from RL_lib.lab_registry import REWARD_ELEMENTS
-from RL_lib.student_formula import parse_expr_to_tokens, tokens_to_expr, validate_formula_tokens
+from RL_lib.student_formula import (
+    apply_reward_instance_displays,
+    parse_expr_to_tokens,
+    tokens_to_expr,
+    validate_formula_tokens,
+)
 from Ui_app.ui_scale import font, px, scale
+from Ui_app.ui_chips import (
+    build_reward_title,
+    chip_container_bg,
+    make_formula_chip,
+    make_palette_chip,
+    measure_instance_badge_width,
+    set_rounded_block_bg,
+    split_reward_display,
+)
 
 # Màu chip reward theo state module
 _MODULE_CHIP = {
@@ -75,7 +89,7 @@ class FormulaBuilder(ttk.Frame):
         lbl1.pack(anchor=tk.W)
         self._title_labels.append((lbl1, 9, "bold", False))
 
-        self._pal_inner = tk.Frame(self, bg="#eceff4")
+        self._pal_inner = tk.Frame(self, bg=chip_container_bg())
         self._pal_inner.pack(fill=tk.X, pady=(0, 4))
         self._pal_inner.bind("<Configure>", self._on_palette_frame_configure)
 
@@ -94,23 +108,29 @@ class FormulaBuilder(ttk.Frame):
         chip_wrap = tk.Frame(bar_outer, bg=_BAR_BG)
         chip_wrap.pack(side=tk.LEFT, fill=tk.X, expand=True)
 
-        self._chip_canvas = tk.Canvas(
-            chip_wrap, height=px(44), bg=_BAR_BG, highlightthickness=2, highlightbackground=_BAR_BORDER_OK
+        self._chip_bar = tk.Frame(
+            chip_wrap,
+            bg=_BAR_BG,
+            highlightthickness=2,
+            highlightbackground=_BAR_BORDER_OK,
         )
-        self._chip_canvas.configure(takefocus=True)
-        self._chip_canvas.pack(side=tk.TOP, fill=tk.X, expand=True)
-        self._chip_inner = tk.Frame(self._chip_canvas, bg=_BAR_BG)
-        self._chip_win = self._chip_canvas.create_window(
-            (_INNER_PAD, _INNER_PAD), window=self._chip_inner, anchor=tk.NW
-        )
+        self._chip_bar_border = _BAR_BORDER_OK
+        self._chip_bar.pack(side=tk.TOP, fill=tk.X, expand=True)
+        self._chip_inner = tk.Frame(self._chip_bar, bg=_BAR_BG)
+        self._chip_inner.pack(fill=tk.X, padx=_INNER_PAD, pady=_INNER_PAD)
         self._chip_inner.bind("<Configure>", self._on_inner_configure)
-        self._resize_after_id = None
-        self._chip_canvas.bind("<Configure>", self._on_canvas_configure_debounced)
+        self._palette_resize_after_id = None
+        self._chip_resize_after_id = None
+        self._redraw_after_id = None
+        self._last_render_sig = None
+        self._chip_bar_last_h = 0
+        self._inner_configure_after_id = None
+        self._last_layout_w = -1
         for seq in ("<MouseWheel>", "<Shift-MouseWheel>", "<Button-4>", "<Button-5>"):
-            self._chip_canvas.bind(seq, self._on_formula_wheel)
+            self._chip_bar.bind(seq, self._on_formula_wheel)
             self._chip_inner.bind(seq, self._on_formula_wheel)
 
-        for w in (self._chip_canvas, self._chip_inner, bar_outer, self):
+        for w in (self._chip_bar, self._chip_inner):
             w.bind("<BackSpace>", self._on_backspace)
             w.bind("<Delete>", self._on_backspace)
             w.bind("<Button-1>", self._focus_bar)
@@ -149,21 +169,8 @@ class FormulaBuilder(ttk.Frame):
         self._title_labels.append((op_lbl, 8, "normal", False))
         for sym, disp in (("+", "+"), ("-", "−"), ("*", "×"), ("^", "^")):
             style = _OP_CHIP.get(sym, _DEFAULT_OP)
-            btn = tk.Button(
-                op,
-                text=disp,
-                width=3,
-                bg=style["bg"],
-                fg=style["fg"],
-                activebackground=style["bg"],
-                relief=tk.RAISED,
-                bd=1,
-                font=font(9, weight="bold"),
-                cursor="hand2",
-            )
+            btn = self._make_op_chip(op, sym, disp, style, "new_op")
             btn.pack(side=tk.LEFT, padx=1)
-            btn.bind("<ButtonPress-1>", lambda e, s=sym: self._op_press(e, s))
-            btn.bind("<B1-Motion>", self._palette_motion)
             self._op_buttons.append(btn)
 
         paren_row = ttk.Frame(self)
@@ -173,21 +180,8 @@ class FormulaBuilder(ttk.Frame):
         self._title_labels.append((paren_lbl, 8, "normal", False))
         for sym in ("(", ")"):
             style = _PAREN_CHIP[sym]
-            btn = tk.Button(
-                paren_row,
-                text=sym,
-                width=3,
-                bg=style["bg"],
-                fg=style["fg"],
-                activebackground=style["bg"],
-                relief=tk.RAISED,
-                bd=1,
-                font=font(9, weight="bold"),
-                cursor="hand2",
-            )
+            btn = self._make_op_chip(paren_row, sym, sym, style, "new_paren")
             btn.pack(side=tk.LEFT, padx=1)
-            btn.bind("<ButtonPress-1>", lambda e, s=sym: self._paren_press(e, s))
-            btn.bind("<B1-Motion>", self._palette_motion)
             self._op_buttons.append(btn)
 
         num_row = ttk.Frame(self)
@@ -209,15 +203,28 @@ class FormulaBuilder(ttk.Frame):
         kind = token["kind"]
         if kind == "reward":
             s = self._reward_palette(token["value"])
-            return {"bg": s["bg"], "fg": s["fg"], "font": ("", 9, "bold")}, 8, 4
+            return {"bg": s["bg"], "fg": s["fg"], "font": ("", 8, "bold")}, 6, 2
         if kind == "num":
-            return {**_CHIP_NUM, "font": ("", 9, "bold")}, 6, 4
+            return {**_CHIP_NUM, "font": ("", 8, "bold")}, 4, 2
         if kind == "paren":
             s = _PAREN_CHIP.get(token["value"], _DEFAULT_OP)
-            return {"bg": s["bg"], "fg": s["fg"], "font": ("", 10, "bold")}, 5, 4
+            return {"bg": s["bg"], "fg": s["fg"], "font": ("", 9, "bold")}, 3, 2
         sym = token["value"]
         s = _OP_CHIP.get(sym, _DEFAULT_OP)
-        return {"bg": s["bg"], "fg": s["fg"], "font": ("", 10, "bold")}, 5, 4
+        return {"bg": s["bg"], "fg": s["fg"], "font": ("", 9, "bold")}, 3, 2
+
+    def _dim_chip_widget(self, widget, bg, fg):
+        try:
+            if isinstance(widget, tk.Label):
+                widget.configure(bg=bg, fg=fg)
+            elif isinstance(widget, tk.Frame):
+                widget.configure(bg=bg)
+                for child in widget.winfo_children():
+                    self._dim_chip_widget(child, bg, fg)
+            elif isinstance(widget, tk.Canvas):
+                widget.configure(bg=bg)
+        except tk.TclError:
+            pass
 
     def _token_for_label(self, label):
         return {"kind": "reward", "value": label, "display": label}
@@ -232,30 +239,69 @@ class FormulaBuilder(ttk.Frame):
     def _token_for_paren(self, sym):
         return {"kind": "paren", "value": sym, "display": sym}
 
-    def _on_palette_frame_configure(self, event):
-        w = event.width
-        if w <= 1 or w == self._palette_built_w:
-            return
-        self._rebuild_palette(w)
-
     def _make_palette_button(self, parent, lbl):
         pal = self._reward_palette(lbl)
-        btn = tk.Button(
+        return make_palette_chip(
             parent,
-            text=lbl,
-            bg=pal["bg"],
-            fg=pal["fg"],
-            activebackground=pal["active"],
-            relief=tk.RAISED,
-            bd=2,
-            padx=px(6),
-            pady=px(2),
-            font=font(8, weight="bold"),
-            cursor="hand2",
+            lbl,
+            pal["bg"],
+            pal["fg"],
+            pal["active"],
+            self._palette_font,
+            self._palette_press,
+            self._palette_motion,
+            canvas_bg=chip_container_bg(),
         )
-        btn.bind("<ButtonPress-1>", lambda e, l=lbl: self._palette_press(e, l))
-        btn.bind("<B1-Motion>", self._palette_motion)
-        return btn
+
+    def _make_op_chip(self, parent, sym, disp, style, drag_mode):
+        active_bg = style.get("active", style["bg"])
+
+        def _press(event, s=sym, mode=drag_mode):
+            if mode == "new_op":
+                self._op_press(event, s)
+            else:
+                self._paren_press(event, s)
+
+        chip = make_palette_chip(
+            parent,
+            disp,
+            style["bg"],
+            style["fg"],
+            active_bg,
+            self._palette_font,
+            _press,
+            self._palette_motion,
+            canvas_bg=chip_container_bg(),
+        )
+        chip._op_sym = sym
+        chip._drag_mode = drag_mode
+        return chip
+
+    def _palette_chip_from_widget(self, widget):
+        w = widget
+        while w is not None:
+            if getattr(w, "_palette_label", None):
+                return w
+            try:
+                w = w.master
+            except (AttributeError, tk.TclError):
+                break
+        return None
+
+    def _set_palette_chip_pressed(self, chip, pressed):
+        if chip is None or not chip.winfo_exists():
+            return
+        if getattr(chip, "_op_sym", None) is not None:
+            sym = chip._op_sym
+            style = _OP_CHIP.get(sym) or _PAREN_CHIP.get(sym, _DEFAULT_OP)
+            bg = style.get("active", style["bg"]) if pressed else style["bg"]
+        else:
+            pal = self._reward_palette(chip._palette_label)
+            bg = pal["active"] if pressed else pal["bg"]
+        chip._chip_bg = bg
+        chip.inner.configure(bg=bg)
+        chip._label.configure(bg=bg)
+        chip._redraw()
 
     def _measure_palette_btn(self, lbl):
         return self._palette_font.measure(lbl) + 20
@@ -282,7 +328,7 @@ class FormulaBuilder(ttk.Frame):
         for lbl in self._known_labels:
             bw = self._measure_palette_btn(lbl)
             if row is None or (row_w > 0 and row_w + gap + bw > width):
-                row = tk.Frame(self._pal_inner, bg="#eceff4")
+                row = tk.Frame(self._pal_inner, bg=chip_container_bg())
                 row.pack(fill=tk.X, anchor=tk.W)
                 row_w = 0
             btn = self._make_palette_button(row, lbl)
@@ -293,31 +339,64 @@ class FormulaBuilder(ttk.Frame):
     def _focus_bar(self, _event=None):
         if self._drag and self._drag.get("active"):
             return
-        self._chip_canvas.focus_set()
-
-    def _on_inner_configure(self, event):
-        self._chip_canvas.configure(scrollregion=self._chip_canvas.bbox("all"))
-        h = max(px(44), event.height + _INNER_PAD * 2)
-        self._chip_canvas.configure(height=h)
-        if self._drag and self._drag.get("active"):
-            self._refresh_drop_visual(self._drag.get("insert_idx", 0))
-
-    def _on_canvas_configure_debounced(self, event):
-        if self._resize_after_id:
-            self.after_cancel(self._resize_after_id)
-        w = event.width
-        self._resize_after_id = self.after(80, lambda: self._on_canvas_configure(w))
-
-    def _on_canvas_configure(self, w):
-        self._resize_after_id = None
-        if w <= 1 or w == self._last_layout_w:
-            return
-        self._last_layout_w = w
         try:
-            self._chip_canvas.itemconfig(self._chip_win, width=w - _INNER_PAD * 2)
+            self._chip_bar.focus_set()
         except tk.TclError:
             pass
+
+    def _on_palette_frame_configure(self, event):
+        w = event.width
+        if w <= 1 or abs(w - self._palette_built_w) < 8:
+            return
+        if self._palette_resize_after_id:
+            self.after_cancel(self._palette_resize_after_id)
+        self._palette_resize_after_id = self.after(150, lambda w=w: self._rebuild_palette_debounced(w))
+
+    def _rebuild_palette_debounced(self, w):
+        self._palette_resize_after_id = None
+        if w <= 1 or abs(w - self._palette_built_w) < 8:
+            return
+        self._rebuild_palette(w)
+
+    def _on_chip_bar_configure_debounced(self, event):
+        if self._drag and self._drag.get("active"):
+            return
+        w = event.width
+        if w <= 1 or abs(w - self._last_layout_w) < 12:
+            return
+        if self._chip_resize_after_id:
+            self.after_cancel(self._chip_resize_after_id)
+        self._chip_resize_after_id = self.after(150, lambda w=w: self._on_chip_bar_resize(w))
+
+    def _on_chip_bar_resize(self, w):
+        self._chip_resize_after_id = None
+        if w <= 1 or abs(w - self._last_layout_w) < 12:
+            return
+        self._last_layout_w = w
         self._redraw_chips()
+
+    def _on_inner_configure(self, event):
+        if self._inner_configure_after_id:
+            return
+        self._inner_configure_after_id = self.after(50, self._apply_chip_bar_height)
+
+    def _apply_chip_bar_height(self):
+        self._inner_configure_after_id = None
+        try:
+            h = max(px(34), self._chip_inner.winfo_reqheight() + _INNER_PAD * 2)
+        except tk.TclError:
+            return
+        if abs(h - self._chip_bar_last_h) < 3:
+            if self._drag and self._drag.get("active"):
+                self._refresh_drop_visual(self._drag.get("insert_idx", 0))
+            return
+        self._chip_bar_last_h = h
+        try:
+            self._chip_bar.configure(height=h)
+        except tk.TclError:
+            pass
+        if self._drag and self._drag.get("active"):
+            self._refresh_drop_visual(self._drag.get("insert_idx", 0))
 
     def _on_formula_wheel(self, event):
         return "break"
@@ -347,7 +426,9 @@ class FormulaBuilder(ttk.Frame):
         self._error_msg = msg
         border = _BAR_BORDER_OK if ok else _BAR_BORDER_ERR
         try:
-            self._chip_canvas.configure(highlightbackground=border, highlightthickness=2)
+            if self._chip_bar_border != border:
+                self._chip_bar_border = border
+                self._chip_bar.configure(highlightbackground=border, highlightthickness=2)
         except tk.TclError:
             pass
         if ok:
@@ -468,7 +549,7 @@ class FormulaBuilder(ttk.Frame):
         return best_idx
 
     def _is_over_formula_bar(self, x_root, y_root):
-        target = self._bar_outer if self._bar_outer and self._bar_outer.winfo_exists() else self._chip_canvas
+        target = self._bar_outer if self._bar_outer and self._bar_outer.winfo_exists() else self._chip_bar
         if not target.winfo_exists():
             return False
         x1 = target.winfo_rootx()
@@ -530,18 +611,27 @@ class FormulaBuilder(ttk.Frame):
         except tk.TclError:
             pass
         self._ghost.attributes("-topmost", True)
-        lbl = tk.Label(
-            self._ghost,
-            text=" %s " % token["display"],
-            bg=style["bg"],
-            fg=style["fg"],
-            font=style["font"],
-            relief=tk.RIDGE,
-            bd=3,
-            padx=padx,
-            pady=pady,
-        )
-        lbl.pack()
+        wrap = tk.Frame(self._ghost, bg=style["bg"])
+        if token.get("kind") == "reward":
+            title, idx = split_reward_display(token.get("display", token.get("value", "")))
+            body = tk.Frame(wrap, bg=style["bg"])
+            body.pack(padx=6, pady=4)
+            title_row, _ = build_reward_title(body, title, idx, style["bg"], style["fg"], font_size=9)
+            title_row.pack(side=tk.LEFT)
+        else:
+            lbl = tk.Label(
+                wrap,
+                text=" %s " % token["display"],
+                bg=style["bg"],
+                fg=style["fg"],
+                font=style["font"],
+                relief=tk.RIDGE,
+                bd=3,
+                padx=padx,
+                pady=pady,
+            )
+            lbl.pack()
+        wrap.pack()
         self._move_ghost(event)
 
     def _move_ghost(self, event):
@@ -565,10 +655,9 @@ class FormulaBuilder(ttk.Frame):
             idx = self._drag["from"]
             if 0 <= idx < len(self._chip_frames):
                 fr = self._chip_frames[idx]
-                fr.configure(bg="#45475a")
-                for child in fr.winfo_children():
-                    if not getattr(child, "_is_del_btn", False):
-                        child.configure(fg="#6c7086", bg="#45475a")
+                set_rounded_block_bg(fr, "#45475a", "#6c7086")
+        elif mode in ("new", "new_op", "new_paren") and self._drag.get("source_chip"):
+            self._set_palette_chip_pressed(self._drag.get("source_chip"), True)
         elif mode in ("new", "new_op", "new_paren") and self._drag.get("source_btn"):
             try:
                 self._drag["source_btn"].configure(relief=tk.SUNKEN)
@@ -590,12 +679,25 @@ class FormulaBuilder(ttk.Frame):
             if self._drag.get("insert_idx") != insert_at:
                 self._drag["insert_idx"] = insert_at
                 self._refresh_drop_visual(insert_at)
-            self._chip_canvas.configure(highlightbackground="#a6e3a1")
+            if self._chip_bar_border != "#a6e3a1":
+                self._chip_bar_border = "#a6e3a1"
+                self._chip_bar.configure(highlightbackground="#a6e3a1")
         else:
             if self._drag.get("insert_idx") is not None:
                 self._drag["insert_idx"] = None
                 self._hide_drop_visual()
-            self._chip_canvas.configure(highlightbackground="#45475a")
+            if self._chip_bar_border != "#45475a":
+                self._chip_bar_border = "#45475a"
+                self._chip_bar.configure(highlightbackground="#45475a")
+
+    def _reset_chip_bar_border(self):
+        border = _BAR_BORDER_OK if self._valid else _BAR_BORDER_ERR
+        if self._chip_bar_border != border:
+            self._chip_bar_border = border
+            try:
+                self._chip_bar.configure(highlightbackground=border)
+            except tk.TclError:
+                pass
 
     def _finish_drag(self, event):
         if not self._drag:
@@ -604,6 +706,8 @@ class FormulaBuilder(ttk.Frame):
         self._drag = None
         self._hide_ghost()
         self._hide_drop_visual()
+        self._reset_chip_bar_border()
+        self._set_palette_chip_pressed(drag.get("source_chip"), False)
         source_btn = drag.get("source_btn")
         if source_btn and source_btn.winfo_exists():
             try:
@@ -612,18 +716,21 @@ class FormulaBuilder(ttk.Frame):
                 pass
 
         if not drag.get("active"):
+            src_chip = drag.get("source_chip")
+            hit_chip = self._palette_chip_from_widget(event.widget)
+            same_palette = src_chip is not None and hit_chip is src_chip
             src = drag.get("source_btn")
             if drag.get("mode") == "new" and drag.get("label"):
-                if src is None or event.widget is src:
+                if same_palette or src is None or event.widget is src:
                     self.append_reward(drag["label"])
             elif drag.get("mode") == "new_op" and drag.get("op_sym"):
-                if src is None or event.widget is src:
+                if same_palette or src_chip is None or hit_chip is src_chip:
                     self.append_op(drag["op_sym"])
             elif drag.get("mode") == "new_paren" and drag.get("paren_sym"):
-                if src is None or event.widget is src:
+                if same_palette or src_chip is None or hit_chip is src_chip:
                     self.append_paren(drag["paren_sym"])
             elif drag.get("mode") == "reorder":
-                self._chip_canvas.focus_set()
+                self._chip_bar.focus_set()
             return
 
         if not self._is_over_formula_bar(event.x_root, event.y_root):
@@ -639,6 +746,7 @@ class FormulaBuilder(ttk.Frame):
             self._notify()
 
     def _palette_press(self, event, label):
+        chip = self._palette_chip_from_widget(event.widget)
         self._drag = {
             "mode": "new",
             "from": None,
@@ -646,6 +754,7 @@ class FormulaBuilder(ttk.Frame):
             "op_sym": None,
             "token": self._token_for_label(label),
             "source_btn": event.widget,
+            "source_chip": chip,
             "x0": event.x_root,
             "y0": event.y_root,
             "active": False,
@@ -653,6 +762,7 @@ class FormulaBuilder(ttk.Frame):
         }
 
     def _op_press(self, event, sym):
+        chip = self._palette_chip_from_widget(event.widget)
         self._drag = {
             "mode": "new_op",
             "from": None,
@@ -660,7 +770,8 @@ class FormulaBuilder(ttk.Frame):
             "op_sym": sym,
             "paren_sym": None,
             "token": self._token_for_op(sym),
-            "source_btn": event.widget,
+            "source_btn": None,
+            "source_chip": chip,
             "x0": event.x_root,
             "y0": event.y_root,
             "active": False,
@@ -668,6 +779,7 @@ class FormulaBuilder(ttk.Frame):
         }
 
     def _paren_press(self, event, sym):
+        chip = self._palette_chip_from_widget(event.widget)
         self._drag = {
             "mode": "new_paren",
             "from": None,
@@ -675,7 +787,8 @@ class FormulaBuilder(ttk.Frame):
             "op_sym": None,
             "paren_sym": sym,
             "token": self._token_for_paren(sym),
-            "source_btn": event.widget,
+            "source_btn": None,
+            "source_chip": chip,
             "x0": event.x_root,
             "y0": event.y_root,
             "active": False,
@@ -711,8 +824,13 @@ class FormulaBuilder(ttk.Frame):
             return
         drag = self._drag
         if not drag.get("active") and drag.get("mode") in ("new", "new_op", "new_paren"):
+            src_chip = drag.get("source_chip")
+            hit_chip = self._palette_chip_from_widget(event.widget)
+            if src_chip is not None and hit_chip is not src_chip:
+                self._finish_drag_silent()
+                return
             src = drag.get("source_btn")
-            if src is not None and event.widget is not src:
+            if src is not None and event.widget is not src and src_chip is None:
                 self._finish_drag_silent()
                 return
         self._finish_drag(event)
@@ -731,24 +849,33 @@ class FormulaBuilder(ttk.Frame):
     def _make_chip_frame(self, parent_frame, index, token):
         style, padx, pady = self._chip_style(token)
         bg = style["bg"]
-        outer = tk.Frame(parent_frame, bg=bg, relief=tk.RAISED, bd=2, cursor="hand2")
-        outer.pack(side=tk.LEFT, padx=2, pady=4)
+        fg = style["fg"]
+        block = make_formula_chip(parent_frame, bg, surround_bg=_BAR_BG, cursor="hand2")
+        block.pack(side=tk.LEFT, padx=2, pady=4)
+        inner = block.inner
 
-        chip = tk.Label(
-            outer,
-            text=" %s " % token["display"],
-            bg=bg,
-            fg=style["fg"],
-            font=style["font"],
-            bd=0,
-            padx=padx + 4,
-            pady=pady + 2,
-            cursor="hand2",
-        )
-        chip.pack()
+        if token.get("kind") == "reward":
+            title, idx = split_reward_display(token.get("display", token.get("value", "")))
+            title_row, title_lbl = build_reward_title(inner, title, idx, bg, fg, font_size=8)
+            title_row.pack(side=tk.LEFT, padx=(padx, padx + px(12)), pady=pady)
+            drag_targets = [title_row, title_lbl, inner, block, block.canvas]
+        else:
+            chip = tk.Label(
+                inner,
+                text=" %s " % token["display"],
+                bg=bg,
+                fg=fg,
+                font=style["font"],
+                bd=0,
+                padx=padx + 2,
+                pady=pady + 1,
+                cursor="hand2",
+            )
+            chip.pack(padx=(0, px(12)))
+            drag_targets = [chip, inner, block, block.canvas]
 
         del_btn = tk.Label(
-            outer,
+            block,
             text="×",
             bg="#1e1e2e",
             fg="#9399b2",
@@ -758,22 +885,51 @@ class FormulaBuilder(ttk.Frame):
             pady=0,
         )
         del_btn._is_del_btn = True
-        del_btn.place(relx=1.0, rely=0.0, anchor=tk.NE, x=-1, y=1)
+        # Giữ nút xóa trong block, né nội dung bằng phần đệm bên phải.
+        del_btn.place(relx=1.0, rely=0.0, anchor=tk.NE, x=-2, y=2)
         del_btn.bind("<Button-1>", lambda e, i=index: self._on_delete_click(e, i))
         del_btn.bind("<Enter>", lambda e, w=del_btn: w.configure(bg="#f38ba8", fg="#1e1e2e"))
         del_btn.bind("<Leave>", lambda e, w=del_btn: w.configure(bg="#1e1e2e", fg="#9399b2"))
 
-        self._chip_frames.append(outer)
-        self._bind_chip_drag(chip, index)
-        return outer
+        self._chip_frames.append(block)
+        for target in drag_targets:
+            self._bind_chip_drag(target, index)
+        return block
 
     def _measure_chip_width(self, token):
-        text = token["display"]
-        w = self._palette_font.measure(" %s " % text) + 26
-        w += 14  # space for "×" button
+        if token.get("kind") == "reward":
+            title, idx = split_reward_display(token.get("display", ""))
+            w = self._palette_font.measure(" %s " % title)
+            if idx is not None:
+                w += measure_instance_badge_width()
+        else:
+            w = self._palette_font.measure(" %s " % token["display"])
+        w += 26
+        w += 14
         return w
 
     def _redraw_chips(self):
+        if self._redraw_after_id:
+            self.after_cancel(self._redraw_after_id)
+        self._redraw_after_id = self.after(60, self._redraw_chips_now)
+
+    def _redraw_chips_now(self):
+        self._redraw_after_id = None
+        if self._drag and self._drag.get("active"):
+            return
+        apply_reward_instance_displays(self._tokens)
+        width = self._chip_bar.winfo_width()
+        if width <= 1:
+            width = self.winfo_width()
+        if width <= 1:
+            width = 400
+        max_w = max(100, width - 24)
+        token_sig = tuple((t.get("kind"), t.get("value"), t.get("display")) for t in self._tokens)
+        render_sig = (token_sig, max_w)
+        if render_sig == self._last_render_sig:
+            self._validate_and_update()
+            return
+        self._last_render_sig = render_sig
         self._chip_frames = []
         for w in self._chip_inner.winfo_children():
             if w is getattr(self, "_drop_indicator", None):
@@ -795,13 +951,6 @@ class FormulaBuilder(ttk.Frame):
             self._validate_and_update()
             return
 
-        width = self._chip_canvas.winfo_width()
-        if width <= 1:
-            width = self.winfo_width()
-        if width <= 1:
-            width = 400
-
-        max_w = max(100, width - 24)
         row = None
         row_w = 0
         gap = 4
@@ -819,6 +968,8 @@ class FormulaBuilder(ttk.Frame):
         self._validate_and_update()
 
     def _finish_drag_silent(self):
+        if self._drag:
+            self._set_palette_chip_pressed(self._drag.get("source_chip"), False)
         if self._drag and self._drag.get("source_btn"):
             btn = self._drag["source_btn"]
             if btn.winfo_exists():
@@ -829,18 +980,27 @@ class FormulaBuilder(ttk.Frame):
         self._drag = None
         self._hide_ghost()
         self._hide_drop_visual()
+        self._reset_chip_bar_border()
 
     def is_dragging(self):
         return self._drag is not None
 
     def refresh_scale(self):
+        self._last_render_sig = None
         for w, sz, wt, _ in self._title_labels:
             w.configure(font=font(sz, weight=wt))
-        self._chip_canvas.configure(height=px(44))
+        try:
+            if self._chip_bar_last_h:
+                self._chip_bar.configure(height=max(px(44), self._chip_bar_last_h))
+        except tk.TclError:
+            pass
         for btn in self._bar_buttons:
             btn.configure(font=font(8, weight="bold"))
         for btn in self._op_buttons:
-            btn.configure(font=font(9, weight="bold"))
+            try:
+                btn._label.configure(font=font(9, weight="bold"))
+            except (AttributeError, tk.TclError):
+                pass
         self._err_lbl.configure(font=font(9, weight="bold"))
         self._palette_font.configure(size=max(7, int(round(8 * scale()))))
         self._palette_built_w = -1

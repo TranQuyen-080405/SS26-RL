@@ -140,6 +140,63 @@ def _apply_ttk_defaults(root: tk.Misc) -> None:
         style.theme_use("clam")
     except tk.TclError:
         pass
+    if sys.platform == "darwin":
+        # macOS Aqua có thể làm lệch màu ttk (nền/field/selected).
+        # Ép palette trung tính để tránh chữ chìm hoặc nền trắng loang.
+        bg = "#1e1e2e"
+        panel = "#313244"
+        panel_alt = "#45475a"
+        fg = "#cdd6f4"
+        muted = "#6c7086"
+        accent = "#89b4fa"
+        try:
+            root.configure(bg=bg)
+        except tk.TclError:
+            pass
+        for name in (".", "TFrame", "TLabelframe", "TLabelframe.Label", "TLabel"):
+            try:
+                style.configure(name, background=bg, foreground=fg)
+            except tk.TclError:
+                pass
+        for name in ("TEntry", "TSpinbox", "TCombobox"):
+            try:
+                style.configure(
+                    name,
+                    fieldbackground=panel,
+                    background=panel,
+                    foreground=fg,
+                    insertcolor=fg,
+                )
+                style.map(
+                    name,
+                    fieldbackground=[("readonly", panel_alt), ("disabled", panel_alt)],
+                    foreground=[("disabled", muted), ("readonly", fg)],
+                )
+            except tk.TclError:
+                pass
+        try:
+            style.configure("TButton", background=panel_alt, foreground=fg)
+            style.map(
+                "TButton",
+                background=[("active", panel), ("pressed", panel_alt), ("disabled", panel_alt)],
+                foreground=[("disabled", muted), ("active", fg)],
+            )
+        except tk.TclError:
+            pass
+        try:
+            style.configure("TCheckbutton", background=bg, foreground=fg)
+            style.configure("TRadiobutton", background=bg, foreground=fg)
+        except tk.TclError:
+            pass
+        try:
+            style.configure("Treeview", background=panel, fieldbackground=panel, foreground=fg)
+            style.map(
+                "Treeview",
+                background=[("selected", accent)],
+                foreground=[("selected", "#11111b")],
+            )
+        except tk.TclError:
+            pass
     pad = btn_padding()
     f = font(10)
     f_btn = font(10)

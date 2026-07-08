@@ -31,11 +31,30 @@ from Ui_app.map_layout import apply_fixed_canvas, avail_from_wrap, fit_grid_layo
 from Ui_app.ui_scale import configure_window, init as init_ui_scale, px, font
 
 
+def _apply_app_icon(root):
+    base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+    candidates = (
+        os.path.join(base_dir, "assets", "logo.png"),
+        os.path.join(base_dir, "res", "logo.png"),
+    )
+    for icon_path in candidates:
+        if not os.path.isfile(icon_path):
+            continue
+        try:
+            icon = tk.PhotoImage(file=icon_path)
+            root.iconphoto(True, icon)
+            root._app_icon = icon
+            return
+        except tk.TclError:
+            continue
+
+
 class MapEditorApp:
     def __init__(self, parent=None, root=None, on_saved=None):
         if parent is None:
             self.root = tk.Tk()
             self.root.title("SS26 Map Editor")
+            _apply_app_icon(self.root)
             init_ui_scale(self.root)
             configure_window(self.root, width=1000, height=700, min_width=720, min_height=560)
             self.container = self.root
@@ -113,9 +132,6 @@ class MapEditorApp:
         self.btn_apply_size.grid(row=0, column=4, padx=4)
 
         ttk.Separator(bar, orient=tk.VERTICAL).grid(row=0, column=5, sticky="ns", padx=12)
-
-        ttk.Label(bar, text="Name").grid(row=0, column=6, padx=(0, 4))
-        ttk.Entry(bar, textvariable=self.map_name, width=14).grid(row=0, column=7, padx=(0, 12))
 
         row2 = ttk.Frame(self.container, padding=(8, 0, 8, 8))
         row2.pack(fill=tk.X)
@@ -684,15 +700,18 @@ class MapEditorApp:
     def _save_map(self, kind):
         if not self._validate_size_for_kind(kind):
             return
+        map_name = self._ask_map_name(kind)
+        if map_name is None:
+            return
+        self.map_name.set(map_name)
         spec = self.current_spec(kind=kind)
         try:
             path = save_map_json(spec, kind=kind)
             path = os.path.abspath(path)
-            self.map_name.set(spec["name"])
         except (OSError, ValueError, tk.TclError) as e:
             messagebox.showerror("Save", str(e))
             return
-        folder = "train" if kind == "train" else "infer"
+        self.map_name.set(map_name)
         self.status.set("Saved: %s" % path)
         self._notify_maps_changed(kind, path)
 
@@ -701,6 +720,59 @@ class MapEditorApp:
 
     def save_infer(self):
         self._save_map("infer")
+
+    def _ask_map_name(self, kind):
+        default_name = (self.map_name.get() or "").strip()
+        if not default_name:
+            default_name = "custom_%s" % ("train" if kind == "train" else "infer")
+
+        result = {"value": None}
+        dlg = tk.Toplevel(self.root)
+        dlg.title("Đặt tên map")
+        dlg.transient(self.root)
+        dlg.grab_set()
+        dlg.resizable(False, False)
+
+        body = ttk.Frame(dlg, padding=12)
+        body.pack(fill=tk.BOTH, expand=True)
+        ttk.Label(body, text="Tên map %s:" % ("train" if kind == "train" else "infer")).pack(
+            anchor=tk.W, pady=(0, 6)
+        )
+        name_var = tk.StringVar(value=default_name)
+        entry = ttk.Entry(body, textvariable=name_var, width=28)
+        entry.pack(fill=tk.X)
+        entry.focus_set()
+        entry.selection_range(0, tk.END)
+
+        hint = ttk.Label(body, text="Enter để tạo map, Esc để hủy.")
+        hint.pack(anchor=tk.W, pady=(6, 0))
+
+        btn_row = ttk.Frame(body)
+        btn_row.pack(fill=tk.X, pady=(10, 0))
+
+        def _confirm(_event=None):
+            raw = name_var.get().strip()
+            if not raw:
+                messagebox.showerror("Lưu map", "Tên map không được để trống.")
+                return
+            result["value"] = raw
+            dlg.destroy()
+
+        def _cancel(_event=None):
+            dlg.destroy()
+
+        ttk.Button(btn_row, text="Hủy", command=_cancel).pack(side=tk.RIGHT)
+        ttk.Button(btn_row, text="Tạo", command=_confirm).pack(side=tk.RIGHT, padx=(0, 8))
+
+        dlg.bind("<Return>", _confirm)
+        dlg.bind("<Escape>", _cancel)
+        dlg.protocol("WM_DELETE_WINDOW", _cancel)
+        dlg.update_idletasks()
+        rx = self.root.winfo_rootx() + (self.root.winfo_width() - dlg.winfo_width()) // 2
+        ry = self.root.winfo_rooty() + (self.root.winfo_height() - dlg.winfo_height()) // 2
+        dlg.geometry("+%d+%d" % (max(0, rx), max(0, ry)))
+        self.root.wait_window(dlg)
+        return result["value"]
 
     def load_map(self):
         os.makedirs(TRAIN_MAPS_DIR, exist_ok=True)

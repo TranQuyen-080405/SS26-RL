@@ -9,6 +9,7 @@ from runtime_paths import app_data_path
 _REPO_ROOT = app_data_path()
 FORMULA_DIR = app_data_path("reward_formula")
 _SCHEMA_VERSION = 1
+_DEFAULT_BLOCK_WEIGHT = 1.0
 
 
 def ensure_formula_dir():
@@ -96,47 +97,35 @@ _LEGACY_REWARD_LABELS = {
 
 def migrate_formula_snapshot(data):
     """Nâng cấp snapshot cũ (revisit / visit_total → visit_window / visit_repeat)."""
+    from RL_lib.lab_registry import REWARD_ELEMENTS
+
     out = dict(data)
     weights = dict(out.get("element_weights") or {})
     if "revisit" in weights:
         weights.setdefault("visit_repeat", weights.pop("revisit"))
     if "visit_total" in weights:
         weights.setdefault("visit_window", weights.pop("visit_total"))
-    weights.setdefault("visit_window", 0.0)
-    weights.setdefault("visit_repeat", 0.0)
 
     # Handle goal_trend
     if "goal_trend" in weights:
         val = weights.pop("goal_trend")
         weights.setdefault("goal_closer", val)
         weights.setdefault("goal_farther", -val)
-    weights.setdefault("goal_closer", 0.0)
-    weights.setdefault("goal_farther", 0.0)
 
     # Handle cp_trend
     if "cp_trend" in weights:
         val = weights.pop("cp_trend")
         weights.setdefault("cp_closer", val)
         weights.setdefault("cp_farther", -val)
-    weights.setdefault("cp_closer", 0.0)
-    weights.setdefault("cp_farther", 0.0)
 
     # Handle straight_streak
     if "straight_streak" in weights:
         val = weights.pop("straight_streak")
         weights.setdefault("straight_streak_reach", val)
         weights.setdefault("straight_streak_cap", val)
-    weights.setdefault("straight_streak_reach", 0.0)
-    weights.setdefault("straight_streak_cap", 0.0)
 
-    # Handle wall_detected and wall_visible
-    weights.setdefault("wall_detected", 0.0)
-    weights.setdefault("wall_visible", 0.0)
-    weights.setdefault("wall_on_entry", 0.0)
-
-    # Handle rotate split
-    weights.setdefault("wasted_rotate", 0.0)
-    weights.setdefault("blocked_rotate", 0.0)
+    for eid in REWARD_ELEMENTS:
+        weights.setdefault(eid, _DEFAULT_BLOCK_WEIGHT)
 
     out["element_weights"] = weights
 
@@ -166,7 +155,9 @@ def migrate_formula_snapshot(data):
         if ":" not in str(key):
             continue
         iid, tk_key = str(key).split(":", 1)
-        cfg = instance_configs.setdefault(iid, {"eid": iid.split("#", 1)[0], "weight": 0.0, "thresholds": {}})
+        cfg = instance_configs.setdefault(
+            iid, {"eid": iid.split("#", 1)[0], "weight": _DEFAULT_BLOCK_WEIGHT, "thresholds": {}}
+        )
         cfg.setdefault("thresholds", {})[tk_key] = val
     out["instance_configs"] = instance_configs
 

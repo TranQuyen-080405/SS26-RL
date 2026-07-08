@@ -1,10 +1,30 @@
 """SS26-RL — shell 4 tab."""
 
+import os
 import tkinter as tk
 from tkinter import ttk
 
 from Ui_app.ui_scale import attach_window_scaling, configure_window, font, init as init_ui_scale, px
 from app_tabs.robot_monitor import RobotMonitorApp
+
+
+def _apply_app_icon(root):
+    """Set window icon from project assets/logo.png (fallback res/logo.png)."""
+    base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+    candidates = (
+        os.path.join(base_dir, "assets", "logo.png"),
+        os.path.join(base_dir, "res", "logo.png"),
+    )
+    for icon_path in candidates:
+        if not os.path.isfile(icon_path):
+            continue
+        try:
+            icon = tk.PhotoImage(file=icon_path)
+            root.iconphoto(True, icon)
+            root._app_icon = icon  # giữ reference tránh bị GC
+            return
+        except tk.TclError:
+            continue
 
 # (nhãn, nền chưa chọn, nền khi chọn)
 _TAB_COLORS = (
@@ -80,6 +100,7 @@ class SS26App:
     def __init__(self, initial_tab=0):
         self.root = tk.Tk()
         self.root.title("SS26-RL")
+        _apply_app_icon(self.root)
         init_ui_scale(self.root)
         configure_window(self.root, width=1200, height=720, min_width=800, min_height=500)
 

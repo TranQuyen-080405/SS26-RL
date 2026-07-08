@@ -5,6 +5,7 @@ from tkinter import ttk
 
 from RL_lib.grid import neighbor_xy, is_valid
 from Ui_app.ui_scale import font, px as scale_px
+from Ui_app.ui_chips import make_result_chip
 from Ui_app.map_layout import apply_fixed_canvas, avail_width_from_wrap, fit_grid_layout_tight
 
 _STATE_BG = "#eceff4"
@@ -24,7 +25,7 @@ class LabScenarioMap5:
         self.world = world
         self.on_change = on_change
         self.frame = ttk.LabelFrame(parent, text="Check State", padding=scale_px(4))
-        self.frame.pack(fill=tk.X, anchor=tk.N)
+        self.frame.pack(fill=tk.BOTH, expand=True, anchor=tk.N)
 
         self._selection = None
         self._await_new_cp = False
@@ -65,18 +66,24 @@ class LabScenarioMap5:
         ttk.Label(act_row, text="Move:", font=font(9)).pack(side=tk.LEFT, padx=(0, scale_px(4)))
         self._move_btns = []
         for label, cmd in (
-            ("(A) Rotate Left", lambda: self._action("rotate left")),
-            ("(S) Forward", lambda: self._action("forward")),
-            ("(D) Rotate Right", lambda: self._action("rotate right")),
+            ("(A/←) Rotate Left", lambda: self._action("rotate left")),
+            ("(S/↑) Forward", lambda: self._action("forward")),
+            ("(D/→) Rotate Right", lambda: self._action("rotate right")),
         ):
             btn = ttk.Button(act_row, text=label, command=cmd)
             btn.pack(side=tk.LEFT, padx=scale_px(2))
             self._move_btns.append(btn)
         self._move_enabled = True
+        self._state_labels = []
+        self._parts_sig = None
+        self._part_rows = []
         self._key_actions = {
             "s": "forward",
             "a": "rotate left",
             "d": "rotate right",
+            "up": "forward",
+            "left": "rotate left",
+            "right": "rotate right",
         }
 
         self._build_result_panel()
@@ -127,22 +134,11 @@ class LabScenarioMap5:
         apply_fixed_canvas(self.canvas, cw, ch)
 
     def _bind_keyboard(self):
-        targets = [self.frame, self.canvas, self._act_row, self._state_box, self._reward_box]
-        for widget in targets:
-            widget.bind("<KeyPress>", self._on_key_press)
-        self.canvas.bind("<Button-1>", self._focus_map, add="+")
-        self.frame.bind("<Enter>", self._focus_map)
         self.canvas.bind("<Escape>", self._on_escape)
         self.canvas.bind("<Delete>", self._on_delete_key)
         self.canvas.bind("<BackSpace>", self._on_delete_key)
 
-    def _focus_map(self, _event=None):
-        try:
-            self.canvas.focus_set()
-        except tk.TclError:
-            pass
-
-    def _on_key_press(self, event):
+    def handle_key_event(self, event):
         if not self._move_enabled:
             return
         w = event.widget
@@ -163,7 +159,7 @@ class LabScenarioMap5:
     def _build_result_panel(self):
         outer = ttk.Frame(self.frame)
         self._result_outer = outer
-        outer.pack(fill=tk.X, pady=(4, 0))
+        outer.pack(fill=tk.BOTH, expand=True, pady=(4, 0))
 
         self._state_box = tk.LabelFrame(
             outer, text=" STATE ", font=font(10, weight="bold"), bg=_STATE_BG, fg=_STATE_FG, padx=scale_px(8), pady=scale_px(6)
@@ -175,9 +171,38 @@ class LabScenarioMap5:
         self._reward_box = tk.LabelFrame(
             outer, text=" REWARD ", font=font(10, weight="bold"), bg=_REWARD_BG, fg=_REWARD_FG, padx=scale_px(8), pady=scale_px(6)
         )
-        self._reward_box.pack(fill=tk.X)
-        self._reward_inner = tk.Frame(self._reward_box, bg=_REWARD_BG)
-        self._reward_inner.pack(fill=tk.X)
+        self._reward_box.pack(fill=tk.BOTH, expand=True)
+        reward_wrap = tk.Frame(self._reward_box, bg=_REWARD_BG)
+        reward_wrap.pack(fill=tk.BOTH, expand=True)
+        self._reward_canvas = tk.Canvas(
+            reward_wrap,
+            bg=_REWARD_BG,
+            highlightthickness=0,
+            bd=0,
+            height=scale_px(570)
+        )
+        self._reward_scroll = ttk.Scrollbar(reward_wrap, orient=tk.VERTICAL, command=self._reward_canvas.yview)
+        self._reward_scroll.pack(side=tk.RIGHT, fill=tk.Y)
+        self._reward_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        self._reward_inner = tk.Frame(self._reward_canvas, bg=_REWARD_BG)
+        self._reward_canvas_win = self._reward_canvas.create_window((0, 0), window=self._reward_inner, anchor=tk.NW)
+        self._reward_canvas.configure(yscrollcommand=self._reward_scroll.set)
+
+        def _on_reward_inner_configure(_event=None):
+            try:
+                self._reward_canvas.configure(scrollregion=self._reward_canvas.bbox("all"))
+            except tk.TclError:
+                pass
+
+        def _on_reward_canvas_configure(event):
+            try:
+                self._reward_canvas.itemconfigure(self._reward_canvas_win, width=event.width)
+            except tk.TclError:
+                pass
+
+        self._reward_inner.bind("<Configure>", _on_reward_inner_configure)
+        self._reward_canvas.bind("<Configure>", _on_reward_canvas_configure)
+        self._bind_reward_wheel_tree(self._reward_canvas)
 
         self._action_lbl = tk.Label(
             self._reward_inner, text="", bg=_REWARD_BG, fg="#89b4fa", font=font(10, weight="bold"), anchor=tk.W
@@ -216,6 +241,102 @@ class LabScenarioMap5:
         for w in frame.winfo_children():
             w.destroy()
 
+    def _bind_reward_wheel_tree(self, widget):
+        if not getattr(widget, "_reward_wheel_tag", False):
+            widget._reward_wheel_tag = True
+
+            def _on_wheel(event):
+                c = self._reward_canvas
+                if event.delta:
+                    c.yview_scroll(int(-event.delta / 120), "units")
+                elif event.num == 4:
+                    c.yview_scroll(-1, "units")
+                elif event.num == 5:
+                    c.yview_scroll(1, "units")
+                return "break"
+
+            for seq in ("<MouseWheel>", "<Button-4>", "<Button-5>"):
+                widget.bind(seq, _on_wheel, add="+")
+        for child in widget.winfo_children():
+            self._bind_reward_wheel_tree(child)
+
+    def _update_state_rows(self, state_rows):
+        while len(self._state_labels) < len(state_rows):
+            lbl = tk.Label(
+                self._state_inner,
+                text="",
+                bg=_STATE_BG,
+                fg=_STATE_FG,
+                font=font(11, family="Consolas"),
+                anchor=tk.W,
+            )
+            lbl.pack(fill=tk.X, pady=1)
+            self._state_labels.append(lbl)
+        while len(self._state_labels) > len(state_rows):
+            lbl = self._state_labels.pop()
+            lbl.destroy()
+        for lbl, text in zip(self._state_labels, state_rows):
+            if lbl.cget("text") != text:
+                lbl.config(text=text)
+
+    def _clear_parts_rows(self):
+        for row in self._part_rows:
+            try:
+                row["frame"].destroy()
+            except tk.TclError:
+                pass
+        self._part_rows = []
+        self._parts_sig = None
+
+    def _update_parts_rows(self, parts):
+        sig = tuple(p[0] for p in parts)
+        if sig == self._parts_sig and len(self._part_rows) == len(parts):
+            for (_, _, _, val), row in zip(parts, self._part_rows):
+                if val > 0:
+                    vfg, vsign = _POS, "+"
+                elif val < 0:
+                    vfg, vsign = _NEG, ""
+                else:
+                    vfg, vsign = _ZERO, ""
+                text = "%s%.1f" % (vsign, val)
+                if row["val_lbl"].cget("text") != text or row["val_lbl"].cget("fg") != vfg:
+                    row["val_lbl"].config(text=text, fg=vfg)
+            return
+
+        self._clear_frame(self._parts_frame)
+        self._part_rows = []
+        self._parts_sig = sig
+        if parts:
+            tk.Label(
+                self._parts_frame,
+                text="Chi tiết thành phần:",
+                bg=_REWARD_BG,
+                fg="#a6adc8",
+                font=font(9, weight="bold"),
+                anchor=tk.W,
+            ).pack(fill=tk.X, pady=(0, 4))
+        for i, (label, chip_bg, chip_fg, val) in enumerate(parts):
+            row_bg = "#3b3d52" if i % 2 else _REWARD_BG
+            row = tk.Frame(self._parts_frame, bg=row_bg)
+            row.pack(fill=tk.X, pady=1, padx=0)
+            make_result_chip(row, label, chip_bg, chip_fg, row_bg, font(9, weight="bold"))
+            if val > 0:
+                vfg, vsign = _POS, "+"
+            elif val < 0:
+                vfg, vsign = _NEG, ""
+            else:
+                vfg, vsign = _ZERO, ""
+            val_lbl = tk.Label(
+                row,
+                text="%s%.1f" % (vsign, val),
+                bg=row_bg,
+                fg=vfg,
+                font=font(12, weight="bold", family="Consolas"),
+                anchor=tk.E,
+            )
+            val_lbl.pack(side=tk.RIGHT, fill=tk.X, expand=True, padx=(8, 4))
+            self._part_rows.append({"frame": row, "val_lbl": val_lbl})
+
     def set_result_display(
         self,
         state_rows,
@@ -226,18 +347,8 @@ class LabScenarioMap5:
         parts=None,
     ):
         """parts: [(label, chip_bg, chip_fg, value), ...]"""
-        self._clear_frame(self._state_inner)
         parts = parts or []
-
-        for text in state_rows:
-            tk.Label(
-                self._state_inner,
-                text=text,
-                bg=_STATE_BG,
-                fg=_STATE_FG,
-                font=font(11, family="Consolas"),
-                anchor=tk.W,
-            ).pack(fill=tk.X, pady=1)
+        self._update_state_rows(state_rows)
 
         if has_action:
             if hasattr(self, "_hint_lbl"):
@@ -260,8 +371,9 @@ class LabScenarioMap5:
             self._total_val.config(text=total_text, bg=tb, fg=tf)
             self._total_frame.pack(fill=tk.X, pady=(0, 6))
 
-            self._clear_frame(self._parts_frame)
             if no_formula:
+                self._clear_parts_rows()
+                self._clear_frame(self._parts_frame)
                 tk.Label(
                     self._parts_frame,
                     text="Kéo reward vào « Công thức tổng » để bắt đầu tính điểm",
@@ -273,48 +385,19 @@ class LabScenarioMap5:
                     justify=tk.LEFT,
                 ).pack(fill=tk.X, pady=(0, 4))
             elif parts:
-                tk.Label(
-                    self._parts_frame,
-                    text="Chi tiết thành phần:",
-                    bg=_REWARD_BG,
-                    fg="#a6adc8",
-                    font=font(9, weight="bold"),
-                    anchor=tk.W,
-                ).pack(fill=tk.X, pady=(0, 4))
-            for i, (label, chip_bg, chip_fg, val) in enumerate(parts):
-                row_bg = "#3b3d52" if i % 2 else _REWARD_BG
-                row = tk.Frame(self._parts_frame, bg=row_bg)
-                row.pack(fill=tk.X, pady=1, padx=0)
-                tk.Label(
-                    row,
-                    text=" %s " % label,
-                    bg=chip_bg,
-                    fg=chip_fg,
-                    font=font(9, weight="bold"),
-                    padx=4,
-                    pady=2,
-                ).pack(side=tk.LEFT, padx=(0, 4))
-                if val > 0:
-                    vfg, vsign = _POS, "+"
-                elif val < 0:
-                    vfg, vsign = _NEG, ""
-                else:
-                    vfg, vsign = _ZERO, ""
-                tk.Label(
-                    row,
-                    text="%s%.1f" % (vsign, val),
-                    bg=row_bg,
-                    fg=vfg,
-                    font=font(12, weight="bold", family="Consolas"),
-                    anchor=tk.E,
-                ).pack(side=tk.RIGHT, fill=tk.X, expand=True, padx=(8, 4))
+                self._update_parts_rows(parts)
+            else:
+                self._clear_parts_rows()
+                self._clear_frame(self._parts_frame)
             self._parts_frame.pack(fill=tk.X)
         else:
             self._action_lbl.pack_forget()
             self._total_frame.pack_forget()
             self._parts_frame.pack_forget()
+            self._clear_parts_rows()
             if hasattr(self, "_hint_lbl"):
                 self._hint_lbl.pack(fill=tk.X, pady=4)
+        self._bind_reward_wheel_tree(self._reward_inner)
 
     def set_result_text(self, text):
         """Tương thích cũ — parse tối thiểu."""

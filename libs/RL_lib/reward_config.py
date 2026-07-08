@@ -14,54 +14,55 @@ from RL_lib.reward_formula import safe_eval_formula
 from RL_lib.student_formula import default_total_formula, tokens_to_expr, parse_expr_to_tokens
 
 # --- Hằng reward (đặt 0 nếu module tắt / không dùng) ---
-R_STEP = -1.5
-R_COLLISION = -260
-R_EXCESS_ROTATE = -10.0
-R_GOAL_CLOSER = 12.0
-R_GOAL_FARTHER = -2.0
-R_CP_CLOSER = 3.0
-R_CP_FARTHER = -1.0
-R_CHECKPOINT_FIRST = 15.0
-R_GOAL_REACHED = 420.0
-R_ROTATE_IN_PLACE = -2.0
+DEFAULT_BLOCK_WEIGHT = 1.0
+R_STEP = -1.2
+R_COLLISION = -220
+R_EXCESS_ROTATE = -60.0
+R_GOAL_CLOSER = 9.0
+R_GOAL_FARTHER = -10.0
+R_CP_CLOSER = 10.0
+R_CP_FARTHER = -4.0
+R_CHECKPOINT_FIRST = 120.0
+R_GOAL_REACHED = 260.0
+R_ROTATE_IN_PLACE = -8.0
 R_FACING_CLEAR = 0.0
-R_FORWARD_CLEAR = 4.0
-R_WASTED_ROTATE = -12.0
-R_BLOCKED_ROTATE = 2.0
-R_STRAIGHT = 0.0
-R_STRAIGHT_REACH = 0.5
-R_STRAIGHT_CAP = 0.2
+R_FORWARD_CLEAR = 5.0
+R_WASTED_ROTATE = -15.0
+R_BLOCKED_ROTATE = 5.0
+R_STRAIGHT = 1.0
+R_STRAIGHT_REACH = 1.0
+R_STRAIGHT_CAP = 1.0
 R_WALL_DETECT = 0.0
 R_WALL_VISIBLE = 0.0
 R_WALL_ON_ENTRY = 0.0
-R_VISIT_WINDOW = -8.0
-R_VISIT_REPEAT = -24.0
-R_PING_PONG = -65.0
+R_VISIT_WINDOW = -18.0
+R_VISIT_REPEAT = -45.0
+R_PING_PONG = -90.0
 
 MAX_ROTATE_STREAK = 2
-MAX_REVISIT_STEPS = 5
+MAX_REVISIT_STEPS = 4
 MAX_CELL_REPEAT = 2
 MAX_PING_PONG_CYCLES = 1
-MAX_PING_PONG_SPAN = 4
-MAX_STRAIGHT_REACH = 4
+MAX_PING_PONG_SPAN = 5
+MAX_STRAIGHT_REACH = 3
 MAX_STRAIGHT_CAP = 3
 COLLISION_RESET = False
 MAX_STEPS_PER_EPISODE = 600
 
 # --- Learn Lab: module bật + công thức từng element ---
-FORMULA_NAME = 'gotogoal'
-ENABLED_MODULES = set(['checkpoint', 'goal', 'heading', 'memory_loop', 'obstacle', 'rotation', 'step'])
+FORMULA_NAME = 'Reward_1'
+ENABLED_MODULES = set(['checkpoint', 'explore_penalty', 'goal', 'heading', 'memory_loop', 'obstacle', 'rotation', 'step'])
 ELEMENT_FORMULAS = dict(DEFAULT_ELEMENT_FORMULAS)
-TOTAL_FORMULA_STUDENT = 'Đến goal + Lại gần goal + Tiến xa goal + Tiến lên thành công + Mỗi bước đi + Va chạm tường + Xoay khi có thể đi thẳng + Xoay tại chỗ liên tục + Xoay tại chỗ liên tục + Lặp ô gần + Lặp ô gần + Quay lại ô + Đi qua đi lại liên tục + Lại gần checkpoint + Chạm checkpoint'
+TOTAL_FORMULA_STUDENT = 'Xoay tại chỗ #1 +  (  Lặp ô gần #1 +  Quay lại ô #1 +  Đi qua đi lại liên tục #1 )  +  Mỗi bước đi #1 +  Lại gần goal #1 +  Lại gần checkpoint #1 +  Chạm checkpoint #1 +  Giữ hướng #1 +  Va chạm tường #1'
 INSTANCE_CONFIGS = {
-    "excess_rotate#1": {"eid": "excess_rotate", "weight": -10.0, "thresholds": {"MAX_ROTATE_STREAK": 2}},
-    "excess_rotate#2": {"eid": "excess_rotate", "weight": -22.0, "thresholds": {"MAX_ROTATE_STREAK": 4}},
-    "visit_window#1": {"eid": "visit_window", "weight": -8.0, "thresholds": {"MAX_REVISIT_STEPS": 5}},
-    "visit_window#2": {"eid": "visit_window", "weight": -18.0, "thresholds": {"MAX_REVISIT_STEPS": 2}},
-    "visit_repeat#1": {"eid": "visit_repeat", "weight": -24.0, "thresholds": {"MAX_CELL_REPEAT": 2}},
+    "excess_rotate#1": {"eid": "excess_rotate", "weight": 1.0, "thresholds": {"MAX_ROTATE_STREAK": 2}},
+    "excess_rotate#2": {"eid": "excess_rotate", "weight": 1.0, "thresholds": {"MAX_ROTATE_STREAK": 4}},
+    "visit_window#1": {"eid": "visit_window", "weight": 1.0, "thresholds": {"MAX_REVISIT_STEPS": 5}},
+    "visit_window#2": {"eid": "visit_window", "weight": 1.0, "thresholds": {"MAX_REVISIT_STEPS": 2}},
+    "visit_repeat#1": {"eid": "visit_repeat", "weight": 1.0, "thresholds": {"MAX_CELL_REPEAT": 2}},
     "ping_pong#1": {
         "eid": "ping_pong",
-        "weight": -65.0,
+        "weight": 1.0,
         "thresholds": {"MAX_PING_PONG_CYCLES": 1, "MAX_PING_PONG_SPAN": 4},
     },
 }
@@ -170,9 +171,9 @@ def set_instance_configs(configs):
         if eid not in REWARD_ELEMENTS:
             continue
         try:
-            weight = float(cfg.get("weight", 0.0))
+            weight = float(cfg.get("weight", DEFAULT_BLOCK_WEIGHT))
         except (TypeError, ValueError):
-            weight = 0.0
+            weight = DEFAULT_BLOCK_WEIGHT
         thresholds = {}
         for k in (_THRESHOLD_FOR_EID.get(eid) or []):
             raw = (cfg.get("thresholds") or {}).get(k)
@@ -239,7 +240,7 @@ def _iter_formula_reward_instances(tokens):
 
 def _default_instance_cfg(eid):
     wkey = ELEMENT_WEIGHT_KEY.get(eid)
-    weight = float(globals().get(wkey, 0.0)) if wkey else 0.0
+    weight = float(globals().get(wkey, DEFAULT_BLOCK_WEIGHT)) if wkey else DEFAULT_BLOCK_WEIGHT
     thresholds = {}
     for tk_key in _THRESHOLD_FOR_EID.get(eid, []):
         thresholds[tk_key] = int(globals().get(tk_key, 0))
@@ -292,7 +293,7 @@ def _instance_ctx(base_ctx, robot, eid, cfg):
         c[k] = int(v)
     wkey = ELEMENT_WEIGHT_KEY.get(eid) if eid else None
     if wkey:
-        c[wkey] = float(cfg.get("weight", c.get(wkey, 0.0)))
+        c[wkey] = float(cfg.get("weight", c.get(wkey, DEFAULT_BLOCK_WEIGHT)))
 
     max_rotate = int(c.get("MAX_ROTATE_STREAK", MAX_ROTATE_STREAK))
     max_revisit_steps = int(c.get("MAX_REVISIT_STEPS", MAX_REVISIT_STEPS))
@@ -499,7 +500,7 @@ def _build_reward_context(robot, sim_map, result, could_forward_before=False):
         robot,
         None,
         {
-            "weight": 0.0,
+            "weight": DEFAULT_BLOCK_WEIGHT,
             "thresholds": {
                 "MAX_ROTATE_STREAK": MAX_ROTATE_STREAK,
                 "MAX_REVISIT_STEPS": MAX_REVISIT_STEPS,
@@ -539,19 +540,21 @@ _FAST_EVAL = {
 }
 
 
-def compute_reward_breakdown(robot, sim_map, result, action_name=None, could_forward_before=False):
-    """Trả (tổng, dict element). Hỗ trợ nhiều block reward trùng label."""
+def compute_reward_breakdown(robot, sim_map, result, action_name=None, could_forward_before=False, include_instances=False):
+    """Trả (tổng, dict element); tùy chọn trả thêm breakdown theo từng instance."""
     tokens = _formula_tokens()
     if not tokens:
-        return 0.0, {}
+        return (0.0, {}, []) if include_instances else (0.0, {})
 
     base_ctx = _build_reward_context(robot, sim_map, result, could_forward_before)
     parts = {}
     instance_values = {}
+    instance_rows = []
     for eid, idx, iid in _iter_formula_reward_instances(tokens):
         meta = REWARD_ELEMENTS.get(eid) or {}
         if meta.get("module") not in ENABLED_MODULES:
             instance_values[iid] = 0.0
+            instance_rows.append({"iid": iid, "eid": eid, "idx": idx, "value": 0.0})
             continue
         cfg = _instance_cfg_for(eid, idx)
         ctx = _instance_ctx(base_ctx, robot, eid, cfg)
@@ -564,8 +567,11 @@ def compute_reward_breakdown(robot, sim_map, result, action_name=None, could_for
             except (ValueError, SyntaxError, TypeError, ZeroDivisionError):
                 val = 0.0
         instance_values[iid] = float(val)
+        instance_rows.append({"iid": iid, "eid": eid, "idx": idx, "value": float(val)})
         parts[eid] = float(parts.get(eid, 0.0)) + float(val)
     total = _eval_total_from_tokens(tokens, instance_values)
+    if include_instances:
+        return total, parts, instance_rows
     return total, parts
 
 

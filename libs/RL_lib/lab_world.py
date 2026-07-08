@@ -50,6 +50,7 @@ class LabWorld5:
         self.paint_tool = "robot"
         self.last_total = 0.0
         self.last_parts = {}
+        self.last_instance_parts = []
         self.last_action = None
 
     def _reset_robot_state(self):
@@ -67,6 +68,7 @@ class LabWorld5:
         rb.perceive_facing_from_sim(self.robot, self.sim_map, for_reward=False)
         self.last_total = 0.0
         self.last_parts = {}
+        self.last_instance_parts = []
         self.last_action = None
 
     def sync_maps(self):
@@ -148,6 +150,7 @@ class LabWorld5:
         self.robot["_reward_no_progress_streak"] = 0
         self.last_total = 0.0
         self.last_parts = {}
+        self.last_instance_parts = []
         self.last_action = None
 
     def reset_checkpoint_state(self):
@@ -157,13 +160,19 @@ class LabWorld5:
     def do_action(self, action_name):
         could_fwd = can_move(self.sim_map, self.robot["x"], self.robot["y"], self.robot["direct"])
         result = act.execute_action_sim(self.robot, self.sim_map, action_name)
-        total, parts = compute_reward_breakdown(
-            self.robot, self.sim_map, result, action_name=action_name, could_forward_before=could_fwd
+        total, parts, instance_parts = compute_reward_breakdown(
+            self.robot,
+            self.sim_map,
+            result,
+            action_name=action_name,
+            could_forward_before=could_fwd,
+            include_instances=True,
         )
         self._mark_checkpoint_visit()
         self.last_action = action_name
         self.last_total = total
         self.last_parts = parts
+        self.last_instance_parts = instance_parts
         return total, parts, result
 
     def _mark_checkpoint_visit(self):
