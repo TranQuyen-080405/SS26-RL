@@ -3,7 +3,7 @@
 import re
 import tkinter as tk
 
-from Ui_app.ui_scale import font, px
+from Ui_app.ui_scale import font, px, clamp_canvas_dim, safe_widget_dim
 
 _BADGE_BG = "#ffffff"
 _BADGE_FG = "#1e1e2e"
@@ -41,7 +41,11 @@ def _widget_bg(widget, fallback="#eceff4"):
 def draw_round_rect(canvas, x1, y1, x2, y2, radius, fill, outline=None):
     if outline is None:
         outline = fill
+    x1, y1, x2, y2 = int(x1), int(y1), int(x2), int(y2)
     if x2 <= x1 or y2 <= y1:
+        return
+    if (x2 - x1) > 4096 or (y2 - y1) > 4096:
+        canvas.create_rectangle(x1, y1, x2, y2, fill=fill, outline=outline, tags="round_bg")
         return
     r = min(radius, (x2 - x1) // 2, (y2 - y1) // 2)
     if r < 1:
@@ -98,14 +102,12 @@ class RoundedBlock(tk.Frame):
             req_w = max(1, self.inner.winfo_reqwidth())
             req_h = max(1, self.inner.winfo_reqheight())
             if self._stretch_width:
-                try:
-                    outer_w = max(req_w, self.winfo_width())
-                except tk.TclError:
-                    outer_w = req_w
+                outer_w = safe_widget_dim(self, req_w)
                 target_w = max(1, outer_w)
             else:
                 target_w = req_w
-            target_h = req_h
+            target_w = clamp_canvas_dim(target_w)
+            target_h = clamp_canvas_dim(req_h)
             if abs(target_w - self._last_w) < 2 and abs(target_h - self._last_h) < 2:
                 return
             self._last_w = target_w
@@ -118,8 +120,8 @@ class RoundedBlock(tk.Frame):
             self._in_sync = False
 
     def _redraw(self):
-        w = self._last_w or max(1, self.canvas.winfo_width())
-        h = self._last_h or max(1, self.canvas.winfo_height())
+        w = clamp_canvas_dim(self._last_w or max(1, self.canvas.winfo_width()))
+        h = clamp_canvas_dim(self._last_h or max(1, self.canvas.winfo_height()))
         # Reuse canvas items to avoid flicker when many chips update.
         if not self._bg_items:
             draw_round_rect(self.canvas, 0, 0, w, h, self._radius, self._chip_bg, self._chip_bg)

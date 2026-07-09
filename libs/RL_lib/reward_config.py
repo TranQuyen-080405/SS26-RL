@@ -15,29 +15,29 @@ from RL_lib.student_formula import default_total_formula, tokens_to_expr, parse_
 
 # --- Hằng reward (đặt 0 nếu module tắt / không dùng) ---
 DEFAULT_BLOCK_WEIGHT = 1.0
-R_STEP = -1.2
-R_COLLISION = -220
-R_EXCESS_ROTATE = -60.0
-R_GOAL_CLOSER = 9.0
-R_GOAL_FARTHER = -10.0
-R_CP_CLOSER = 10.0
-R_CP_FARTHER = -4.0
-R_CHECKPOINT_FIRST = 120.0
-R_GOAL_REACHED = 260.0
-R_ROTATE_IN_PLACE = -8.0
-R_FACING_CLEAR = 0.0
-R_FORWARD_CLEAR = 5.0
-R_WASTED_ROTATE = -15.0
-R_BLOCKED_ROTATE = 5.0
+R_STEP = 1.0
+R_COLLISION = 1.0
+R_EXCESS_ROTATE = 1.0
+R_GOAL_CLOSER = 1.0
+R_GOAL_FARTHER = 1.0
+R_CP_CLOSER = 1.0
+R_CP_FARTHER = 1.0
+R_CHECKPOINT_FIRST = 1.0
+R_GOAL_REACHED = 1.0
+R_ROTATE_IN_PLACE = 1.0
+R_FACING_CLEAR = 1.0
+R_FORWARD_CLEAR = 1.0
+R_WASTED_ROTATE = 1.0
+R_BLOCKED_ROTATE = 1.0
 R_STRAIGHT = 1.0
 R_STRAIGHT_REACH = 1.0
 R_STRAIGHT_CAP = 1.0
-R_WALL_DETECT = 0.0
-R_WALL_VISIBLE = 0.0
-R_WALL_ON_ENTRY = 0.0
-R_VISIT_WINDOW = -18.0
-R_VISIT_REPEAT = -45.0
-R_PING_PONG = -90.0
+R_WALL_DETECT = 1.0
+R_WALL_VISIBLE = 1.0
+R_WALL_ON_ENTRY = 1.0
+R_VISIT_WINDOW = 1.0
+R_VISIT_REPEAT = 1.0
+R_PING_PONG = 1.0
 
 MAX_ROTATE_STREAK = 2
 MAX_REVISIT_STEPS = 4
@@ -50,10 +50,10 @@ COLLISION_RESET = False
 MAX_STEPS_PER_EPISODE = 600
 
 # --- Learn Lab: module bật + công thức từng element ---
-FORMULA_NAME = 'Reward_1'
+FORMULA_NAME = 'test'
 ENABLED_MODULES = set(['checkpoint', 'explore_penalty', 'goal', 'heading', 'memory_loop', 'obstacle', 'rotation', 'step'])
 ELEMENT_FORMULAS = dict(DEFAULT_ELEMENT_FORMULAS)
-TOTAL_FORMULA_STUDENT = 'Xoay tại chỗ #1 +  (  Lặp ô gần #1 +  Quay lại ô #1 +  Đi qua đi lại liên tục #1 )  +  Mỗi bước đi #1 +  Lại gần goal #1 +  Lại gần checkpoint #1 +  Chạm checkpoint #1 +  Giữ hướng #1 +  Va chạm tường #1'
+TOTAL_FORMULA_STUDENT = 'Mỗi bước đi #1 +  Mỗi bước đi #2 +  Xoay sang hướng thông thoáng #1 +  Xoay sang hướng thông thoáng #2 +  Xoay sang hướng thông thoáng #3 +  Xoay sang hướng thông thoáng #4 +  Xoay sang hướng thông thoáng #5 +  Xoay sang hướng thông thoáng #6 +  Xoay sang hướng thông thoáng #7 +  Xoay sang hướng thông thoáng #8 +  Xoay sang hướng thông thoáng #9 +  Xoay sang hướng thông thoáng #10 +  Xoay sang hướng thông thoáng #11 +  Xoay sang hướng thông thoáng #12 +  Xoay sang hướng thông thoáng #13 +  Xoay sang hướng thông thoáng #14 +  Xoay sang hướng thông thoáng #15 +  Xoay sang hướng thông thoáng #16 +  Xoay sang hướng thông thoáng #17 +  Xoay sang hướng thông thoáng #18 +  Xoay sang hướng thông thoáng #19 +  Xoay sang hướng thông thoáng #20 +  Xoay sang hướng thông thoáng #21'
 INSTANCE_CONFIGS = {
     "excess_rotate#1": {"eid": "excess_rotate", "weight": 1.0, "thresholds": {"MAX_ROTATE_STREAK": 2}},
     "excess_rotate#2": {"eid": "excess_rotate", "weight": 1.0, "thresholds": {"MAX_ROTATE_STREAK": 4}},

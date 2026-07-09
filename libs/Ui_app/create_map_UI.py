@@ -32,6 +32,8 @@ from Ui_app.ui_scale import configure_window, init as init_ui_scale, px, font
 
 
 def _apply_app_icon(root):
+    if sys.platform.startswith("linux"):
+        return
     base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
     candidates = (
         os.path.join(base_dir, "assets", "logo.png"),

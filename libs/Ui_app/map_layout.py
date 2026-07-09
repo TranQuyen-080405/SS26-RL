@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from Ui_app.ui_scale import canvas_pad, cell_max, px
+from Ui_app.ui_scale import canvas_pad, cell_max, px, clamp_canvas_dim
 
 
 def map_cell_floor() -> int:
@@ -25,8 +25,8 @@ def fit_grid_layout(
     _ = margin  # giữ tham số tương thích; lề tính bằng căn giữa
     cap = max_cell if max_cell is not None else cell_max()
     floor = map_cell_floor()
-    cw = max(1, int(avail_w))
-    ch = max(1, int(avail_h))
+    cw = clamp_canvas_dim(max(1, int(avail_w)))
+    ch = clamp_canvas_dim(max(1, int(avail_h)))
     gw = max(1, int(grid_w))
     gh = max(1, int(grid_h))
     by_w = cw // gw
@@ -61,21 +61,36 @@ def fit_grid_layout_tight(
     )
     map_w = gw * cell
     map_h = gh * cell
-    return cell, 0, 0, map_w, map_h
+    return cell, 0, 0, clamp_canvas_dim(map_w), clamp_canvas_dim(map_h)
 
 
 def avail_width_from_wrap(wrap, *, min_w: int = 120) -> int:
     """Chiều rộng khung — dùng cho layout tight (không đọc height wrap)."""
     wrap.update_idletasks()
-    return max(px(min_w), wrap.winfo_width())
+    try:
+        w = wrap.winfo_width()
+    except tk.TclError:
+        w = 0
+    if w <= 1 or w > 4096:
+        w = min_w
+    return clamp_canvas_dim(max(px(min_w), w))
 
 
 def avail_from_wrap(wrap, *, min_w: int = 120, min_h: int = 80) -> tuple[int, int]:
     wrap.update_idletasks()
-    w = max(px(min_w), wrap.winfo_width())
-    h = max(px(min_h), wrap.winfo_height())
-    return w, h
+    try:
+        w = wrap.winfo_width()
+        h = wrap.winfo_height()
+    except tk.TclError:
+        w, h = 0, 0
+    if w <= 1 or w > 4096:
+        w = min_w
+    if h <= 1 or h > 4096:
+        h = min_h
+    return clamp_canvas_dim(max(px(min_w), w)), clamp_canvas_dim(max(px(min_h), h))
 
 
 def apply_fixed_canvas(canvas, canvas_w: int, canvas_h: int) -> None:
+    canvas_w = clamp_canvas_dim(canvas_w)
+    canvas_h = clamp_canvas_dim(canvas_h)
     canvas.config(width=canvas_w, height=canvas_h, scrollregion=(0, 0, canvas_w, canvas_h))

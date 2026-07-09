@@ -321,8 +321,24 @@ def attach_window_scaling(root: tk.Misc, on_change=None) -> None:
 
 # --- Map canvas (ô co theo khung map_layout, base theo scale hiện tại) ---
 
-def cell_min() -> int:
-    return max(8, px(14))
+def clamp_canvas_dim(n: float, *, lo: int = 1, hi: int = 4096) -> int:
+    """Giới hạn kích thước canvas — tránh X11 BadLength trên Linux."""
+    try:
+        v = int(round(float(n)))
+    except (TypeError, ValueError):
+        v = lo
+    return max(lo, min(v, hi))
+
+
+def safe_widget_dim(widget, fallback: int, *, lo: int = 1, hi: int = 4096) -> int:
+    """Đọc winfo_* an toàn; bỏ qua giá trị chưa layout hoặc quá lớn."""
+    try:
+        v = int(widget.winfo_width())
+    except (tk.TclError, AttributeError):
+        return clamp_canvas_dim(fallback, lo=lo, hi=hi)
+    if v <= lo or v > hi:
+        return clamp_canvas_dim(fallback, lo=lo, hi=hi)
+    return v
 
 
 def cell_max() -> int:

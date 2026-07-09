@@ -1,6 +1,7 @@
 """SS26-RL — shell 4 tab."""
 
 import os
+import sys
 import tkinter as tk
 from tkinter import ttk
 
@@ -10,6 +11,9 @@ from app_tabs.robot_monitor import RobotMonitorApp
 
 def _apply_app_icon(root):
     """Set window icon from project assets/logo.png (fallback res/logo.png)."""
+    if sys.platform.startswith("linux"):
+        # Một số driver X11 (đặc biệt X forwarding) crash BadLength khi iconphoto.
+        return
     base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
     candidates = (
         os.path.join(base_dir, "assets", "logo.png"),

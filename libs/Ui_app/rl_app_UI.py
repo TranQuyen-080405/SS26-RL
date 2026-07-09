@@ -95,6 +95,7 @@ class RlApp:
         self._drag_src_iid = None
         self._eps_entry = None
         self._eps_edit_iid = None
+        self._infer_seq_ctx = None
         self._start_queue_processing()
         self.learn_lab_app = None
         self._on_maps_changed = on_maps_changed
@@ -645,7 +646,7 @@ class RlApp:
         style_train_treeview(self.infer_tree, self.root)
         self.infer_tree.heading("on", text="")
         self.infer_tree.heading("ord", text="≡")
-        self.infer_tree.heading("name", text="File map infer")
+        self.infer_tree.heading("name", text="File map")
         self.infer_tree.column("on", width=px(34), anchor=tk.CENTER, stretch=False, minwidth=px(30))
         self.infer_tree.column("ord", width=px(32), anchor=tk.CENTER, stretch=False, minwidth=px(28))
         self.infer_tree.column("name", width=px(160), anchor=tk.W, stretch=True, minwidth=px(72))
@@ -1414,6 +1415,7 @@ class RlApp:
         self._paused = False
         self._locked_view = None
         self._locked_mode = None
+        self._infer_seq_ctx = None
         self.btn_run.configure(state=tk.NORMAL, text="▶ Run")
         self.btn_pause.configure(state=tk.DISABLED)
         self.btn_stop.configure(state=tk.DISABLED)
@@ -1677,7 +1679,10 @@ class RlApp:
                 else:
                     self._run_infer_log(idx)
             else:
-                self._run_infer_sequence(targets)
+                if self.view.get() == "map":
+                    self._run_infer_sequence_map(targets)
+                else:
+                    self._run_infer_sequence(targets)
             return
 
         self._start_train()
@@ -1804,9 +1809,13 @@ class RlApp:
             if self._anim_after_id:
                 self.root.after_cancel(self._anim_after_id)
                 self._anim_after_id = None
-            self._end_run()
+            if self._infer_seq_ctx:
+                self._infer_sequence_finish(stopped=True)
+            else:
+                self._end_run()
             self.status.set("Stopped")
-            self.map_view.set_status("Đã dừng inference")
+            if self.view.get() == "map":
+                self.map_view.set_status("Inference stopped")
 
 
     def _begin_train(self):
@@ -1959,12 +1968,16 @@ class RlApp:
         return self._format_infer_steps_report(label, outcome)
 
     @staticmethod
+    def _infer_scoring_formula_line():
+        return "scoring: goal +400, checkpoint +100, collision -100, each action -2"
+
+    @staticmethod
     def _format_infer_map_line(map_label, map_score):
-        return "- %s: %.1f điểm" % (map_label, float(map_score))
+        return "- %s: %.1f points" % (map_label, float(map_score))
 
     @staticmethod
     def _format_infer_total_line(total_score):
-        return "Tổng điểm cuối cùng: %.1f" % float(total_score)
+        return "Final total score: %.1f" % float(total_score)
 
     def _format_infer_steps_report(self, map_label, outcome):
         lines = [
@@ -1977,15 +1990,15 @@ class RlApp:
         status = outcome.get("status", "?")
         steps = int(outcome.get("steps", 0))
         if status == "goal":
-            lines.append("Kết quả: GOAL — %d bước" % steps)
+            lines.append("Result: GOAL — %d steps" % steps)
         elif status == "collision":
-            lines.append("Kết quả: COLLISION — dừng ở bước %d" % steps)
+            lines.append("Result: COLLISION — stopped at step %d" % steps)
         else:
-            lines.append("Kết quả: %s (%d bước)" % (status, steps))
+            lines.append("Result: %s (%d steps)" % (status, steps))
         return "\n".join(lines) + "\n"
 
     def _format_infer_score_summary(self, map_scores, total_score):
-        lines = ["", "=== THỐNG KÊ ĐIỂM CUỐI ==="]
+        lines = ["", "=== FINAL SCORE SUMMARY ==="]
         for map_label, map_score in map_scores:
             lines.append(self._format_infer_map_line(map_label, map_score))
         lines.append(self._format_infer_total_line(total_score))
@@ -2011,8 +2024,7 @@ class RlApp:
         self._clear_log()
         self.status.set("Checking infer...")
         self._append_log_text(
-            "Check infer (%s) — thống kê theo công thức: đến đích +400, checkpoint +100, va chạm -100, mỗi action -2."
-            % self._infer_mode_label()
+            "Check infer (%s) — %s." % (self._infer_mode_label(), self._infer_scoring_formula_line())
         )
 
         def finish(done, total, stopped=False):
@@ -2077,8 +2089,7 @@ class RlApp:
         self._clear_log()
         self.status.set("Running sequence...")
         self._append_log_text(
-            "Inference (%s) — thống kê theo công thức: đến đích +400, checkpoint +100, va chạm -100, mỗi action -2."
-            % self._infer_mode_label()
+            "Inference (%s) — %s." % (self._infer_mode_label(), self._infer_scoring_formula_line())
         )
 
         def work():
@@ -2129,6 +2140,84 @@ class RlApp:
 
         threading.Thread(target=work, daemon=True).start()
 
+    def _run_infer_sequence_map(self, infer_paths):
+        if self._running:
+            return
+        try:
+            policy_bin = self._infer_policy_bin()
+        except FileNotFoundError as exc:
+            messagebox.showwarning("Inference", str(exc))
+            return
+        self._begin_run()
+        self._clear_log()
+        if self._anim_after_id:
+            self.root.after_cancel(self._anim_after_id)
+            self._anim_after_id = None
+        self._infer_seq_ctx = {
+            "paths": list(infer_paths),
+            "policy_bin": policy_bin,
+            "index": 0,
+            "map_scores": [],
+            "total": len(infer_paths),
+        }
+        self.status.set("Running sequence...")
+        self._append_log_text(
+            "Inference (%s) — %s." % (self._infer_mode_label(), self._infer_scoring_formula_line())
+        )
+        self._infer_sequence_next_map()
+
+    def _infer_sequence_next_map(self):
+        ctx = self._infer_seq_ctx
+        if not ctx or self._stop_requested:
+            self._infer_sequence_finish(stopped=True)
+            return
+        idx = ctx["index"]
+        total = ctx["total"]
+        if idx >= total:
+            self._infer_sequence_finish(stopped=False)
+            return
+        map_path = ctx["paths"][idx]
+        policy_bin = ctx["policy_bin"]
+        self.status.set("Computing map %d/%d..." % (idx + 1, total))
+
+        def work():
+            import rl_runner
+
+            try:
+                sim, outcome = rl_runner.run_infer_episode_for_map(
+                    map_path,
+                    verbose=False,
+                    policy_bin=policy_bin,
+                    pause_gate=self._pause_gate,
+                    should_stop=lambda: self._stop_requested,
+                )
+                map_label = sim.get("name") or os.path.basename(map_path)
+                if self._stop_requested or outcome.get("status") == "stopped":
+                    self._ui_async(lambda: self._infer_sequence_finish(stopped=True))
+                    return
+                self._ui_async(
+                    lambda s=sim, o=outcome, m=map_label: self._start_animation(s, o, m, sequence_mode=True)
+                )
+            except Exception as exc:
+                self._ui_async(lambda err=exc: self._infer_error(err))
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def _infer_sequence_finish(self, stopped=False):
+        ctx = self._infer_seq_ctx
+        self._infer_seq_ctx = None
+        map_scores = ctx.get("map_scores", []) if ctx else []
+        done = len(map_scores)
+        total = ctx.get("total", done) if ctx else done
+        if map_scores:
+            total_score = sum(score for _, score in map_scores)
+            self._append_log_text(self._format_infer_score_summary(map_scores, total_score))
+        if stopped:
+            self.status.set("Stopped - checked %d/%d map(s)" % (done, total))
+        else:
+            self.status.set("Done - checked %d map(s)" % done)
+        self._end_run()
+
     def _run_infer_log(self, idx):
         map_path = self._map_paths[idx]
         policy_bin = self._infer_policy_bin()
@@ -2136,8 +2225,7 @@ class RlApp:
         self._clear_log()
         self.status.set("Running...")
         self._append_log_text(
-            "Inference (%s) — thống kê theo công thức: đến đích +400, checkpoint +100, va chạm -100, mỗi action -2."
-            % self._infer_mode_label()
+            "Inference (%s) — %s." % (self._infer_mode_label(), self._infer_scoring_formula_line())
         )
 
         def work():
@@ -2188,11 +2276,12 @@ class RlApp:
         threading.Thread(target=work, daemon=True).start()
 
     def _infer_error(self, exc):
+        self._infer_seq_ctx = None
         self._end_run()
         self.status.set("Error")
         messagebox.showerror("Error", str(exc))
 
-    def _start_animation(self, sim_map, outcome, map_label=None):
+    def _start_animation(self, sim_map, outcome, map_label=None, sequence_mode=False):
         delay = self._step_delay_ms()
         map_label = map_label or sim_map.get("name", "?")
 
@@ -2209,7 +2298,7 @@ class RlApp:
             )
         )
         log = outcome.get("log") or []
-        self._play_steps(log, 0, outcome, delay, map_label)
+        self._play_steps(log, 0, outcome, delay, map_label, sequence_mode=sequence_mode)
 
     def _render_infer_result_map(self, sim_map, outcome):
         self.map_view.load_sim_map(sim_map)
@@ -2220,17 +2309,20 @@ class RlApp:
         status = outcome.get("status", "?")
         steps = int(outcome.get("steps", 0))
         score = float(outcome.get("score", 0.0))
-        self.map_view.set_status("Kết quả: %s | bước=%d | điểm=%.1f" % (status, steps, score))
+        self.map_view.set_status("Result: %s | steps=%d | score=%.1f" % (status, steps, score))
 
-    def _play_steps(self, log, index, outcome, delay, map_label):
+    def _play_steps(self, log, index, outcome, delay, map_label, sequence_mode=False):
         if self._stop_requested:
-            self.map_view.set_status("Đã dừng inference")
+            self.map_view.set_status("Inference stopped")
             self.status.set("Stopped")
-            self._end_run()
+            if sequence_mode or self._infer_seq_ctx:
+                self._infer_sequence_finish(stopped=True)
+            else:
+                self._end_run()
             return
         if self._paused:
             self._anim_after_id = self.root.after(
-                50, lambda: self._play_steps(log, index, outcome, delay, map_label)
+                50, lambda: self._play_steps(log, index, outcome, delay, map_label, sequence_mode)
             )
             return
         if index >= len(log):
@@ -2238,14 +2330,22 @@ class RlApp:
             steps = outcome.get("steps", 0)
             score = float(outcome.get("score", 0.0))
             if status == "goal":
-                msg = "GOAL — %d bước" % steps
+                msg = "GOAL — %d steps" % steps
             elif status == "collision":
-                msg = "COLLISION — dừng ở bước %d" % steps
+                msg = "COLLISION — stopped at step %d" % steps
             else:
-                msg = "Kết thúc: %s (%d bước)" % (status, steps)
+                msg = "Finished: %s (%d steps)" % (status, steps)
             self.map_view.set_status(msg)
             self.status.set("Done — " + msg)
-            self._append_log_text("Kết quả: %s" % msg)
+            self._append_log_text("Result: %s" % msg)
+            if sequence_mode and self._infer_seq_ctx:
+                ctx = self._infer_seq_ctx
+                ctx["map_scores"].append((map_label, score))
+                ctx["index"] += 1
+                done = len(ctx["map_scores"])
+                self.map_view.set_status("Map %d/%d: %s" % (done, ctx["total"], msg))
+                self._infer_sequence_next_map()
+                return
             self._append_log_text(self._format_infer_score_summary([(map_label, score)], score))
             self._end_run()
             return
@@ -2254,7 +2354,8 @@ class RlApp:
         self.map_view.show_step(entry)
         self._append_step_log(entry)
         self._anim_after_id = self.root.after(
-            delay, lambda: self._play_steps(log, index + 1, outcome, delay, map_label)
+            delay,
+            lambda: self._play_steps(log, index + 1, outcome, delay, map_label, sequence_mode),
         )
 
     def _run_done(self):
