@@ -334,8 +334,7 @@ class LearnLabApp:
             for tk_key in keys:
                 if tk_key in THRESHOLD_LABELS and tk_key not in seen_thresholds:
                     seen_thresholds.add(tk_key)
-                    default_val = "1" if tk_key == "CP_TARGET_INDEX" else "4"
-                    self._threshold_vars[tk_key] = tk.StringVar(value=default_val)
+                    self._threshold_vars[tk_key] = tk.StringVar(value="1")
 
         self._bind_reward_wheel_tree(self._reward_scroll_canvas)
 
@@ -402,7 +401,7 @@ class LearnLabApp:
                     return int(base_var.get())
                 except ValueError:
                     pass
-        return reward_config.get_reward_dict().get(tk_key, 0)
+        return 1
 
     def _token_eid(self, tok, label_to_eid):
         base, _ = split_reward_display(tok.get("display") or tok.get("value") or "")
@@ -891,7 +890,14 @@ class LearnLabApp:
         d = reward_config.get_reward_dict()
         for eid, wkey in ELEMENT_WEIGHT_KEY.items():
             if eid in self._weight_vars and wkey in d:
-                self._weight_vars[eid].set(str(d[wkey]))
+                raw = d[wkey]
+                try:
+                    num = float(raw)
+                except (TypeError, ValueError):
+                    num = _DEFAULT_WEIGHTS.get(eid, _DEFAULT_BLOCK_WEIGHT)
+                if num == 0:
+                    num = _DEFAULT_WEIGHTS.get(eid, _DEFAULT_BLOCK_WEIGHT)
+                self._weight_vars[eid].set(str(num))
         for k, var in self._threshold_vars.items():
             if k in d:
                 var.set(str(d[k]))
@@ -1158,17 +1164,8 @@ class LearnLabApp:
     def _reset_defaults(self):
         for eid, var in self._weight_vars.items():
             var.set(str(_DEFAULT_WEIGHTS.get(eid, _DEFAULT_BLOCK_WEIGHT)))
-        for k, var in self._threshold_vars.items():
-            var.set(str({
-                "MAX_ROTATE_STREAK": 4,
-                "MAX_REVISIT_STEPS": 5,
-                "MAX_CELL_REPEAT": 3,
-                "MAX_PING_PONG_CYCLES": 1,
-                "MAX_PING_PONG_SPAN": 5,
-                "MAX_STRAIGHT_REACH": 3,
-                "MAX_STRAIGHT_CAP": 3,
-                "CP_TARGET_INDEX": 1,
-            }.get(k, var.get())))
+        for _k, var in self._threshold_vars.items():
+            var.set("1")
         self._weight_instance_saved_values = {}
         self._clear_weight_panel_widgets()
         self._weight_instance_vars = {}

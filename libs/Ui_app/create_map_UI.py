@@ -95,6 +95,8 @@ class MapEditorApp:
         self._map_list_drag_cb = {}
         self._suppress_list_events = False
         self._active_list_kind = None
+        self._side_panel_width = None
+        self._preserve_side_panel_width = False
 
         self._build_toolbar()
         self._build_workspace()
@@ -187,6 +189,8 @@ class MapEditorApp:
         self.root.bind("<BackSpace>", self._on_delete_key)
 
         side = ttk.LabelFrame(self._paned, text="List map", padding=px(6))
+        self._side_panel = side
+        self._side_panel.bind("<Configure>", self._on_side_panel_configure, add="+")
         side.columnconfigure(0, weight=1)
         side.rowconfigure(1, weight=1)
         side.rowconfigure(3, weight=1)
@@ -201,12 +205,49 @@ class MapEditorApp:
 
         self._paned.add(self._canvas_wrap, minsize=px(360), stretch="always")
         self._paned.add(side, minsize=px(240), stretch="always")
+        self.root.after_idle(self._restore_paned_layout)
 
     def _on_paned_resize(self, _event=None):
+        self._remember_paned_layout()
         try:
             self.root.after_idle(self.redraw)
         except Exception:
             pass
+
+    def _on_side_panel_configure(self, _event=None):
+        self._remember_paned_layout()
+
+    def _remember_paned_layout(self, force=False):
+        try:
+            if self._preserve_side_panel_width and not force:
+                return
+            if hasattr(self, "_side_panel") and self._side_panel.winfo_ismapped():
+                w = int(self._side_panel.winfo_width())
+                if w > 1:
+                    self._side_panel_width = w
+        except (tk.TclError, ValueError):
+            pass
+
+    def _restore_paned_layout(self):
+        try:
+            if self._side_panel_width is None:
+                return
+            total_w = int(self._paned.winfo_width())
+            if total_w <= 1:
+                return
+            sash_w = int(self._paned.cget("sashwidth") or 0)
+            min_left = px(360)
+            min_right = px(240)
+            max_left = total_w - sash_w - min_right
+            if max_left <= min_left:
+                return
+            target = total_w - sash_w - int(self._side_panel_width)
+            target = max(min_left, min(max_left, target))
+            self._paned.sash_place(0, target, 0)
+        except (tk.TclError, ValueError):
+            pass
+        finally:
+            self._preserve_side_panel_width = False
 
     def _build_map_scroll_list(self, parent, kind):
         wrap = ttk.Frame(parent)
@@ -482,6 +523,8 @@ class MapEditorApp:
 
     def refresh_map_lists(self, kind=None, select_path=None):
         """Đọc lại map/train + map/infer; giữ selection nếu file còn tồn tại."""
+        self._remember_paned_layout(force=True)
+        self._preserve_side_panel_width = True
         prev_train = self._selected_map_path("train")
         prev_infer = self._selected_map_path("infer")
         if select_path:
@@ -502,6 +545,7 @@ class MapEditorApp:
             self._rebuild_map_list("infer", self._infer_map_paths, infer_select)
         finally:
             self._suppress_list_events = False
+        self.root.after_idle(self._restore_paned_layout)
 
     def _selected_map_path(self, kind):
         return self._map_list_selected(kind)

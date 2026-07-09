@@ -69,7 +69,7 @@ class RlApp:
 
         self.mode = tk.StringVar(value="train")
         self.view = tk.StringVar(value="log")
-        self.episodes = tk.IntVar(value=10000)
+        self.episodes = tk.IntVar(value=10)
         self.step_delay = tk.StringVar(value="200")
         self.checkpoint_var = tk.StringVar(value="(mới)")
         self.export_policy_var = tk.StringVar(value="policy")
@@ -549,6 +549,7 @@ class RlApp:
         self._side_col_minsize = px(240)
         self._log_col_minsize = px(220)
         self._map_col_minsize = px(180)
+        self._side_panel_width = None
 
         try:
             pane_bg = ttk.Style().lookup("TFrame", "background")
@@ -587,11 +588,41 @@ class RlApp:
         self.maps_frame.rowconfigure(0, weight=1)
 
     def _on_paned_resize(self, _event=None):
+        self._remember_paned_layout()
         if self.view.get() != "map":
             return
         try:
             self.root.after_idle(self.map_view.redraw)
         except Exception:
+            pass
+
+    def _remember_paned_layout(self):
+        try:
+            if self.maps_frame.winfo_ismapped():
+                width = int(self.maps_frame.winfo_width())
+                if width > 1:
+                    self._side_panel_width = width
+        except (tk.TclError, ValueError):
+            pass
+
+    def _restore_paned_layout(self):
+        try:
+            if self._side_panel_width is None:
+                return
+            total_w = int(self._paned.winfo_width())
+            if total_w <= 1:
+                return
+            sash_w = int(self._paned.cget("sashwidth") or 0)
+            is_map = self.view.get() == "map"
+            sash_idx = 1 if is_map else 0
+            min_left = self._log_col_minsize + (self._map_col_minsize if is_map else 0)
+            max_left = total_w - sash_w - self._side_col_minsize
+            if max_left <= min_left:
+                return
+            target = total_w - sash_w - int(self._side_panel_width)
+            target = max(min_left, min(max_left, target))
+            self._paned.sash_place(sash_idx, target, 0)
+        except (tk.TclError, ValueError):
             pass
 
     def _apply_pane_minsizes(self):
@@ -605,6 +636,7 @@ class RlApp:
 
     def _rebuild_paned_panes(self):
         """Sắp xếp lại pane Log | Map | List map — Map ẩn khi View = Log."""
+        self._remember_paned_layout()
         for child in (self.log_frame, self.map_frame, self.maps_frame):
             try:
                 self._paned.forget(child)
@@ -618,6 +650,7 @@ class RlApp:
             self._paned.add(self.map_frame, minsize=self._map_col_minsize, stretch=stretch)
         self._paned.add(self.maps_frame, minsize=self._side_col_minsize, stretch=stretch)
         self._apply_pane_minsizes()
+        self.root.after_idle(self._restore_paned_layout)
 
         if is_map:
             self.delay_group.set_enabled(True)
@@ -669,10 +702,10 @@ class RlApp:
         self.train_tree.heading("ord", text="≡")
         self.train_tree.heading("name", text="File map")
         self.train_tree.heading("eps", text="Episodes")
-        self.train_tree.column("on", width=px(34), anchor=tk.CENTER, stretch=False, minwidth=px(30))
-        self.train_tree.column("ord", width=px(32), anchor=tk.CENTER, stretch=False, minwidth=px(28))
-        self.train_tree.column("name", width=px(160), anchor=tk.W, stretch=True, minwidth=px(72))
-        self.train_tree.column("eps", width=px(72), anchor=tk.CENTER, stretch=False, minwidth=px(56))
+        self.train_tree.column("on", width=px(56), anchor=tk.CENTER, stretch=False, minwidth=px(50))
+        self.train_tree.column("ord", width=px(36), anchor=tk.CENTER, stretch=False, minwidth=px(30))
+        self.train_tree.column("name", width=px(160), anchor=tk.W, stretch=False, minwidth=px(120))
+        self.train_tree.column("eps", width=px(108), anchor=tk.CENTER, stretch=False, minwidth=px(92))
         self.train_tree.grid(row=0, column=0, sticky="nsew")
         scroll_t.grid(row=0, column=1, sticky="ns")
         scroll_x.grid(row=1, column=0, sticky="ew")
@@ -680,6 +713,7 @@ class RlApp:
         self.train_tree.bind("<Button-1>", self._on_train_tree_click, add=True)
         self.train_tree.bind("<ButtonRelease-1>", self._on_train_drag_release, add=True)
         self.train_tree.bind("<B1-Motion>", self._on_train_drag_motion, add=True)
+        self.train_tree.bind("<Configure>", self._on_train_tree_resize, add=True)
 
         btn_row = tk.Frame(self.train_cfg_frame, height=px(44))
         btn_row.grid(row=2, column=0, sticky="ew", pady=(px(6), 0))
@@ -764,16 +798,16 @@ class RlApp:
         mode = mode or self.train_map_mode.get()
         store = row.get("episodes_by_mode")
         if store is None:
-            return max(1, int(row.get("episodes", 1000)))
+            return max(1, int(row.get("episodes", 10)))
         if mode not in store:
-            store[mode] = 1000
+            store[mode] = 10
         return max(1, int(store[mode]))
 
     def _set_row_episodes(self, row, n, mode=None):
         mode = mode or self.train_map_mode.get()
         if mode not in ("sequential", "single"):
             return
-        store = row.setdefault("episodes_by_mode", {"sequential": 1000, "single": 1000})
+        store = row.setdefault("episodes_by_mode", {"sequential": 10, "single": 10})
         store[mode] = max(1, int(n))
 
     def _row_curriculum_goal(self, row):
@@ -801,7 +835,7 @@ class RlApp:
         mode = mode or self.train_map_mode.get()
         if mode == "random":
             self.spin_ep.configure(state=tk.NORMAL)
-            self.spin_ep.set(str(self._episodes_by_mode.get("random", 10000)))
+            self.spin_ep.set(str(self._episodes_by_mode.get("random", 10)))
         elif mode == "curriculum":
             self._update_train_episodes_total()
         else:
@@ -855,17 +889,17 @@ class RlApp:
     def _apply_train_mode_ui(self):
         mode = self.train_map_mode.get()
         self.train_tree.configure(displaycolumns=self._train_tree_display_columns())
-        self.train_tree.column("on", width=px(34), anchor=tk.CENTER, stretch=False, minwidth=px(30))
-        self.train_tree.column("ord", width=px(32), anchor=tk.CENTER, stretch=False, minwidth=px(28))
-        self.train_tree.column("name", anchor=tk.W, stretch=True, minwidth=px(72))
+        self.train_tree.column("on", width=px(56), anchor=tk.CENTER, stretch=False, minwidth=px(50))
+        self.train_tree.column("ord", width=px(36), anchor=tk.CENTER, stretch=False, minwidth=px(30))
+        self.train_tree.column("name", anchor=tk.W, stretch=False, minwidth=px(120))
         if mode != "random":
             self.train_tree.heading("eps", text="Goal qua map" if mode == "curriculum" else "Episodes")
             self.train_tree.column(
                 "eps",
-                width=px(72),
+                width=px(108),
                 anchor=tk.CENTER,
                 stretch=False,
-                minwidth=px(56),
+                minwidth=px(92),
             )
         if mode == "single":
             self.btn_train_select_all.pack_forget()
@@ -874,6 +908,34 @@ class RlApp:
             self.btn_train_select_all.pack(side=tk.LEFT, padx=(0, 4), pady=4)
             self.btn_train_select_none.pack(side=tk.LEFT, padx=4, pady=4)
         self.curriculum_cfg_frame.pack_forget()
+        self._fit_train_name_column()
+
+    def _on_train_tree_resize(self, _event=None):
+        self._fit_train_name_column()
+
+    def _fit_train_name_column(self):
+        cols = self._train_tree_display_columns()
+        if "name" not in cols:
+            return
+        try:
+            tree_w = int(self.train_tree.winfo_width())
+        except (tk.TclError, ValueError):
+            return
+        if tree_w <= 1:
+            return
+        fixed_w = 0
+        for key in cols:
+            if key == "name":
+                continue
+            try:
+                fixed_w += int(self.train_tree.column(key, "width"))
+            except (tk.TclError, ValueError):
+                pass
+        target = max(px(120), tree_w - fixed_w - px(26))
+        try:
+            self.train_tree.column("name", width=target)
+        except tk.TclError:
+            pass
 
     def _train_enabled_rows(self):
         return [r for r in self._train_rows if r["enabled"]]
@@ -1059,7 +1121,7 @@ class RlApp:
             prev = old.get(name, {})
             prev_eps = prev.get("episodes_by_mode")
             if prev_eps is None:
-                legacy = prev.get("episodes", 1000)
+                legacy = prev.get("episodes", 10)
                 prev_eps = {"sequential": legacy, "single": legacy}
             rows.append(
                 {
@@ -1284,7 +1346,7 @@ class RlApp:
         try:
             n_ep = max(1, int(self.spin_ep.get()))
         except ValueError:
-            n_ep = self._episodes_by_mode.get("random", 10000)
+            n_ep = self._episodes_by_mode.get("random", 10)
         return mode, sims, None, n_ep, None
 
     def _start_train(self):
@@ -2508,10 +2570,10 @@ class RlApp:
         try:
             style_train_treeview(self.train_tree, self.root)
             self.train_tree.configure(height=text_lines(8))
-            self.train_tree.column("on", width=px(34), minwidth=px(30), stretch=False)
-            self.train_tree.column("ord", width=px(32), minwidth=px(28))
-            self.train_tree.column("name", width=px(160), minwidth=px(72))
-            self.train_tree.column("eps", width=px(72), minwidth=px(56))
+            self.train_tree.column("on", width=px(56), minwidth=px(50), stretch=False)
+            self.train_tree.column("ord", width=px(36), minwidth=px(30), stretch=False)
+            self.train_tree.column("name", width=px(160), minwidth=px(120), stretch=False)
+            self.train_tree.column("eps", width=px(108), minwidth=px(92), stretch=False)
             self._apply_train_mode_ui()
         except tk.TclError:
             pass
@@ -2534,6 +2596,7 @@ class RlApp:
             self._map_col_minsize = px(180)
             self._paned.configure(sashwidth=px(6))
             self._apply_pane_minsizes()
+            self.root.after_idle(self._restore_paned_layout)
         except tk.TclError:
             pass
         try:

@@ -5,7 +5,15 @@ import sys
 import tkinter as tk
 from tkinter import ttk
 
-from Ui_app.ui_scale import attach_window_scaling, configure_window, font, init as init_ui_scale, px, scale, set_scale
+from Ui_app.ui_scale import (
+    attach_window_scaling,
+    configure_window,
+    font,
+    init as init_ui_scale,
+    px,
+    scale,
+    set_manual_scale,
+)
 from app_tabs.robot_monitor import RobotMonitorApp
 
 
@@ -37,6 +45,10 @@ _TAB_COLORS = (
     ("Train / Inference", "#32405a", "#89b4fa"),
     ("Monitor", "#45325a", "#cba6f7"),
 )
+_ZOOM_FIXED_FONT = ("Segoe UI", 10, "bold")
+_ZOOM_FIXED_PAD_X = 8
+_ZOOM_FIXED_PAD_Y = 4
+_ZOOM_FIXED_GAP = 3
 
 
 class _ColoredNotebook:
@@ -62,9 +74,9 @@ class _ColoredNotebook:
             text="Kích thước",
             bg="#11111b",
             fg="#cdd6f4",
-            font=font(10, weight="bold"),
+            font=_ZOOM_FIXED_FONT,
         )
-        self._zoom_label.pack(side=tk.LEFT, padx=(0, px(3)))
+        self._zoom_label.pack(side=tk.LEFT, padx=(0, _ZOOM_FIXED_GAP))
         self._zoom_minus = tk.Button(
             self._zoom_wrap,
             text="-",
@@ -74,13 +86,13 @@ class _ColoredNotebook:
             activeforeground="#11111b",
             relief=tk.RAISED,
             bd=2,
-            padx=px(8),
-            pady=px(4),
-            font=font(10, weight="bold"),
+            padx=_ZOOM_FIXED_PAD_X,
+            pady=_ZOOM_FIXED_PAD_Y,
+            font=_ZOOM_FIXED_FONT,
             cursor="hand2",
             command=self._emit_zoom_out,
         )
-        self._zoom_minus.pack(side=tk.LEFT, padx=(0, px(3)))
+        self._zoom_minus.pack(side=tk.LEFT, padx=(0, _ZOOM_FIXED_GAP))
         self._zoom_plus = tk.Button(
             self._zoom_wrap,
             text="+",
@@ -90,9 +102,9 @@ class _ColoredNotebook:
             activeforeground="#11111b",
             relief=tk.RAISED,
             bd=2,
-            padx=px(8),
-            pady=px(4),
-            font=font(10, weight="bold"),
+            padx=_ZOOM_FIXED_PAD_X,
+            pady=_ZOOM_FIXED_PAD_Y,
+            font=_ZOOM_FIXED_FONT,
             cursor="hand2",
             command=self._emit_zoom_in,
         )
@@ -103,10 +115,6 @@ class _ColoredNotebook:
         f = font(10, weight="bold")
         for btn, _idle, _active in self._buttons:
             btn.configure(padx=px(18), pady=px(9), font=f)
-        self._zoom_wrap.configure(padx=0, pady=0)
-        self._zoom_label.configure(font=f)
-        self._zoom_minus.configure(font=f, padx=px(8), pady=px(4))
-        self._zoom_plus.configure(font=f, padx=px(8), pady=px(4))
 
     def add(self, label, bg_idle, bg_active):
         frame = ttk.Frame(self._body)
@@ -198,7 +206,7 @@ class SS26App:
 
     def _adjust_ui_scale(self, delta):
         new_scale = scale() + float(delta)
-        if set_scale(new_scale, self.root):
+        if set_manual_scale(new_scale, self.root):
             self._on_ui_scale_changed()
 
     def _build_ui(self, initial_tab):

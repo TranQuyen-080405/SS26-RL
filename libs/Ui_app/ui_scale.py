@@ -7,6 +7,8 @@ Gọi init(root) sau Tk(), attach_window_scaling(root) sau khi dựng UI.
 from __future__ import annotations
 
 import sys
+import os
+import json
 import tkinter as tk
 from tkinter import ttk
 
@@ -25,10 +27,32 @@ _root_ref: tk.Misc | None = None
 _resize_after_id: str | None = None
 _on_scale_change = None
 _scale_listeners: list = []
+_manual_scale_override: float | None = None
+_SCALE_PREF_PATH = os.path.join(os.path.expanduser("~"), ".ss26_rl_ui_scale.json")
 
 
 def scale() -> float:
     return _scale
+
+
+def _load_manual_scale_pref():
+    try:
+        with open(_SCALE_PREF_PATH, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        val = float(data.get("ui_scale"))
+        if 0.50 <= val <= 1.50:
+            return val
+    except Exception:
+        pass
+    return None
+
+
+def _save_manual_scale_pref(value: float) -> None:
+    try:
+        with open(_SCALE_PREF_PATH, "w", encoding="utf-8") as f:
+            json.dump({"ui_scale": float(value)}, f)
+    except Exception:
+        pass
 
 
 def px(n: float) -> int:
@@ -239,6 +263,17 @@ def set_scale(new_scale: float, root: tk.Misc | None = None) -> bool:
     return True
 
 
+def set_manual_scale(new_scale: float, root: tk.Misc | None = None, persist: bool = True) -> bool:
+    """Đặt scale thủ công và khóa auto-resize override."""
+    global _manual_scale_override
+    new_scale = max(0.50, min(1.50, float(new_scale)))
+    _manual_scale_override = new_scale
+    changed = set_scale(new_scale, root)
+    if persist:
+        _save_manual_scale_pref(new_scale)
+    return changed
+
+
 def update_scale_from_window(root: tk.Misc | None = None) -> bool:
     """Cập nhật scale từ kích thước cửa sổ hiện tại."""
     r = root or _root_ref
@@ -246,17 +281,23 @@ def update_scale_from_window(root: tk.Misc | None = None) -> bool:
         return False
     r.update_idletasks()
     w, h = r.winfo_width(), r.winfo_height()
+    if _manual_scale_override is not None:
+        return set_scale(_manual_scale_override, r)
     if w < 200 or h < 200:
         return set_scale(_scale_from_screen(_screen_w, _screen_h), r)
     return set_scale(_scale_from_dims(w, h), r)
 
 
 def init(root: tk.Misc) -> float:
-    global _scale, _initialized, _screen_w, _screen_h, _root_ref
+    global _scale, _initialized, _screen_w, _screen_h, _root_ref, _manual_scale_override
     _detect_dpi_awareness()
     _root_ref = root
     _screen_w, _screen_h = _read_screen(root)
-    _scale = _scale_from_screen(_screen_w, _screen_h)
+    _manual_scale_override = _load_manual_scale_pref()
+    if _manual_scale_override is not None:
+        _scale = _manual_scale_override
+    else:
+        _scale = _scale_from_screen(_screen_w, _screen_h)
     _apply_ttk_defaults(root)
     _initialized = True
     return _scale
