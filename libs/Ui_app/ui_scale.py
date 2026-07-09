@@ -309,11 +309,18 @@ def attach_window_scaling(root: tk.Misc, on_change=None) -> None:
                 pass
         _resize_after_id = root.after(150, _apply)
 
+    _first_apply = True
+
     def _apply():
+        nonlocal _first_apply
         global _resize_after_id
         _resize_after_id = None
-        update_scale_from_window(root)
-        _notify_scale_listeners()
+        changed = update_scale_from_window(root)
+        # Chỉ phát listener khi scale thật sự đổi (hoặc lần đầu),
+        # tránh refresh/redraw toàn UI liên tục gây giật lag.
+        if _first_apply or changed:
+            _first_apply = False
+            _notify_scale_listeners()
 
     root.bind("<Configure>", _schedule, add="+")
     root.after_idle(_apply)
@@ -363,3 +370,16 @@ def lab_margin() -> int:
 
 def lab_max_canvas_w() -> int:
     return px(450)
+
+
+def checkpoint_label_font(cell: int, weight: str = "bold", family: str = ""):
+    """Font số checkpoint — tỷ lệ theo kích thước ô canvas (pixel)."""
+    sz = max(7, int(round(cell * 0.40)))
+    if family:
+        return (family, sz, weight) if weight != "normal" else (family, sz)
+    return ("", sz, weight) if weight != "normal" else ("", sz)
+
+
+def checkpoint_label_inset(cell: int) -> int:
+    """Lề góc phải-trên trong ô cho nhãn checkpoint."""
+    return max(px(2), int(round(cell * 0.10)))

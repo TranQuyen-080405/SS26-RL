@@ -15,29 +15,38 @@ from RL_lib.student_formula import default_total_formula, tokens_to_expr, parse_
 
 # --- Hằng reward (đặt 0 nếu module tắt / không dùng) ---
 DEFAULT_BLOCK_WEIGHT = 1.0
-R_STEP = 1.0
-R_COLLISION = 1.0
-R_EXCESS_ROTATE = 1.0
-R_GOAL_CLOSER = 1.0
-R_GOAL_FARTHER = 1.0
-R_CP_CLOSER = 1.0
-R_CP_FARTHER = 1.0
-R_CHECKPOINT_FIRST = 1.0
-R_GOAL_REACHED = 1.0
-R_ROTATE_IN_PLACE = 1.0
-R_FACING_CLEAR = 1.0
-R_FORWARD_CLEAR = 1.0
-R_WASTED_ROTATE = 1.0
-R_BLOCKED_ROTATE = 1.0
+R_STEP = -1.2
+R_COLLISION = -220
+R_EXCESS_ROTATE = -60.0
+R_GOAL_CLOSER = 9.0
+R_GOAL_FARTHER = -10.0
+R_CP_CLOSER = 10.0
+R_CP_FARTHER = -4.0
+R_CHECKPOINT_FIRST = 120.0
+R_GOAL_REACHED = 260.0
+R_ROTATE_IN_PLACE = -8.0
+R_FACING_CLEAR = 0.0
+R_FORWARD_CLEAR = 5.0
+R_WASTED_ROTATE = -15.0
+R_BLOCKED_ROTATE = 5.0
+R_ROTATE_TO_N = 1.0
+R_ROTATE_TO_E = 1.0
+R_ROTATE_TO_S = 1.0
+R_ROTATE_TO_W = 1.0
+R_FORWARD_N = 1.0
+R_FORWARD_E = 1.0
+R_FORWARD_S = 1.0
+R_FORWARD_W = 1.0
+R_FORWARD_NEW = 1.0
 R_STRAIGHT = 1.0
 R_STRAIGHT_REACH = 1.0
 R_STRAIGHT_CAP = 1.0
-R_WALL_DETECT = 1.0
-R_WALL_VISIBLE = 1.0
-R_WALL_ON_ENTRY = 1.0
-R_VISIT_WINDOW = 1.0
-R_VISIT_REPEAT = 1.0
-R_PING_PONG = 1.0
+R_WALL_DETECT = 0.0
+R_WALL_VISIBLE = 0.0
+R_WALL_ON_ENTRY = 0.0
+R_VISIT_WINDOW = -18.0
+R_VISIT_REPEAT = -45.0
+R_PING_PONG = -90.0
 
 MAX_ROTATE_STREAK = 2
 MAX_REVISIT_STEPS = 4
@@ -46,14 +55,15 @@ MAX_PING_PONG_CYCLES = 1
 MAX_PING_PONG_SPAN = 5
 MAX_STRAIGHT_REACH = 3
 MAX_STRAIGHT_CAP = 3
+CP_TARGET_INDEX = 1
 COLLISION_RESET = False
 MAX_STEPS_PER_EPISODE = 600
 
 # --- Learn Lab: module bật + công thức từng element ---
-FORMULA_NAME = 'test'
+FORMULA_NAME = 'Reward_1'
 ENABLED_MODULES = set(['checkpoint', 'explore_penalty', 'goal', 'heading', 'memory_loop', 'obstacle', 'rotation', 'step'])
 ELEMENT_FORMULAS = dict(DEFAULT_ELEMENT_FORMULAS)
-TOTAL_FORMULA_STUDENT = 'Mỗi bước đi #1 +  Mỗi bước đi #2 +  Xoay sang hướng thông thoáng #1 +  Xoay sang hướng thông thoáng #2 +  Xoay sang hướng thông thoáng #3 +  Xoay sang hướng thông thoáng #4 +  Xoay sang hướng thông thoáng #5 +  Xoay sang hướng thông thoáng #6 +  Xoay sang hướng thông thoáng #7 +  Xoay sang hướng thông thoáng #8 +  Xoay sang hướng thông thoáng #9 +  Xoay sang hướng thông thoáng #10 +  Xoay sang hướng thông thoáng #11 +  Xoay sang hướng thông thoáng #12 +  Xoay sang hướng thông thoáng #13 +  Xoay sang hướng thông thoáng #14 +  Xoay sang hướng thông thoáng #15 +  Xoay sang hướng thông thoáng #16 +  Xoay sang hướng thông thoáng #17 +  Xoay sang hướng thông thoáng #18 +  Xoay sang hướng thông thoáng #19 +  Xoay sang hướng thông thoáng #20 +  Xoay sang hướng thông thoáng #21'
+TOTAL_FORMULA_STUDENT = 'Xoay tại chỗ #1 +  (  Lặp ô gần #1 +  Quay lại ô #1 +  Đi qua đi lại liên tục #1 )  +  Mỗi bước đi #1 +  Lại gần goal #1 +  Lại gần checkpoint #1 +  Chạm checkpoint #1 +  Giữ hướng #1 +  Va chạm tường #1'
 INSTANCE_CONFIGS = {
     "excess_rotate#1": {"eid": "excess_rotate", "weight": 1.0, "thresholds": {"MAX_ROTATE_STREAK": 2}},
     "excess_rotate#2": {"eid": "excess_rotate", "weight": 1.0, "thresholds": {"MAX_ROTATE_STREAK": 4}},
@@ -68,6 +78,9 @@ INSTANCE_CONFIGS = {
 }
 
 _THRESHOLD_FOR_EID = {
+    "cp_closer": ["CP_TARGET_INDEX"],
+    "cp_farther": ["CP_TARGET_INDEX"],
+    "checkpoint": ["CP_TARGET_INDEX"],
     "excess_rotate": ["MAX_ROTATE_STREAK"],
     "visit_window": ["MAX_REVISIT_STEPS"],
     "visit_repeat": ["MAX_CELL_REPEAT"],
@@ -91,6 +104,15 @@ REWARD_KEYS = (
     "R_FORWARD_CLEAR",
     "R_WASTED_ROTATE",
     "R_BLOCKED_ROTATE",
+    "R_ROTATE_TO_N",
+    "R_ROTATE_TO_E",
+    "R_ROTATE_TO_S",
+    "R_ROTATE_TO_W",
+    "R_FORWARD_N",
+    "R_FORWARD_E",
+    "R_FORWARD_S",
+    "R_FORWARD_W",
+    "R_FORWARD_NEW",
     "R_STRAIGHT",
     "R_STRAIGHT_REACH",
     "R_STRAIGHT_CAP",
@@ -107,6 +129,7 @@ REWARD_KEYS = (
     "MAX_PING_PONG_SPAN",
     "MAX_STRAIGHT_REACH",
     "MAX_STRAIGHT_CAP",
+    "CP_TARGET_INDEX",
     "COLLISION_RESET",
     "MAX_STEPS_PER_EPISODE",
 )
@@ -206,6 +229,15 @@ def sync_weights_from_elements(element_weights):
     if "cp_trend" in element_weights:
         globals()["R_CP_CLOSER"] = element_weights["cp_trend"]
         globals()["R_CP_FARTHER"] = -element_weights["cp_trend"]
+    if "cp_closer" in element_weights:
+        v = element_weights["cp_closer"]
+        globals()["R_CP_CLOSER"] = v
+    if "cp_farther" in element_weights:
+        v = element_weights["cp_farther"]
+        globals()["R_CP_FARTHER"] = v
+    if "checkpoint" in element_weights:
+        v = element_weights["checkpoint"]
+        globals()["R_CHECKPOINT_FIRST"] = v
     if "straight_streak" in element_weights:
         globals()["R_STRAIGHT_REACH"] = element_weights["straight_streak"]
         globals()["R_STRAIGHT_CAP"] = element_weights["straight_streak"]
@@ -302,6 +334,8 @@ def _instance_ctx(base_ctx, robot, eid, cfg):
     max_ping_span = int(c.get("MAX_PING_PONG_SPAN", MAX_PING_PONG_SPAN))
     max_straight_reach = int(c.get("MAX_STRAIGHT_REACH", MAX_STRAIGHT_REACH))
     max_straight_cap = int(c.get("MAX_STRAIGHT_CAP", MAX_STRAIGHT_CAP))
+    cp_target_idx = int(c.get("CP_TARGET_INDEX", CP_TARGET_INDEX))
+    cp_target_idx = max(1, min(3, cp_target_idx))
 
     rotate_streak = int(c.get("_rotate_streak", 0))
     spin_streak = int(c.get("_spin_streak", 0))
@@ -327,6 +361,13 @@ def _instance_ctx(base_ctx, robot, eid, cfg):
     c["straight_streak_on"] = straight_streak >= max_straight_reach
     c["straight_streak_reach_on"] = moved and straight_streak >= max_straight_reach
     c["straight_streak_cap_on"] = moved and straight_streak <= max_straight_cap
+
+    if eid in ("cp_closer", "cp_farther", "checkpoint"):
+        suffix = str(cp_target_idx)
+        c["cp_closer"] = bool(c.get("cp%s_closer" % suffix, False))
+        c["cp_farther"] = bool(c.get("cp%s_farther" % suffix, False))
+        c["at_cp_first"] = bool(c.get("at_cp%s_first" % suffix, False))
+    c["cp_target_index"] = cp_target_idx
     return c
 
 
@@ -390,32 +431,40 @@ def _build_reward_context(robot, sim_map, result, could_forward_before=False):
                     revisit_gap = (len(hist) - 1) - i
                     break
 
-    cp_closer = False
-    cp_farther = False
-    at_cp_first = False
+    cp_closer_flags = [False, False, False]
+    cp_farther_flags = [False, False, False]
+    at_cp_first_flags = [False, False, False]
+    at_cp_first_idx = None
     n_cp = sm.n_checkpoints(sim_map) if sim_map else 0
     visited = robot.get("cp_visited")
     if visited is None or not isinstance(visited, list) or len(visited) < n_cp:
         visited = [False] * n_cp
         robot["cp_visited"] = visited
 
+    cp_trends = list(robot.get("dist_cp_trend", [0, 0, 0])[:3])
+    while len(cp_trends) < 3:
+        cp_trends.append(0)
+
     if moved and sim_map:
-        for i in range(n_cp):
-            if i < len(visited) and not visited[i]:
-                ct = robot.get("dist_cp_trend", [0, 0, 0])[i]
-                if ct == 1:
-                    cp_closer = True
-                elif ct == -1:
-                    cp_farther = True
-                break
+        for i in range(3):
+            if i >= n_cp:
+                continue
+            if i >= len(visited) or visited[i]:
+                continue
+            ct = cp_trends[i]
+            cp_closer_flags[i] = (ct == 1)
+            cp_farther_flags[i] = (ct == -1)
 
     if "checkpoint_first_visited" in result:
-        at_cp_first = (result.get("checkpoint_first_visited") is not None)
+        at_cp_first_idx = result.get("checkpoint_first_visited")
+        if isinstance(at_cp_first_idx, int) and 0 <= at_cp_first_idx < 3:
+            at_cp_first_flags[at_cp_first_idx] = True
     elif sim_map:
         for i in range(n_cp):
             if sm.is_at_checkpoint(sim_map, robot["x"], robot["y"], i):
                 if i < len(visited) and not visited[i]:
-                    at_cp_first = True
+                    at_cp_first_idx = i
+                    at_cp_first_flags[i] = True
                     visited[i] = True
                 break
 
@@ -463,7 +512,12 @@ def _build_reward_context(robot, sim_map, result, could_forward_before=False):
     robot["_reward_spin_streak"] = spin_streak
     robot["_reward_no_progress_streak"] = no_progress
 
+    cp_closer = any(cp_closer_flags)
+    cp_farther = any(cp_farther_flags)
+    at_cp_first = any(at_cp_first_flags)
+
     ctx = dict(get_reward_dict())
+    heading = str(robot.get("direct", "N")).upper()
     ctx.update(
         {
             "collision": collision,
@@ -477,9 +531,28 @@ def _build_reward_context(robot, sim_map, result, could_forward_before=False):
             "cp_farther": cp_farther,
             "at_goal": at_goal,
             "at_cp_first": at_cp_first,
+            "cp1_closer": cp_closer_flags[0],
+            "cp1_farther": cp_farther_flags[0],
+            "cp2_closer": cp_closer_flags[1],
+            "cp2_farther": cp_farther_flags[1],
+            "cp3_closer": cp_closer_flags[2],
+            "cp3_farther": cp_farther_flags[2],
+            "at_cp1_first": at_cp_first_flags[0],
+            "at_cp2_first": at_cp_first_flags[1],
+            "at_cp3_first": at_cp_first_flags[2],
+            "at_cp_first_idx": at_cp_first_idx,
             "facing_clear_on": facing_clear_on,
             "wasted_rotate_on": rotated and could_forward_before,
             "blocked_rotate_on": rotated and not could_forward_before,
+            "rotate_to_n_on": rotated and heading == "N",
+            "rotate_to_e_on": rotated and heading == "E",
+            "rotate_to_s_on": rotated and heading == "S",
+            "rotate_to_w_on": rotated and heading == "W",
+            "forward_n_on": moved and heading == "N",
+            "forward_e_on": moved and heading == "E",
+            "forward_s_on": moved and heading == "S",
+            "forward_w_on": moved and heading == "W",
+            "forward_new_cell_on": moved and repeat_visits == 0,
             "_rotate_streak": int(streak),
             "_straight_streak": int(straight_streak),
             "_repeat_visits": int(repeat_visits),
@@ -509,6 +582,7 @@ def _build_reward_context(robot, sim_map, result, could_forward_before=False):
                 "MAX_PING_PONG_SPAN": MAX_PING_PONG_SPAN,
                 "MAX_STRAIGHT_REACH": MAX_STRAIGHT_REACH,
                 "MAX_STRAIGHT_CAP": MAX_STRAIGHT_CAP,
+                "CP_TARGET_INDEX": CP_TARGET_INDEX,
             },
         },
     )
@@ -531,6 +605,15 @@ _FAST_EVAL = {
     "R_FACING_CLEAR if facing_clear_on else 0": lambda c: c["R_FACING_CLEAR"] if c["facing_clear_on"] else 0.0,
     "R_WASTED_ROTATE if wasted_rotate_on else 0": lambda c: c["R_WASTED_ROTATE"] if c["wasted_rotate_on"] else 0.0,
     "R_BLOCKED_ROTATE if blocked_rotate_on else 0": lambda c: c["R_BLOCKED_ROTATE"] if c["blocked_rotate_on"] else 0.0,
+    "R_ROTATE_TO_N if rotate_to_n_on else 0": lambda c: c["R_ROTATE_TO_N"] if c["rotate_to_n_on"] else 0.0,
+    "R_ROTATE_TO_E if rotate_to_e_on else 0": lambda c: c["R_ROTATE_TO_E"] if c["rotate_to_e_on"] else 0.0,
+    "R_ROTATE_TO_S if rotate_to_s_on else 0": lambda c: c["R_ROTATE_TO_S"] if c["rotate_to_s_on"] else 0.0,
+    "R_ROTATE_TO_W if rotate_to_w_on else 0": lambda c: c["R_ROTATE_TO_W"] if c["rotate_to_w_on"] else 0.0,
+    "R_FORWARD_N if forward_n_on else 0": lambda c: c["R_FORWARD_N"] if c["forward_n_on"] else 0.0,
+    "R_FORWARD_E if forward_e_on else 0": lambda c: c["R_FORWARD_E"] if c["forward_e_on"] else 0.0,
+    "R_FORWARD_S if forward_s_on else 0": lambda c: c["R_FORWARD_S"] if c["forward_s_on"] else 0.0,
+    "R_FORWARD_W if forward_w_on else 0": lambda c: c["R_FORWARD_W"] if c["forward_w_on"] else 0.0,
+    "R_FORWARD_NEW if forward_new_cell_on else 0": lambda c: c["R_FORWARD_NEW"] if c["forward_new_cell_on"] else 0.0,
     "R_EXCESS_ROTATE if excess_rotate else 0": lambda c: c["R_EXCESS_ROTATE"] if c["excess_rotate"] else 0.0,
     "R_VISIT_WINDOW if visit_window_penalty else 0": lambda c: c["R_VISIT_WINDOW"] if c["visit_window_penalty"] else 0.0,
     "R_VISIT_REPEAT if visit_repeat_penalty else 0": lambda c: c["R_VISIT_REPEAT"] if c["visit_repeat_penalty"] else 0.0,

@@ -41,8 +41,30 @@ def run(cfg):
         except Exception:
             pass
 
+    def _fmt_xy(pos):
+        return "(%d,%d)" % (int(pos[0]), int(pos[1]))
+
+    def _format_checkpoints(cps):
+        if cps:
+            return "Checkpoints: " + ", ".join(_fmt_xy(cp) for cp in cps)
+        return "Checkpoints: (none)"
+
+    def _format_end_reason(status, steps):
+        if status == "goal":
+            return "End: reached goal after %d steps" % steps
+        if status == "collision":
+            return "End: collision at step %d" % steps
+        if status == "stopped":
+            return "End: stopped at step %d" % steps
+        return "End: %s (%d steps)" % (status, steps)
+
     step = 0
-    _log("Inference | policy=%s | map=%dx%d start=%s goal=%s" % (loaded_name(), w, h, s, cfg["goal"]))
+    map_label = cfg.get("name") or ("%dx%d" % (w, h))
+    _log("-" * 80)
+    _log("Map: %s" % map_label)
+    _log("Start: %s" % _fmt_xy(s))
+    _log("Goal: %s" % _fmt_xy(cfg["goal"]))
+    _log(_format_checkpoints(cfg.get("checkpoints") or []))
     _log("step   pos       dir      s  action")
     if publish_state:
         publish_state(bot, phase="r", step=0)
@@ -109,7 +131,6 @@ def run(cfg):
         )
         if sensor_wall:
             seen_walls = _collect_seen_walls()
-            _log("Sensor: wall detected (%d edges seen)" % len(seen_walls))
         if result.get("collision"):
             end_status = "collision"
             if publish_state:
@@ -127,10 +148,10 @@ def run(cfg):
         moved_new_cells = max(0, unique_cells - 1)
         cp_visited = bot.get("cp_visited") or []
         cp_count = sum(1 for v in cp_visited if v)
-        _log("Result: %s | steps=%d" % (end_status, step))
+        _log(_format_end_reason(end_status, step))
         _log("Stats: walls_seen=%d | new_cells=%d | checkpoints=%d" % (len(seen_walls), moved_new_cells, cp_count))
     elif end_status == "stopped":
-        _log("Result: stopped | steps=%d" % step)
+        _log(_format_end_reason("stopped", step))
     _log("SW: Episode finished. Waiting for new Start command...")
     if end_status in ("goal", "collision"):
         try:

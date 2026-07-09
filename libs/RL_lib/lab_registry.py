@@ -72,7 +72,7 @@ DEFAULT_ENABLED_MODULES = frozenset(m["id"] for m in STATE_MODULES)
 # flags: biến bool/int có trong ngữ cảnh eval (xem FORMULA_HELP)
 REWARD_ELEMENTS = {
     "R_STEP": {
-        "label": "Mỗi bước đi",
+        "label": "Mỗi Action",
         "module": "step",
         "constants": ["R_STEP"],
         "default_formula": "R_STEP",
@@ -128,19 +128,19 @@ REWARD_ELEMENTS = {
     "cp_closer": {
         "label": "Lại gần checkpoint",
         "module": "checkpoint",
-        "constants": ["R_CP_CLOSER"],
+        "constants": ["R_CP_CLOSER", "CP_TARGET_INDEX"],
         "default_formula": "R_CP_CLOSER if cp_closer else 0",
     },
     "cp_farther": {
         "label": "Đi xa checkpoint",
         "module": "checkpoint",
-        "constants": ["R_CP_FARTHER"],
+        "constants": ["R_CP_FARTHER", "CP_TARGET_INDEX"],
         "default_formula": "R_CP_FARTHER if cp_farther else 0",
     },
     "checkpoint": {
         "label": "Chạm checkpoint",
         "module": "checkpoint",
-        "constants": ["R_CHECKPOINT_FIRST"],
+        "constants": ["R_CHECKPOINT_FIRST", "CP_TARGET_INDEX"],
         "default_formula": "R_CHECKPOINT_FIRST if at_cp_first else 0",
     },
     "rotate": {
@@ -166,6 +166,60 @@ REWARD_ELEMENTS = {
         "module": "rotation",
         "constants": ["R_BLOCKED_ROTATE"],
         "default_formula": "R_BLOCKED_ROTATE if blocked_rotate_on else 0",
+    },
+    "rotate_to_n": {
+        "label": "Xoay sang hướng N",
+        "module": "rotation",
+        "constants": ["R_ROTATE_TO_N"],
+        "default_formula": "R_ROTATE_TO_N if rotate_to_n_on else 0",
+    },
+    "rotate_to_e": {
+        "label": "Xoay sang hướng E",
+        "module": "rotation",
+        "constants": ["R_ROTATE_TO_E"],
+        "default_formula": "R_ROTATE_TO_E if rotate_to_e_on else 0",
+    },
+    "rotate_to_s": {
+        "label": "Xoay sang hướng S",
+        "module": "rotation",
+        "constants": ["R_ROTATE_TO_S"],
+        "default_formula": "R_ROTATE_TO_S if rotate_to_s_on else 0",
+    },
+    "rotate_to_w": {
+        "label": "Xoay sang hướng W",
+        "module": "rotation",
+        "constants": ["R_ROTATE_TO_W"],
+        "default_formula": "R_ROTATE_TO_W if rotate_to_w_on else 0",
+    },
+    "forward_n": {
+        "label": "Bước ở hướng N",
+        "module": "step",
+        "constants": ["R_FORWARD_N"],
+        "default_formula": "R_FORWARD_N if forward_n_on else 0",
+    },
+    "forward_e": {
+        "label": "Bước ở hướng E",
+        "module": "step",
+        "constants": ["R_FORWARD_E"],
+        "default_formula": "R_FORWARD_E if forward_e_on else 0",
+    },
+    "forward_s": {
+        "label": "Bước ở hướng S",
+        "module": "step",
+        "constants": ["R_FORWARD_S"],
+        "default_formula": "R_FORWARD_S if forward_s_on else 0",
+    },
+    "forward_w": {
+        "label": "Bước ở hướng W",
+        "module": "step",
+        "constants": ["R_FORWARD_W"],
+        "default_formula": "R_FORWARD_W if forward_w_on else 0",
+    },
+    "forward_new_cell": {
+        "label": "Bước tới ô mới",
+        "module": "step",
+        "constants": ["R_FORWARD_NEW"],
+        "default_formula": "R_FORWARD_NEW if forward_new_cell_on else 0",
     },
     "excess_rotate": {
         "label": "Xoay tại chỗ liên tục",
@@ -225,6 +279,15 @@ ELEMENT_WEIGHT_KEY = {
     "facing_clear": "R_FACING_CLEAR",
     "wasted_rotate": "R_WASTED_ROTATE",
     "blocked_rotate": "R_BLOCKED_ROTATE",
+    "rotate_to_n": "R_ROTATE_TO_N",
+    "rotate_to_e": "R_ROTATE_TO_E",
+    "rotate_to_s": "R_ROTATE_TO_S",
+    "rotate_to_w": "R_ROTATE_TO_W",
+    "forward_n": "R_FORWARD_N",
+    "forward_e": "R_FORWARD_E",
+    "forward_s": "R_FORWARD_S",
+    "forward_w": "R_FORWARD_W",
+    "forward_new_cell": "R_FORWARD_NEW",
     "excess_rotate": "R_EXCESS_ROTATE",
     "visit_window": "R_VISIT_WINDOW",
     "visit_repeat": "R_VISIT_REPEAT",
@@ -235,9 +298,12 @@ ELEMENT_WEIGHT_KEY = {
 
 # Ngưỡng (ẩn tên code trong UI — label riêng)
 THRESHOLD_LABELS = {
+    "CP_TARGET_INDEX": "Số thứ tự Checkpoint",
     "MAX_ROTATE_STREAK": "Ngưỡng xoay tính điểm",
     "MAX_REVISIT_STEPS": "Ngưỡng ô bước khi lặp lại",
     "MAX_CELL_REPEAT": "Ngưỡng ô lặp lại",
+    "MAX_PING_PONG_CYCLES": "Ngưỡng số vòng lặp liên tục",
+    "MAX_PING_PONG_SPAN": "Ngưỡng số ô tối đa lặp (vd: 3 ô [A-B-C-D-C-B-A])",
     "MAX_STRAIGHT_REACH": "Ngưỡng giữ hướng",
     "MAX_STRAIGHT_CAP": "Ngưỡng giữ hướng ngắn",
 }

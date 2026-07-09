@@ -88,10 +88,8 @@ class RlApp:
         self._locked_mode = None
         self.train_map_mode = tk.StringVar(value="random")
         self.infer_map_mode = tk.StringVar(value="single")
-        self.curriculum_goal_hits = tk.StringVar(value="10")
         self._last_train_mode = "random"
         self._episodes_by_mode = {"random": self.episodes.get()}
-        self._curriculum_by_mode = {"goal_hits": 10}
         self._drag_src_iid = None
         self._eps_entry = None
         self._eps_edit_iid = None
@@ -108,7 +106,6 @@ class RlApp:
         self._build_map_list()
         self.mode.trace_add("write", lambda *_: self._on_mode_change())
         self.view.trace_add("write", lambda *_: self._on_view_change())
-        self.curriculum_goal_hits.trace_add("write", lambda *_: self._on_curriculum_goal_hits_changed())
         self._on_mode_change()
         self._sync_formula_combo()
 
@@ -244,7 +241,95 @@ class RlApp:
         box_button(
             self.infer_policy_frame, text="Xuất file CSV", command=self._export_policy_to_csv, role="secondary"
         ).pack(side=tk.LEFT, padx=(0, 4))
+        box_button(
+            self.infer_policy_frame, text="Xuất log", command=self._export_infer_log, role="secondary"
+        ).pack(side=tk.LEFT, padx=(0, 4))
         self.refresh_infer_policies()
+
+    def _latent_map_dir(self):
+        return os.path.join(_ROOT, "latent_map")
+
+    def _list_latent_map_paths(self):
+        folder = self._latent_map_dir()
+        if not os.path.isdir(folder):
+            return []
+        paths = []
+        for name in sorted(os.listdir(folder)):
+            if name.lower().endswith(".json"):
+                paths.append(os.path.join(folder, name))
+        return paths
+
+    def _export_infer_log(self):
+        if self._is_busy():
+            messagebox.showinfo("Xuất log", "Đang chạy train/inference — vui lòng bấm Stop hoặc đợi chạy xong.")
+            return
+        try:
+            policy_bin = self._infer_policy_bin()
+        except FileNotFoundError as exc:
+            messagebox.showwarning("Xuất log", str(exc))
+            return
+
+        map_paths = self._list_latent_map_paths()
+        if not map_paths:
+            messagebox.showwarning("Xuất log", "Không có map .json trong thư mục libs/latent_map/.")
+            return
+
+        policy_name = os.path.basename(policy_bin)
+        default_name = "log_%s.log" % os.path.splitext(policy_name)[0]
+        log_path = filedialog.asksaveasfilename(
+            parent=self.root,
+            title="Xuất log infer (actions)",
+            defaultextension=".log",
+            initialfile=default_name,
+            filetypes=[("Log files", "*.log"), ("All files", "*.*")],
+        )
+        if not log_path:
+            return
+
+        self._begin_run()
+        self.status.set("Đang xuất log infer...")
+
+        def finish(stopped=False, error=None):
+            self._end_run()
+            if error is not None:
+                self.status.set("Lỗi xuất log")
+                messagebox.showerror("Xuất log", "Không thể xuất log:\n%s" % error)
+            elif stopped:
+                self.status.set("Đã dừng xuất log")
+                messagebox.showinfo("Xuất log", "Đã dừng. File có thể chưa đầy đủ:\n%s" % log_path)
+            else:
+                self.status.set("Đã xuất log")
+                messagebox.showinfo("Xuất log", "Đã xuất file log:\n%s" % log_path)
+
+        def work():
+            import rl_runner
+
+            chunks = [train_log.format_export_log_header(policy_name, len(map_paths))]
+            try:
+                for map_path in map_paths:
+                    if self._stop_requested:
+                        chunks.append("[Stopped]\n")
+                        self._ui_async(lambda: finish(stopped=True))
+                        return
+                    sim, outcome = rl_runner.run_infer_episode_for_map(
+                        map_path,
+                        verbose=False,
+                        policy_bin=policy_bin,
+                        should_stop=lambda: self._stop_requested,
+                    )
+                    map_label = os.path.splitext(os.path.basename(map_path))[0]
+                    chunks.append(
+                        train_log.format_episode_actions_log(
+                            map_label, sim, outcome, include_reward=False, include_end=True
+                        )
+                    )
+                with open(log_path, "w", encoding="utf-8") as f:
+                    f.write("".join(chunks))
+                self._ui_async(lambda: finish(stopped=False))
+            except Exception as exc:
+                self._ui_async(lambda err=exc: finish(error=err))
+
+        threading.Thread(target=work, daemon=True).start()
 
     def _export_policy_to_csv(self):
         if self._is_busy():
@@ -561,17 +646,7 @@ class RlApp:
         )
         self.train_mode_group.pack(side=tk.LEFT)
         self.curriculum_cfg_frame = ttk.Frame(mode_row)
-        self.curriculum_cfg_frame.pack(side=tk.LEFT, padx=(10, 0))
-        ttk.Label(self.curriculum_cfg_frame, text="Mục tiêu qua map").pack(side=tk.LEFT, padx=(0, 4))
-        self.spin_curriculum_goal_hits = ttk.Spinbox(
-            self.curriculum_cfg_frame,
-            from_=1,
-            to=1000,
-            increment=1,
-            width=entry_width(6),
-            textvariable=self.curriculum_goal_hits,
-        )
-        self.spin_curriculum_goal_hits.pack(side=tk.LEFT)
+        self.curriculum_cfg_frame.pack_forget()
 
         tree_wrap = ttk.Frame(self.train_cfg_frame)
         tree_wrap.grid(row=1, column=0, sticky="nsew")
@@ -623,6 +698,7 @@ class RlApp:
             self.infer_map_mode,
             [("Single", "single"), ("Sequence", "sequential")],
             command=self._on_infer_mode_change,
+            uniform_width=True,
         )
         self.infer_mode_group.pack(side=tk.LEFT)
 
@@ -657,22 +733,19 @@ class RlApp:
         self.infer_tree.bind("<Button-1>", self._on_infer_tree_click, add=True)
         self.infer_tree.bind("<ButtonRelease-1>", self._on_infer_drag_release, add=True)
         self.infer_tree.bind("<B1-Motion>", self._on_infer_drag_motion, add=True)
-        btn_row_infer = tk.Frame(self.infer_list_frame, height=px(44))
-        btn_row_infer.pack(fill=tk.X, pady=(4, 0))
+        self.btn_row_infer = tk.Frame(self.infer_list_frame, height=px(44))
+        self.btn_row_infer.pack(fill=tk.X, pady=(px(4), 0))
+        self.btn_row_infer.pack_propagate(False)
         self.btn_infer_select_all = box_button(
-            btn_row_infer, text="Chọn tất cả", command=self._infer_select_all, role="accent"
+            self.btn_row_infer, text="Chọn tất cả", command=self._infer_select_all, role="accent"
         )
-        self.btn_infer_select_all.pack(side=tk.LEFT, padx=(0, 4), pady=4)
         self.btn_infer_select_none = box_button(
-            btn_row_infer, text="Bỏ chọn tất cả", command=self._infer_select_none, role="secondary"
+            self.btn_row_infer, text="Bỏ chọn tất cả", command=self._infer_select_none, role="secondary"
         )
-        self.btn_infer_select_none.pack(side=tk.LEFT, padx=4, pady=4)
-        box_button(btn_row_infer, text="Xóa map", command=self._delete_selected_infer_map, role="secondary").pack(
-            side=tk.LEFT, padx=(8, 0), pady=4
+        self.btn_infer_delete_map = box_button(
+            self.btn_row_infer, text="Xóa map", command=self._delete_selected_infer_map, role="secondary"
         )
-        box_button(btn_row_infer, text="Check infer", command=self._run_check_infer_all, role="accent").pack(
-            side=tk.LEFT, padx=(8, 0), pady=4
-        )
+        self._repack_infer_buttons()
 
         self._rebuild_paned_panes()
 
@@ -685,9 +758,7 @@ class RlApp:
         self.btn_pause.pack(side=tk.LEFT, padx=(0, 8))
         self.btn_stop = ttk.Button(bar, text="■ Stop", command=self.on_stop, state=tk.DISABLED)
         self.btn_stop.pack(side=tk.LEFT)
-        ttk.Button(bar, text="Refresh map", command=self.refresh_map_view).pack(side=tk.LEFT, padx=(8, 0))
         self.status = tk.StringVar(value="Ready")
-        ttk.Label(bar, textvariable=self.status).pack(side=tk.LEFT, padx=12)
 
     def _row_episodes(self, row, mode=None):
         mode = mode or self.train_map_mode.get()
@@ -705,6 +776,18 @@ class RlApp:
         store = row.setdefault("episodes_by_mode", {"sequential": 1000, "single": 1000})
         store[mode] = max(1, int(n))
 
+    def _row_curriculum_goal(self, row):
+        return max(1, int(row.get("curriculum_goal_hits", 10)))
+
+    def _set_row_curriculum_goal(self, row, n):
+        row["curriculum_goal_hits"] = max(1, int(n))
+
+    def _coerce_curriculum_goal(self, raw):
+        try:
+            return max(1, int(raw))
+        except (TypeError, ValueError):
+            return 10
+
     def _save_mode_episode_settings(self, mode):
         if mode == "random":
             try:
@@ -712,10 +795,7 @@ class RlApp:
             except ValueError:
                 pass
         elif mode == "curriculum":
-            try:
-                self._curriculum_by_mode["goal_hits"] = max(1, int(self.curriculum_goal_hits.get()))
-            except ValueError:
-                pass
+            pass
 
     def _restore_mode_episode_settings(self, mode=None):
         mode = mode or self.train_map_mode.get()
@@ -723,7 +803,6 @@ class RlApp:
             self.spin_ep.configure(state=tk.NORMAL)
             self.spin_ep.set(str(self._episodes_by_mode.get("random", 10000)))
         elif mode == "curriculum":
-            self.curriculum_goal_hits.set(str(self._curriculum_by_mode.get("goal_hits", 10)))
             self._update_train_episodes_total()
         else:
             self._update_train_episodes_total()
@@ -754,14 +833,8 @@ class RlApp:
         self._refresh_train_tree()
         self._last_train_mode = mode
 
-    def _on_curriculum_goal_hits_changed(self):
-        if self.train_map_mode.get() != "curriculum":
-            return
-        self._save_mode_episode_settings("curriculum")
-        self._update_train_episodes_total()
-
     def _train_tree_display_columns(self):
-        if self.train_map_mode.get() in ("random", "curriculum"):
+        if self.train_map_mode.get() == "random":
             return ("on", "ord", "name")
         return ("on", "ord", "eps", "name")
 
@@ -786,7 +859,7 @@ class RlApp:
         self.train_tree.column("ord", width=px(32), anchor=tk.CENTER, stretch=False, minwidth=px(28))
         self.train_tree.column("name", anchor=tk.W, stretch=True, minwidth=px(72))
         if mode != "random":
-            self.train_tree.heading("eps", text="Episodes")
+            self.train_tree.heading("eps", text="Goal qua map" if mode == "curriculum" else "Episodes")
             self.train_tree.column(
                 "eps",
                 width=px(72),
@@ -800,12 +873,7 @@ class RlApp:
         else:
             self.btn_train_select_all.pack(side=tk.LEFT, padx=(0, 4), pady=4)
             self.btn_train_select_none.pack(side=tk.LEFT, padx=4, pady=4)
-        if mode == "curriculum":
-            self.curriculum_cfg_frame.pack(side=tk.LEFT, padx=(10, 0))
-            self.spin_curriculum_goal_hits.configure(state=tk.NORMAL)
-        else:
-            self.curriculum_cfg_frame.pack_forget()
-            self.spin_curriculum_goal_hits.configure(state=tk.DISABLED)
+        self.curriculum_cfg_frame.pack_forget()
 
     def _train_enabled_rows(self):
         return [r for r in self._train_rows if r["enabled"]]
@@ -816,13 +884,9 @@ class RlApp:
             return
         enabled = self._train_enabled_rows()
         if mode == "curriculum":
-            try:
-                per_map = max(1, int(self.curriculum_goal_hits.get()))
-            except ValueError:
-                per_map = 10
-            total_target = per_map * max(1, len(enabled))
+            total_target = sum(self._row_curriculum_goal(r) for r in enabled)
             self.spin_ep.configure(state=tk.DISABLED)
-            self.spin_ep.set(str(total_target))
+            self.spin_ep.set(str(max(1, total_target) if total_target else 1))
             return
         total = sum(self._row_episodes(r) for r in enabled)
         self.spin_ep.configure(state=tk.DISABLED)
@@ -842,14 +906,16 @@ class RlApp:
     def _refresh_train_tree(self):
         self._cancel_eps_edit()
         self.train_tree.delete(*self.train_tree.get_children())
+        mode = self.train_map_mode.get()
         for i, row in enumerate(self._train_rows):
             mark = train_map_mark(row["enabled"])
             tags = train_row_tags(row["enabled"], i)
+            eps_val = self._row_curriculum_goal(row) if mode == "curriculum" else self._row_episodes(row)
             self.train_tree.insert(
                 "",
                 tk.END,
                 iid=str(i),
-                values=(mark, i + 1, row["name"], self._row_episodes(row)),
+                values=(mark, i + 1, row["name"], eps_val),
                 tags=tags,
             )
         self._update_train_episodes_total()
@@ -871,7 +937,11 @@ class RlApp:
         x, y, w, h = bbox
         self._eps_edit_iid = iid
         self._eps_entry = ttk.Entry(self.train_tree, width=8, justify=tk.CENTER)
-        self._eps_entry.insert(0, str(self._row_episodes(row)))
+        if self.train_map_mode.get() == "curriculum":
+            seed = self._row_curriculum_goal(row)
+        else:
+            seed = self._row_episodes(row)
+        self._eps_entry.insert(0, str(seed))
         self._eps_entry.place(x=x, y=y, width=max(w, 64), height=h)
         self._eps_entry.focus_set()
         self._eps_entry.select_range(0, tk.END)
@@ -905,7 +975,10 @@ class RlApp:
             self._refresh_train_tree()
             self.train_tree.selection_set(iid)
             return
-        self._set_row_episodes(row, n)
+        if self.train_map_mode.get() == "curriculum":
+            self._set_row_curriculum_goal(row, n)
+        else:
+            self._set_row_episodes(row, n)
         self._refresh_train_tree()
         self.train_tree.selection_set(iid)
         self._update_train_episodes_total()
@@ -982,7 +1055,7 @@ class RlApp:
         old = {r["name"]: r for r in self._train_rows}
         rows = []
         for path in self._map_paths:
-            name = os.path.basename(path)
+            name = os.path.splitext(os.path.basename(path))[0]
             prev = old.get(name, {})
             prev_eps = prev.get("episodes_by_mode")
             if prev_eps is None:
@@ -994,6 +1067,7 @@ class RlApp:
                     "name": name,
                     "enabled": prev.get("enabled", True),
                     "episodes_by_mode": dict(prev_eps),
+                    "curriculum_goal_hits": self._coerce_curriculum_goal(prev.get("curriculum_goal_hits", 10)),
                     "order": prev.get("order", len(rows)),
                 }
             )
@@ -1066,7 +1140,7 @@ class RlApp:
         old = {r["name"]: r for r in self._infer_rows}
         rows = []
         for path in self._map_paths:
-            name = os.path.basename(path)
+            name = os.path.splitext(os.path.basename(path))[0]
             prev = old.get(name, {})
             rows.append(
                 {
@@ -1193,12 +1267,9 @@ class RlApp:
         if mode == "curriculum":
             ordered = sorted(enabled, key=lambda r: r["order"])
             sims = [build_sim_map_from_file(r["path"]) for r in ordered]
-            try:
-                goal_hits = max(1, int(self.curriculum_goal_hits.get()))
-            except ValueError:
-                goal_hits = 10
-            total_target = goal_hits * max(1, len(sims))
-            return mode, sims, None, total_target, goal_hits
+            goals = [self._row_curriculum_goal(r) for r in ordered]
+            total_target = sum(goals)
+            return mode, sims, None, total_target, goals
         if mode == "sequential":
             ordered = sorted(enabled, key=lambda r: r["order"])
             plan = []
@@ -1311,6 +1382,17 @@ class RlApp:
             self._on_infer_mode_change()
         self._update_view_widgets()
 
+    def _repack_infer_buttons(self):
+        self.btn_infer_select_all.pack_forget()
+        self.btn_infer_select_none.pack_forget()
+        self.btn_infer_delete_map.pack_forget()
+        if self.infer_map_mode.get() == "single":
+            self.btn_infer_delete_map.pack(side=tk.LEFT, padx=0, pady=4)
+        else:
+            self.btn_infer_select_all.pack(side=tk.LEFT, padx=(0, 4), pady=4)
+            self.btn_infer_select_none.pack(side=tk.LEFT, padx=4, pady=4)
+            self.btn_infer_delete_map.pack(side=tk.LEFT, padx=(8, 0), pady=4)
+
     def _on_infer_mode_change(self):
         if self.mode.get() != "infer":
             return
@@ -1326,11 +1408,7 @@ class RlApp:
                 if pick:
                     for r in self._infer_rows:
                         r["enabled"] = r is pick
-            self.btn_infer_select_all.pack_forget()
-            self.btn_infer_select_none.pack_forget()
-        else:
-            self.btn_infer_select_all.pack(side=tk.LEFT, padx=(0, 4), pady=4)
-            self.btn_infer_select_none.pack(side=tk.LEFT, padx=4, pady=4)
+        self._repack_infer_buttons()
         self._refresh_infer_tree()
         active = [i for i, r in enumerate(self._infer_rows) if r["enabled"]]
         if active:
@@ -1375,18 +1453,7 @@ class RlApp:
         self.log.configure(state=tk.DISABLED)
 
     def _format_step_log(self, entry):
-        return (
-            train_log.format_step_log_line(
-                entry.get("step", 0),
-                entry.get("x", 0),
-                entry.get("y", 0),
-                entry.get("direct", "?"),
-                entry.get("s", 0),
-                entry.get("action", "?"),
-                reward=entry.get("reward"),
-            )
-            + "\n"
-        )
+        return train_log.format_step_log_entry(entry, include_reward=True) + "\n"
 
     def _append_step_log(self, entry):
         line = self._format_step_log(entry)
@@ -1552,7 +1619,6 @@ class RlApp:
     def refresh_map_view(self):
         """Đọc lại map từ map/train|infer/ và vẽ lại bản đồ đang chọn."""
         if self._is_busy():
-            messagebox.showinfo("Refresh map", "Đang chạy train/inference — bấm Stop hoặc đợi xong.")
             return
         kind = "train" if self.mode.get() == "train" else "infer"
         prev_name = None
@@ -1840,36 +1906,54 @@ class RlApp:
             self.infer_policy_var.set(export_name)
             self.export_policy_var.set(os.path.splitext(export_name)[0])
 
-    def _make_train_callbacks(self, n_episodes):
+    def _append_infer_session_header(self):
+        self._append_log_text(
+            "Inference (%s) — %s.\n" % (self._infer_mode_label(), self._infer_scoring_formula_line())
+        )
+
+    def _make_train_callbacks(self, n_episodes, animate_map=True):
         def on_episode_start(sim, ep, eps, total):
             if self._stop_requested:
                 return
 
             def show():
-                self.map_view.load_sim_map(sim)
-                self.map_view.reset_path()
                 name = sim.get("name", "?")
-                self.map_view.set_status(
-                    "Episode %d/%d | map: %s | ε=%.3f" % (ep + 1, total, name, eps)
-                )
+                if animate_map:
+                    self.map_view.load_sim_map(sim)
+                    self.map_view.reset_path()
+                    self.map_view.set_status(
+                        "Episode %d/%d | map: %s | ε=%.3f" % (ep + 1, total, name, eps)
+                    )
                 self.status.set("Training episode %d/%d" % (ep + 1, total))
                 self._append_log_text(
-                    "--- episode %d/%d | map: %s | eps=%.3f ---\n%s"
-                    % (ep + 1, total, name, eps, train_log.format_step_log_header())
+                    "Episode %d/%d | eps=%.3f\n%s\n%s\n"
+                    % (
+                        ep + 1,
+                        total,
+                        eps,
+                        "\n".join(train_log.format_map_meta_lines(name, sim)),
+                        train_log.format_step_log_header(include_reward=True),
+                    )
                 )
 
-            self._ui_sync(show)
+            if animate_map:
+                self._ui_sync(show)
+            else:
+                self._ui_async(show)
 
         def on_step(entry):
             if self._stop_requested:
                 return
-            delay = self._step_delay_ms()
 
             def show():
-                self.map_view.show_step(entry)
+                if animate_map:
+                    self.map_view.show_step(entry)
                 self._append_step_log(entry)
 
-            self._ui_sync_after_delay(show, delay)
+            if animate_map:
+                self._ui_sync_after_delay(show, self._step_delay_ms())
+            else:
+                self._ui_async(show)
 
         return on_episode_start, on_step
 
@@ -1929,7 +2013,7 @@ class RlApp:
             self._end_train(False, 0)
             return
 
-        on_episode_start, on_step = self._make_train_callbacks(n_ep)
+        on_episode_start, on_step = self._make_train_callbacks(n_ep, animate_map=True)
 
         def work():
             import rl_runner
@@ -1964,8 +2048,7 @@ class RlApp:
         threading.Thread(target=work, daemon=True).start()
 
     def _format_check_infer_report(self, label, sim_map, outcome):
-        _ = sim_map
-        return self._format_infer_steps_report(label, outcome)
+        return self._format_infer_steps_report(label, sim_map, outcome)
 
     @staticmethod
     def _infer_scoring_formula_line():
@@ -1979,23 +2062,10 @@ class RlApp:
     def _format_infer_total_line(total_score):
         return "Final total score: %.1f" % float(total_score)
 
-    def _format_infer_steps_report(self, map_label, outcome):
-        lines = [
-            "-" * 80,
-            "Map: %s" % map_label,
-            train_log.format_step_log_header(),
-        ]
-        for entry in outcome.get("log") or []:
-            lines.append(self._format_step_log(entry).rstrip("\n"))
-        status = outcome.get("status", "?")
-        steps = int(outcome.get("steps", 0))
-        if status == "goal":
-            lines.append("Result: GOAL — %d steps" % steps)
-        elif status == "collision":
-            lines.append("Result: COLLISION — stopped at step %d" % steps)
-        else:
-            lines.append("Result: %s (%d steps)" % (status, steps))
-        return "\n".join(lines) + "\n"
+    def _format_infer_steps_report(self, map_label, sim_map, outcome):
+        return train_log.format_episode_actions_log(
+            map_label, sim_map, outcome, include_reward=True, include_end=True
+        ).rstrip("\n") + "\n"
 
     def _format_infer_score_summary(self, map_scores, total_score):
         lines = ["", "=== FINAL SCORE SUMMARY ==="]
@@ -2088,9 +2158,7 @@ class RlApp:
         self._begin_run()
         self._clear_log()
         self.status.set("Running sequence...")
-        self._append_log_text(
-            "Inference (%s) — %s." % (self._infer_mode_label(), self._infer_scoring_formula_line())
-        )
+        self._append_infer_session_header()
 
         def work():
             import rl_runner
@@ -2119,7 +2187,7 @@ class RlApp:
                     map_score = float(outcome.get("score", 0.0))
                     total_score += map_score
                     map_scores.append((map_label, map_score))
-                    text = self._format_infer_steps_report(map_label, outcome)
+                    text = self._format_infer_steps_report(map_label, sim, outcome)
                     self._ui_async(lambda t=text: self._append_log_text(t))
                     if outcome.get("status") == "stopped":
                         break
@@ -2161,9 +2229,7 @@ class RlApp:
             "total": len(infer_paths),
         }
         self.status.set("Running sequence...")
-        self._append_log_text(
-            "Inference (%s) — %s." % (self._infer_mode_label(), self._infer_scoring_formula_line())
-        )
+        self._append_infer_session_header()
         self._infer_sequence_next_map()
 
     def _infer_sequence_next_map(self):
@@ -2224,9 +2290,7 @@ class RlApp:
         self._begin_run()
         self._clear_log()
         self.status.set("Running...")
-        self._append_log_text(
-            "Inference (%s) — %s." % (self._infer_mode_label(), self._infer_scoring_formula_line())
-        )
+        self._append_infer_session_header()
 
         def work():
             import rl_runner
@@ -2240,7 +2304,7 @@ class RlApp:
                     should_stop=lambda: self._stop_requested,
                 )
                 map_label = sim.get("name") or os.path.basename(map_path)
-                detail = self._format_infer_steps_report(map_label, outcome)
+                detail = self._format_infer_steps_report(map_label, sim, outcome)
                 total_score = float(outcome.get("score", 0.0))
                 summary = self._format_infer_score_summary([(map_label, total_score)], total_score)
                 self._ui_async(lambda t=detail: self._append_log_text(t))
@@ -2257,6 +2321,7 @@ class RlApp:
         policy_bin = self._infer_policy_bin()
         self._begin_run()
         self._clear_log()
+        self._append_infer_session_header()
         self.status.set("Computing path...")
         if self._anim_after_id:
             self.root.after_cancel(self._anim_after_id)
@@ -2289,13 +2354,9 @@ class RlApp:
         self.map_view.reset_path()
         self.status.set("Playing...")
         self._append_log_text(
-            "\n".join(
-                [
-                    "-" * 80,
-                    "Map: %s" % map_label,
-                    train_log.format_step_log_header(),
-                ]
-            )
+            "\n".join(train_log.format_map_meta_lines(map_label, sim_map))
+            + "\n"
+            + train_log.format_step_log_header(include_reward=True)
         )
         log = outcome.get("log") or []
         self._play_steps(log, 0, outcome, delay, map_label, sequence_mode=sequence_mode)
@@ -2337,7 +2398,7 @@ class RlApp:
                 msg = "Finished: %s (%d steps)" % (status, steps)
             self.map_view.set_status(msg)
             self.status.set("Done — " + msg)
-            self._append_log_text("Result: %s" % msg)
+            self._append_log_text(train_log.format_infer_end_reason(status, int(steps)) + "\n")
             if sequence_mode and self._infer_seq_ctx:
                 ctx = self._infer_seq_ctx
                 ctx["map_scores"].append((map_label, score))
@@ -2433,7 +2494,13 @@ class RlApp:
             self._sync_formula_combo()
 
     def refresh_ui_scale(self):
-        for grp in (self.mode_group, self.view_group, self.delay_group, self.train_mode_group):
+        for grp in (
+            self.mode_group,
+            self.view_group,
+            self.delay_group,
+            self.train_mode_group,
+            self.infer_mode_group,
+        ):
             try:
                 grp.refresh_scale()
             except Exception:

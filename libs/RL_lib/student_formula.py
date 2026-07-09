@@ -32,6 +32,15 @@ _LABEL_ALIASES = {
     "Lại gần đích": "Lại gần goal",
     "Thay đổi khoảng cách tới Goal": "Lại gần goal",
     "Thay đổi khoảng cách tới Checkpoint": "Lại gần checkpoint",
+    "Lại gần checkpoint 1": "Lại gần checkpoint",
+    "Lại gần checkpoint 2": "Lại gần checkpoint",
+    "Lại gần checkpoint 3": "Lại gần checkpoint",
+    "Đi xa checkpoint 1": "Đi xa checkpoint",
+    "Đi xa checkpoint 2": "Đi xa checkpoint",
+    "Đi xa checkpoint 3": "Đi xa checkpoint",
+    "Chạm checkpoint 1": "Chạm checkpoint",
+    "Chạm checkpoint 2": "Chạm checkpoint",
+    "Chạm checkpoint 3": "Chạm checkpoint",
     "Giữ nguyên hướng đi": "Giữ hướng n lần thì cộng",
 }
 

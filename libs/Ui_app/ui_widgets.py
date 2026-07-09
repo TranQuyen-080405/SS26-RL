@@ -40,12 +40,14 @@ def box_button(parent, text, command=None, role="secondary", **kwargs):
 class SegmentGroup:
     """Nhóm chọn dạng nút hộp (thay radio tròn). options: [(label, value), ...]."""
 
-    def __init__(self, parent, variable, options, command=None, padx=3):
+    def __init__(self, parent, variable, options, command=None, padx=3, uniform_width=False):
         self.frame = ttk.Frame(parent)
         self.variable = variable
         self.command = command
+        self._uniform_width = uniform_width
         self._buttons = []
         _padx = px(padx)
+        btn_width = max((len(label) for label, _ in options), default=0) if uniform_width else None
         for label, value in options:
             btn = tk.Button(
                 self.frame,
@@ -56,6 +58,7 @@ class SegmentGroup:
                 pady=px(2),
                 cursor="hand2",
                 font=font(10),
+                width=btn_width,
                 command=lambda v=value: self._select(v),
             )
             btn.pack(side=tk.LEFT, padx=_padx)
@@ -82,7 +85,7 @@ class SegmentGroup:
                     relief=tk.SUNKEN,
                     bg="#89b4fa",
                     fg="#11111b",
-                    font=font(10, weight="bold"),
+                    font=font(10, weight="bold" if not self._uniform_width else "normal"),
                 )
             else:
                 btn.configure(

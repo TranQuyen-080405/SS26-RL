@@ -4,8 +4,10 @@ import os
 import textwrap
 
 _WIDTH = 80
+SEP = "-" * _WIDTH
 TITLE_TRAIN = "SummerSchool 2026 - Train"
 TITLE_INFER = "SummerSchool 2026 - Inference"
+TITLE_INFER_LOG = "SummerSchool 2026 - Inference Log"
 
 _MODE_LABELS = {
     "random": "random",
@@ -73,49 +75,124 @@ def print_train_header(
 
 def print_infer_header(sim_map, policy_path):
     banner(TITLE_INFER)
-    cps = sim_map.get("checkpoints") or []
-    cp_txt = ("  cp %s" % (cps,)) if cps else ""
-    line(
-        "Run",
-        "map %s %dx%d  policy %s  start %s  goal %s%s"
-        % (
-            sim_map.get("name", "?"),
-            sim_map["width"],
-            sim_map["height"],
-            _basename(policy_path),
-            sim_map.get("start"),
-            sim_map.get("goal"),
-            cp_txt,
-        ),
+    print("Policy: %s" % _basename(policy_path))
+    for meta in format_map_meta_lines(sim_map.get("name", "?"), sim_map)[1:]:
+        print(meta)
+
+
+def fmt_xy(pos):
+    if not pos or len(pos) < 2:
+        return "(?,?)"
+    return "(%d,%d)" % (int(pos[0]), int(pos[1]))
+
+
+def format_checkpoints_line(checkpoints):
+    if checkpoints:
+        return "Checkpoints: %s" % ", ".join(fmt_xy(cp) for cp in checkpoints)
+    return "Checkpoints: (none)"
+
+
+def format_map_meta_lines(map_label, sim_map):
+    return [
+        SEP,
+        "Map: %s" % map_label,
+        "Start: %s" % fmt_xy(sim_map.get("start")),
+        "Goal: %s" % fmt_xy(sim_map.get("goal")),
+        format_checkpoints_line(sim_map.get("checkpoints") or []),
+    ]
+
+
+def format_infer_end_reason(status, steps):
+    if status == "goal":
+        return "End: reached goal after %d steps" % steps
+    if status == "collision":
+        return "End: collision at step %d" % steps
+    if status == "max_steps":
+        return "End: max steps reached (%d steps)" % steps
+    if status == "stopped":
+        return "End: stopped at step %d" % steps
+    return "End: %s (%d steps)" % (status, steps)
+
+
+def format_robot_episode_stats(walls_seen, new_cells, checkpoints_touched):
+    return "Stats: walls_seen=%d | new_cells=%d | checkpoints=%d" % (
+        int(walls_seen),
+        int(new_cells),
+        int(checkpoints_touched),
     )
 
 
-def format_step_log_header():
-    return "%-5s  %-8s  %-3s  %5s  %-14s  %8s" % (
-        "step",
-        "pos",
-        "dir",
-        "s",
-        "action",
-        "reward",
+def format_export_log_header(policy_name, n_maps):
+    return "\n".join(
+        [
+            SEP,
+            TITLE_INFER_LOG,
+            "Policy: %s" % policy_name,
+            "Maps: %d" % n_maps,
+            SEP,
+            "",
+        ]
     )
+
+
+def format_episode_actions_log(map_label, sim_map, outcome, include_reward=False, include_end=True):
+    lines = list(format_map_meta_lines(map_label, sim_map))
+    lines.append(format_step_log_header(include_reward=include_reward))
+    for entry in outcome.get("log") or []:
+        lines.append(format_step_log_entry(entry, include_reward=include_reward))
+    if include_end:
+        lines.append(
+            format_infer_end_reason(
+                outcome.get("status", "?"),
+                int(outcome.get("steps", 0)),
+            )
+        )
+    return "\n".join(lines) + "\n\n"
+
+
+def format_step_log_header(include_reward=True):
+    if include_reward:
+        return "%-5s  %-8s  %-3s  %5s  %-14s  %8s" % (
+            "step",
+            "pos",
+            "dir",
+            "s",
+            "action",
+            "reward",
+        )
+    return "%-5s  %-8s  %-3s  %5s  %s" % ("step", "pos", "dir", "s", "action")
 
 
 def print_step_log_header():
     print(format_step_log_header())
 
 
-def format_step_log_line(step, x, y, direction, state, action, reward=None):
-    reward_val = 0.0 if reward is None else float(reward)
-    pos = "(%d,%d)" % (x, y)
-    return "%-5d  %-8s  %-3s  %5d  %-14s  %+8.1f" % (
-        step,
-        pos,
-        direction,
-        state,
-        action,
-        reward_val,
+def format_step_log_entry(entry, include_reward=True):
+    return format_step_log_line(
+        entry.get("step", 0),
+        entry.get("x", 0),
+        entry.get("y", 0),
+        entry.get("direct", "?"),
+        entry.get("s", 0),
+        entry.get("action", "?"),
+        reward=entry.get("reward"),
+        include_reward=include_reward,
     )
+
+
+def format_step_log_line(step, x, y, direction, state, action, reward=None, include_reward=True):
+    pos = "(%d,%d)" % (x, y)
+    if include_reward:
+        reward_val = 0.0 if reward is None else float(reward)
+        return "%-5d  %-8s  %-3s  %5d  %-14s  %+8.1f" % (
+            step,
+            pos,
+            direction,
+            state,
+            action,
+            reward_val,
+        )
+    return "%-5d  %-8s  %-3s  %5d  %s" % (step, pos, direction, state, action)
 
 
 def print_infer_step(step, x, y, direction, state, action, reward=None):
@@ -123,12 +200,7 @@ def print_infer_step(step, x, y, direction, state, action, reward=None):
 
 
 def print_infer_summary(status, steps):
-    if status == "goal":
-        line("Result", "goal in %d steps" % steps)
-    elif status == "collision":
-        line("Result", "collision at step %d" % steps)
-    else:
-        line("Result", "%s after %d steps" % (status, steps))
+    print(format_infer_end_reason(status, steps))
 
 
 def print_train_start(map_mode, n_episodes, n_maps, q_rows=None, resuming=False):
@@ -144,6 +216,45 @@ def print_sequential_plan(plan):
         print("  %s -> %d ep" % (sim.get("name", "?"), n_ep))
 
 
+def format_train_block_line(block_start, block_episodes, map_name, goals_in_block, include_map=True):
+    if block_episodes <= 0:
+        return ""
+    ep_from = block_start + 1
+    ep_to = block_start + block_episodes
+    if include_map:
+        return "Episodes %d-%d | map: %s | goals: %d/%d" % (
+            ep_from,
+            ep_to,
+            map_name or "?",
+            goals_in_block,
+            block_episodes,
+        )
+    return "Episodes %d-%d | goals: %d/%d" % (
+        ep_from,
+        ep_to,
+        goals_in_block,
+        block_episodes,
+    )
+
+
+def print_train_block(block_start, block_episodes, map_name, goals_in_block, include_map=True):
+    text = format_train_block_line(
+        block_start, block_episodes, map_name, goals_in_block, include_map=include_map
+    )
+    if text:
+        print(text)
+
+
+def print_curriculum_block(sim_map, episodes_run, goals_hit, goal_target):
+    name = sim_map.get("name", "?")
+    for meta in format_map_meta_lines(name, sim_map)[1:]:
+        print(meta)
+    print(
+        "Curriculum block | episodes: %d | goals: %d/%d"
+        % (episodes_run, goals_hit, goal_target)
+    )
+
+
 def print_episode_table_header():
     global _episode_header_printed
     if _episode_header_printed:
@@ -157,6 +268,11 @@ def print_episode(ep_index, map_name, goals_in_block):
     print_episode_table_header()
     tag = map_name or "?"
     print("%-8d  %-20s  %5d" % (ep_index, tag, goals_in_block))
+
+
+def print_train_block_summary(block_start, block_episodes, map_name, goals_in_block):
+    """Alias — log train theo cụm episode."""
+    print_train_block(block_start, block_episodes, map_name, goals_in_block)
 
 
 def print_stopped_at(ep_index):

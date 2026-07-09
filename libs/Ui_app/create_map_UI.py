@@ -28,7 +28,7 @@ from map.map_io import (
 )
 from RL_lib.grid import DIRECTIONS, neighbor_xy, is_valid
 from Ui_app.map_layout import apply_fixed_canvas, avail_from_wrap, fit_grid_layout
-from Ui_app.ui_scale import configure_window, init as init_ui_scale, px, font
+from Ui_app.ui_scale import checkpoint_label_font, checkpoint_label_inset, configure_window, init as init_ui_scale, px, font
 
 
 def _apply_app_icon(root):
@@ -92,6 +92,7 @@ class MapEditorApp:
         self._infer_list_selected = None
         self._map_list_select_bg = {}
         self._map_list_wheel_cb = {}
+        self._map_list_drag_cb = {}
         self._suppress_list_events = False
         self._active_list_kind = None
 
@@ -155,13 +156,28 @@ class MapEditorApp:
     def _build_workspace(self):
         self._workspace = ttk.Frame(self.container)
         self._workspace.pack(fill=tk.BOTH, expand=True)
-        self._workspace.columnconfigure(0, weight=2)
-        self._workspace.columnconfigure(1, weight=1, minsize=px(320))
         self._workspace.rowconfigure(0, weight=1)
+        self._workspace.columnconfigure(0, weight=1)
 
-        self._canvas_wrap = ttk.Frame(self._workspace, padding=px(8))
-        self._canvas_wrap.grid(row=0, column=0, sticky="nsew")
+        try:
+            pane_bg = ttk.Style().lookup("TFrame", "background")
+        except tk.TclError:
+            pane_bg = "#f0f0f0"
 
+        self._paned = tk.PanedWindow(
+            self._workspace,
+            orient=tk.HORIZONTAL,
+            sashwidth=px(6),
+            sashrelief=tk.RAISED,
+            opaqueresize=False,
+            bg=pane_bg,
+            bd=0,
+            showhandle=False,
+        )
+        self._paned.pack(fill=tk.BOTH, expand=True)
+        self._paned.bind("<ButtonRelease-1>", self._on_paned_resize)
+
+        self._canvas_wrap = ttk.Frame(self._paned, padding=px(8))
         self.canvas = tk.Canvas(self._canvas_wrap, bg="#1e1e2e", highlightthickness=0)
         self.canvas.pack(fill=tk.BOTH, expand=True)
         self.canvas.bind("<Button-1>", self.on_click)
@@ -170,8 +186,7 @@ class MapEditorApp:
         self.root.bind("<Delete>", self._on_delete_key)
         self.root.bind("<BackSpace>", self._on_delete_key)
 
-        side = ttk.LabelFrame(self._workspace, text="List map", padding=px(6))
-        side.grid(row=0, column=1, sticky="nsew", padx=(0, px(8)), pady=px(8))
+        side = ttk.LabelFrame(self._paned, text="List map", padding=px(6))
         side.columnconfigure(0, weight=1)
         side.rowconfigure(1, weight=1)
         side.rowconfigure(3, weight=1)
@@ -184,20 +199,36 @@ class MapEditorApp:
         infer_wrap = self._build_map_scroll_list(side, "infer")
         infer_wrap.grid(row=3, column=0, sticky="nsew")
 
+        self._paned.add(self._canvas_wrap, minsize=px(360), stretch="always")
+        self._paned.add(side, minsize=px(240), stretch="always")
+
+    def _on_paned_resize(self, _event=None):
+        try:
+            self.root.after_idle(self.redraw)
+        except Exception:
+            pass
+
     def _build_map_scroll_list(self, parent, kind):
         wrap = ttk.Frame(parent)
         wrap.columnconfigure(0, weight=1)
         wrap.rowconfigure(0, weight=1)
-        canvas = tk.Canvas(wrap, highlightthickness=0, borderwidth=0)
+        canvas = tk.Canvas(wrap, highlightthickness=0, borderwidth=0, height=1)
         scroll = ttk.Scrollbar(wrap, orient=tk.VERTICAL, command=canvas.yview)
         inner = ttk.Frame(canvas)
         win = canvas.create_window((0, 0), window=inner, anchor=tk.NW)
+        drag_state = {"active": False, "moved": False, "x": 0, "y": 0}
 
-        def _on_inner_configure(_event):
-            canvas.configure(scrollregion=canvas.bbox("all"))
+        def _sync_viewport(_event=None):
+            bbox = canvas.bbox("all")
+            if bbox:
+                canvas.configure(scrollregion=bbox)
 
-        def _on_canvas_configure(event):
-            canvas.itemconfigure(win, width=event.width)
+        def _on_wrap_configure(event):
+            scroll_w = scroll.winfo_width() or px(16)
+            inner_w = max(1, event.width - scroll_w)
+            canvas.itemconfigure(win, width=inner_w)
+            if event.height > 1:
+                canvas.configure(height=event.height)
 
         def _on_wheel(event):
             if event.delta:
@@ -208,15 +239,48 @@ class MapEditorApp:
                 canvas.yview_scroll(1, "units")
             return "break"
 
+        def _canvas_coords(event):
+            return event.x, event.y
+
+        def _start_drag(event):
+            drag_state["active"] = True
+            drag_state["moved"] = False
+            drag_state["x"] = event.x
+            drag_state["y"] = event.y
+            cx, cy = _canvas_coords(event)
+            canvas.scan_mark(cx, cy)
+
+        def _drag_motion(event):
+            if not drag_state["active"]:
+                return
+            if abs(event.x - drag_state["x"]) + abs(event.y - drag_state["y"]) > 3:
+                drag_state["moved"] = True
+            if drag_state["moved"]:
+                cx, cy = _canvas_coords(event)
+                canvas.scan_dragto(cx, cy, gain=1)
+                return "break"
+
+        def _end_drag(_event=None):
+            drag_state["active"] = False
+            drag_state["moved"] = False
+
         def _bind_wheel(widget):
             for seq in ("<MouseWheel>", "<Button-4>", "<Button-5>"):
                 widget.bind(seq, _on_wheel, add="+")
 
-        inner.bind("<Configure>", _on_inner_configure)
-        canvas.bind("<Configure>", _on_canvas_configure)
+        def _bind_drag(widget):
+            widget.bind("<ButtonPress-1>", _start_drag, add="+")
+            widget.bind("<B1-Motion>", _drag_motion, add="+")
+            widget.bind("<ButtonRelease-1>", _end_drag, add="+")
+
+        inner.bind("<Configure>", _sync_viewport)
+        wrap.bind("<Configure>", _on_wrap_configure)
         _bind_wheel(canvas)
         _bind_wheel(inner)
         _bind_wheel(wrap)
+        _bind_drag(canvas)
+        _bind_drag(inner)
+        _bind_drag(wrap)
         canvas.configure(yscrollcommand=scroll.set)
         scroll.config(command=canvas.yview)
         canvas.grid(row=0, column=0, sticky="nsew")
@@ -233,6 +297,11 @@ class MapEditorApp:
             self._infer_list_rows = {}
             select_bg = "#89b4fa"
         self._map_list_wheel_cb[kind] = _on_wheel
+        self._map_list_drag_cb[kind] = {
+            "start": _start_drag,
+            "motion": _drag_motion,
+            "end": _end_drag,
+        }
         self._map_list_select_bg[kind] = select_bg
         return wrap
 
@@ -283,12 +352,23 @@ class MapEditorApp:
             cur = self._map_list_selected(kind)
             if cur and os.path.abspath(cur) not in paths:
                 self._set_map_list_selected(kind, None)
+        self._sync_map_list_scroll(kind)
+
+    def _map_list_canvas(self, kind):
+        return self._train_list_canvas if kind == "train" else self._infer_list_canvas
+
+    def _sync_map_list_scroll(self, kind):
+        canvas = self._map_list_canvas(kind)
+        canvas.update_idletasks()
+        bbox = canvas.bbox("all")
+        if bbox:
+            canvas.configure(scrollregion=bbox)
 
     def _add_map_list_row(self, kind, path, selected=False):
         path = os.path.abspath(path)
         inner = self._map_list_inner(kind)
         rows = self._map_list_rows(kind)
-        name = os.path.basename(path)
+        name = os.path.splitext(os.path.basename(path))[0]
         bg = self._map_list_select_bg[kind] if selected else "#313244"
         fg = "#11111b" if selected else "#cdd6f4"
 
@@ -337,8 +417,43 @@ class MapEditorApp:
         def _delete(_event=None):
             self._delete_map_path(kind, path)
 
-        name_lbl.bind("<Button-1>", _activate)
-        row.bind("<Button-1>", lambda e: _activate() if e.widget is row else None)
+        canvas = self._map_list_canvas(kind)
+        row_drag = {"active": False, "moved": False, "x": 0, "y": 0}
+
+        def _row_press(event):
+            row_drag["active"] = True
+            row_drag["moved"] = False
+            row_drag["x"] = event.x_root
+            row_drag["y"] = event.y_root
+            cx = event.x_root - canvas.winfo_rootx()
+            cy = event.y_root - canvas.winfo_rooty()
+            canvas.scan_mark(cx, cy)
+
+        def _row_motion(event):
+            if not row_drag["active"]:
+                return
+            if abs(event.x_root - row_drag["x"]) + abs(event.y_root - row_drag["y"]) > 4:
+                row_drag["moved"] = True
+            if row_drag["moved"]:
+                cx = event.x_root - canvas.winfo_rootx()
+                cy = event.y_root - canvas.winfo_rooty()
+                canvas.scan_dragto(cx, cy, gain=1)
+                return "break"
+
+        def _row_release(event):
+            if not row_drag["active"]:
+                return
+            moved = row_drag["moved"]
+            row_drag["active"] = False
+            row_drag["moved"] = False
+            if moved or event.widget is del_btn:
+                return "break"
+            _activate()
+
+        for widget in (row, name_lbl):
+            widget.bind("<ButtonPress-1>", _row_press)
+            widget.bind("<B1-Motion>", _row_motion)
+            widget.bind("<ButtonRelease-1>", _row_release)
         wheel_cb = self._map_list_wheel_cb.get(kind)
         if wheel_cb:
             for widget in (row, name_lbl, del_btn):
@@ -985,7 +1100,8 @@ class MapEditorApp:
 
         start = self._start_pos()
         goal = self._goal_pos()
-        cps = {tuple(cp) for cp in self.checkpoints if len(cp) >= 2}
+        cps = [tuple(cp) for cp in self.checkpoints if len(cp) >= 2]
+        cp_index = {cp: i for i, cp in enumerate(cps)}
         sel_cell = self._selection_cell()
 
         for y in range(self.height):
@@ -996,7 +1112,7 @@ class MapEditorApp:
                     fill = "#a6e3a1"
                 elif (x, y) == goal:
                     fill = "#f38ba8"
-                elif (x, y) in cps:
+                elif (x, y) in cp_index:
                     fill = "#f9e2af"
                 c.create_rectangle(
                     px, py, px + cell, py + cell, fill=fill, outline="#45475a", width=1
@@ -1011,6 +1127,16 @@ class MapEditorApp:
                     fill="#cdd6f4",
                     font=("", font_sz),
                 )
+                if (x, y) in cp_index:
+                    inset = checkpoint_label_inset(cell)
+                    c.create_text(
+                        px + cell - inset,
+                        py + inset,
+                        text="%d" % (cp_index[(x, y)] + 1),
+                        fill="#11111b",
+                        font=checkpoint_label_font(cell),
+                        anchor=tk.NE,
+                    )
 
         if sel_cell:
             sx, sy = sel_cell

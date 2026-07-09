@@ -9,7 +9,7 @@ from tkinter import ttk, scrolledtext, messagebox, filedialog, simpledialog
 
 from bootstrap import robot_embbed_dir
 from Ui_app.map_layout import apply_fixed_canvas, avail_from_wrap, fit_grid_layout
-from Ui_app.ui_scale import configure_window, entry_width, font, init as init_ui_scale, px
+from Ui_app.ui_scale import checkpoint_label_font, checkpoint_label_inset, configure_window, entry_width, font, init as init_ui_scale, px
 
 try:
     from bleak import BleakClient, BleakScanner
@@ -562,7 +562,11 @@ class RobotMapCanvas:
 
     def _update_info(self):
         gx, gy = self.model.goal
-        cp_txt = (" | CP %s" % (self.model.checkpoints,)) if self.model.checkpoints else ""
+        cp_txt = ""
+        if self.model.checkpoints:
+            cp_txt = " | " + ", ".join(
+                "CP%d=(%d,%d)" % (i + 1, cp[0], cp[1]) for i, cp in enumerate(self.model.checkpoints)
+            )
         extra = ""
         if self.model.step:
             extra += " | bước %d" % self.model.step
@@ -623,7 +627,8 @@ class RobotMapCanvas:
         w, h = m.w, m.h
         cell = self._cell
         start, goal = m.start, m.goal
-        cps = {tuple(cp) for cp in m.checkpoints}
+        cps = [tuple(cp) for cp in m.checkpoints]
+        cp_index = {cp: i for i, cp in enumerate(cps)}
         
         visited_cps = {cp for cp in cps if cp in self.path or cp == (m.x, m.y)}
 
@@ -640,12 +645,22 @@ class RobotMapCanvas:
                     fill = "#a6e3a1"
                 elif (x, y) == goal:
                     fill = "#f38ba8"
-                elif (x, y) in cps:
+                elif (x, y) in cp_index:
                     if (x, y) in visited_cps:
                         fill = "#89dceb"
                     else:
                         fill = "#f9e2af"
                 c.create_rectangle(px, py, px + cell, py + cell, fill=fill, outline="#45475a")
+                if (x, y) in cp_index:
+                    inset = checkpoint_label_inset(cell)
+                    c.create_text(
+                        px + cell - inset,
+                        py + inset,
+                        text="%d" % (cp_index[(x, y)] + 1),
+                        fill="#11111b",
+                        font=checkpoint_label_font(cell, family="Segoe UI"),
+                        anchor=tk.NE,
+                    )
                 
                 # Draw black cross: vertical and horizontal bars extending to cell edges, thickness = 1/10 of cell size
                 thick = cell / 10.0

@@ -44,6 +44,9 @@ from Ui_app.ui_chips import RoundedBlock, build_reward_title, chip_container_bg,
 from Ui_app.ui_scale import entry_width, font, px
 
 _THRESHOLD_FOR_EID = {
+    "cp_closer": "CP_TARGET_INDEX",
+    "cp_farther": "CP_TARGET_INDEX",
+    "checkpoint": "CP_TARGET_INDEX",
     "excess_rotate": "MAX_ROTATE_STREAK",
     "visit_window": "MAX_REVISIT_STEPS",
     "visit_repeat": "MAX_CELL_REPEAT",
@@ -73,6 +76,15 @@ _REWARD_DESCRIPTIONS = {
     "facing_clear": "Tính điểm khi xoay mặt sang hướng không có tường",
     "wasted_rotate": "Tính điểm khi xoay mà hướng trước khi xoay không có vật cản",
     "blocked_rotate": "Tính điểm khi xoay mặt sang hướng có tường",
+    "rotate_to_n": "Tính điểm khi quay sang hướng N",
+    "rotate_to_e": "Tính điểm khi quay sang hướng E",
+    "rotate_to_s": "Tính điểm khi quay sang hướng S",
+    "rotate_to_w": "Tính điểm khi quay sang hướng W",
+    "forward_n": "Tính điểm khi Forward ở hướng N",
+    "forward_e": "Tính điểm khi Forward ở hướng E",
+    "forward_s": "Tính điểm khi Forward ở hướng S",
+    "forward_w": "Tính điểm khi Forward ở hướng W",
+    "forward_new_cell": "Tính điểm khi bước tới ô mới",
     "excess_rotate": "Tính điểm khi xoay tại chỗ n vòng",
     "visit_window": "Tính điểm khi vào lại cùng 1 ô sau n bước",
     "visit_repeat": "Tính điểm khi quay lại vào ô đó n lần",
@@ -109,6 +121,7 @@ class LearnLabApp:
         self._threshold_instance_saved_values = {}
         self._save_after_id = None
         self._formula_fx_after_id = None
+        self._weight_refresh_after_id = None
         self._weight_panel_sig = None
         self._loading = False
         self._loaded_formula_name = None
@@ -321,7 +334,8 @@ class LearnLabApp:
             for tk_key in keys:
                 if tk_key in THRESHOLD_LABELS and tk_key not in seen_thresholds:
                     seen_thresholds.add(tk_key)
-                    self._threshold_vars[tk_key] = tk.StringVar(value="4")
+                    default_val = "1" if tk_key == "CP_TARGET_INDEX" else "4"
+                    self._threshold_vars[tk_key] = tk.StringVar(value=default_val)
 
         self._bind_reward_wheel_tree(self._reward_scroll_canvas)
 
@@ -411,8 +425,8 @@ class LearnLabApp:
     def _create_weight_instance_row(self, eid, idx, w_var):
         mod = REWARD_ELEMENTS[eid]["module"]
         chip = module_chip_style(mod)
-        wrap = tk.Frame(self._weights_container, bg=chip_container_bg())
-        wr = RoundedBlock(wrap, bg=chip["bg"], canvas_bg=chip_container_bg(), stretch_width=True)
+        wrap = tk.Frame(self._weights_container, bg=chip["bg"])
+        wr = RoundedBlock(wrap, bg=chip["bg"], radius=0, canvas_bg=chip["bg"], stretch_width=True)
         wr.pack(fill=tk.X)
         inner = wr.inner
 
@@ -433,7 +447,7 @@ class LearnLabApp:
 
         w_desc = tk.Label(
             inner,
-            text="—  " + _REWARD_DESCRIPTIONS.get(eid, ""),
+            text="- " + _REWARD_DESCRIPTIONS.get(eid, ""),
             bg=chip["bg"],
             fg=chip["fg"],
             font=font(9, weight="italic"),
@@ -446,8 +460,8 @@ class LearnLabApp:
     def _create_threshold_instance_row(self, eid, idx, tk_key, var):
         mod = REWARD_ELEMENTS[eid]["module"]
         chip = module_chip_style(mod)
-        wrap = tk.Frame(self._weights_container, bg=chip_container_bg())
-        tr = RoundedBlock(wrap, bg=chip["bg"], canvas_bg=chip_container_bg(), stretch_width=True)
+        wrap = tk.Frame(self._weights_container, bg=chip["bg"])
+        tr = RoundedBlock(wrap, bg=chip["bg"], radius=0, canvas_bg=chip["bg"], stretch_width=True)
         tr.pack(fill=tk.X)
         inner = tr.inner
 
@@ -471,21 +485,23 @@ class LearnLabApp:
         th_suffix.pack(side=tk.LEFT)
         self._scaled_font_widgets.append((title_row, 9, "normal"))
 
-        t_spin = ttk.Spinbox(inner, from_=0, to=50, width=entry_width(8), textvariable=var)
+        spin_from, spin_to = (1, 3) if tk_key == "CP_TARGET_INDEX" else (0, 50)
+        t_spin = ttk.Spinbox(inner, from_=spin_from, to=spin_to, width=entry_width(8), textvariable=var)
         t_spin.pack(side=tk.LEFT, padx=px(4), pady=4)
         self._scaled_spinboxes.append((t_spin, 8))
 
-        desc = _REWARD_DESCRIPTIONS.get(tk_key, "")
-        th_desc = tk.Label(
-            inner,
-            text="—  " + desc,
-            bg=chip["bg"],
-            fg=chip["fg"],
-            font=font(9, weight="italic"),
-            anchor=tk.W,
-        )
-        th_desc.pack(side=tk.LEFT, padx=(12, 0), pady=4)
-        self._scaled_font_widgets.append((th_desc, 9, "italic"))
+        desc = _REWARD_DESCRIPTIONS.get(tk_key, "").strip()
+        if desc:
+            th_desc = tk.Label(
+                inner,
+                text="- " + desc,
+                bg=chip["bg"],
+                fg=chip["fg"],
+                font=font(9, weight="italic"),
+                anchor=tk.W,
+            )
+            th_desc.pack(side=tk.LEFT, padx=(12, 0), pady=4)
+            self._scaled_font_widgets.append((th_desc, 9, "italic"))
         return {"wrap": wrap, "block": tr}
 
     def _clear_weight_panel_widgets(self):
@@ -512,15 +528,8 @@ class LearnLabApp:
 
     def _refresh_weight_panel(self):
         sig = self._formula_instance_signature()
-        if sig == self._weight_panel_sig:
-            if sig and self._weight_instance_rows:
-                return
-            if not sig and self._empty_weight_hint is not None:
-                try:
-                    if self._empty_weight_hint.winfo_manager():
-                        return
-                except tk.TclError:
-                    pass
+        if sig == self._weight_panel_sig and self._is_weight_panel_ready(sig):
+            return
         self._weight_panel_sig = sig
         self._weight_instance_rows = []
         self._active_reward_instance_keys = []
@@ -534,7 +543,8 @@ class LearnLabApp:
             rec["wrap"].pack_forget()
         for rec in self._threshold_row_widgets.values():
             rec["wrap"].pack_forget()
-        if not reward_tokens:
+        # Nếu không resolve được instance nào hợp lệ thì xem như công thức rỗng.
+        if not sig:
             if self._empty_weight_hint is None:
                 self._empty_weight_hint = tk.Label(
                     self._weights_container,
@@ -621,6 +631,27 @@ class LearnLabApp:
                 del self._threshold_row_widgets[key]
 
         self._bind_reward_wheel_tree(self._weights_container)
+
+    def _is_weight_panel_ready(self, sig):
+        if sig:
+            if not self._weight_instance_rows:
+                return False
+            for eid, idx in sig:
+                rec = self._weight_row_widgets.get((eid, idx))
+                if rec is None:
+                    return False
+                try:
+                    if not rec["wrap"].winfo_manager():
+                        return False
+                except tk.TclError:
+                    return False
+            return True
+        if self._empty_weight_hint is None:
+            return False
+        try:
+            return bool(self._empty_weight_hint.winfo_manager())
+        except tk.TclError:
+            return False
     def _sync_enabled_modules(self):
         reward_config.set_enabled_modules(self._enabled_modules())
         self._refresh_reward_panel()
@@ -742,8 +773,17 @@ class LearnLabApp:
         self._refresh_export()
 
     def _on_formula_changed(self):
-        # Cập nhật panel ngay để tránh cảm giác mất khung khi xóa/thêm nhanh.
-        self._refresh_weight_panel()
+        if self._loading:
+            # Khi đang nạp công thức, bỏ debounce trung gian để tránh trạng thái lệch.
+            self._refresh_move_gate()
+            return
+        # Debounce nhẹ để giảm giật khi kéo/thả liên tục.
+        if self._weight_refresh_after_id:
+            try:
+                self.root.after_cancel(self._weight_refresh_after_id)
+            except tk.TclError:
+                pass
+        self._weight_refresh_after_id = self.root.after(40, self._apply_weight_panel_refresh)
         self._refresh_move_gate()
         if self._formula_fx_after_id:
             try:
@@ -752,10 +792,35 @@ class LearnLabApp:
                 pass
         self._formula_fx_after_id = self.root.after(200, self._apply_formula_side_effects)
 
+    def _apply_weight_panel_refresh(self):
+        self._weight_refresh_after_id = None
+        self._refresh_weight_panel()
+
     def _apply_formula_side_effects(self):
         self._formula_fx_after_id = None
         self._sync_config_from_ui()
         self._refresh_export()
+
+    def _reset_reward_panel_scroll(self):
+        try:
+            self._reward_scroll_canvas.update_idletasks()
+            self._reward_scroll_canvas.yview_moveto(0.0)
+        except tk.TclError:
+            pass
+
+    def _cancel_pending_formula_jobs(self):
+        if self._weight_refresh_after_id:
+            try:
+                self.root.after_cancel(self._weight_refresh_after_id)
+            except tk.TclError:
+                pass
+            self._weight_refresh_after_id = None
+        if self._formula_fx_after_id:
+            try:
+                self.root.after_cancel(self._formula_fx_after_id)
+            except tk.TclError:
+                pass
+            self._formula_fx_after_id = None
 
     def _on_scenario_event(self, action_name):
         if action_name and not self.formula_builder.is_valid():
@@ -790,7 +855,7 @@ class LearnLabApp:
             )
             visited = snap.get("visited_before", 0)
             state_rows.append(
-                "Đã qua: %s" % ("1" if visited else "0")
+                "Ô đã qua: %s" % ("1" if visited else "0")
             )
         if "goal" in enabled:
             state_rows.append("Trend goal: %+d" % snap["goal_trend"])
@@ -822,6 +887,7 @@ class LearnLabApp:
         )
 
     def _load_from_module(self):
+        self._cancel_pending_formula_jobs()
         d = reward_config.get_reward_dict()
         for eid, wkey in ELEMENT_WEIGHT_KEY.items():
             if eid in self._weight_vars and wkey in d:
@@ -848,6 +914,8 @@ class LearnLabApp:
         reward_config.set_total_formula_student("")
         self._loaded_formula_name = ""
         reward_config.set_formula_name("")
+        self._refresh_weight_panel()
+        self._reset_reward_panel_scroll()
 
     def _refresh_export(self):
         if not self.export_text:
@@ -969,6 +1037,7 @@ class LearnLabApp:
         from RL_lib.formula_store import migrate_formula_snapshot
 
         data = migrate_formula_snapshot(data)
+        self._cancel_pending_formula_jobs()
         self._loading = True
         try:
             weights = data.get("element_weights") or {}
@@ -1001,6 +1070,12 @@ class LearnLabApp:
             self._sync_enabled_modules()
         finally:
             self._loading = False
+        # Ép đồng bộ lại UI sau load để tránh mất panel khi thao tác/nạp liên tiếp.
+        self._refresh_weight_panel()
+        self._reset_reward_panel_scroll()
+        self._sync_config_from_ui()
+        self._refresh_export()
+        self._refresh_move_gate()
 
     def _ask_formula_save_name(self):
         default = self._loaded_formula_name or self.formula_pick_var.get().strip() or "cong_thuc_moi"
@@ -1092,6 +1167,7 @@ class LearnLabApp:
                 "MAX_PING_PONG_SPAN": 5,
                 "MAX_STRAIGHT_REACH": 3,
                 "MAX_STRAIGHT_CAP": 3,
+                "CP_TARGET_INDEX": 1,
             }.get(k, var.get())))
         self._weight_instance_saved_values = {}
         self._clear_weight_panel_widgets()

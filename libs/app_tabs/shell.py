@@ -5,7 +5,7 @@ import sys
 import tkinter as tk
 from tkinter import ttk
 
-from Ui_app.ui_scale import attach_window_scaling, configure_window, font, init as init_ui_scale, px
+from Ui_app.ui_scale import attach_window_scaling, configure_window, font, init as init_ui_scale, px, scale, set_scale
 from app_tabs.robot_monitor import RobotMonitorApp
 
 
@@ -52,12 +52,61 @@ class _ColoredNotebook:
         self._frames = []
         self._active = None
         self._tab_meta = []
+        self._on_zoom_in = None
+        self._on_zoom_out = None
+
+        self._zoom_wrap = tk.Frame(self._bar, bg="#11111b")
+        self._zoom_wrap.pack(side=tk.RIGHT, padx=(px(6), 0))
+        self._zoom_label = tk.Label(
+            self._zoom_wrap,
+            text="Kích thước",
+            bg="#11111b",
+            fg="#cdd6f4",
+            font=font(10, weight="bold"),
+        )
+        self._zoom_label.pack(side=tk.LEFT, padx=(0, px(3)))
+        self._zoom_minus = tk.Button(
+            self._zoom_wrap,
+            text="-",
+            bg="#585b70",
+            fg="#cdd6f4",
+            activebackground="#6c7086",
+            activeforeground="#11111b",
+            relief=tk.RAISED,
+            bd=2,
+            padx=px(8),
+            pady=px(4),
+            font=font(10, weight="bold"),
+            cursor="hand2",
+            command=self._emit_zoom_out,
+        )
+        self._zoom_minus.pack(side=tk.LEFT, padx=(0, px(3)))
+        self._zoom_plus = tk.Button(
+            self._zoom_wrap,
+            text="+",
+            bg="#89b4fa",
+            fg="#11111b",
+            activebackground="#7aaef8",
+            activeforeground="#11111b",
+            relief=tk.RAISED,
+            bd=2,
+            padx=px(8),
+            pady=px(4),
+            font=font(10, weight="bold"),
+            cursor="hand2",
+            command=self._emit_zoom_in,
+        )
+        self._zoom_plus.pack(side=tk.LEFT)
 
     def refresh_scale(self):
         self._bar.configure(padx=px(6), pady=px(6))
         f = font(10, weight="bold")
         for btn, _idle, _active in self._buttons:
             btn.configure(padx=px(18), pady=px(9), font=f)
+        self._zoom_wrap.configure(padx=0, pady=0)
+        self._zoom_label.configure(font=f)
+        self._zoom_minus.configure(font=f, padx=px(8), pady=px(4))
+        self._zoom_plus.configure(font=f, padx=px(8), pady=px(4))
 
     def add(self, label, bg_idle, bg_active):
         frame = ttk.Frame(self._body)
@@ -82,6 +131,18 @@ class _ColoredNotebook:
         self._buttons.append((btn, bg_idle, bg_active))
         self._tab_meta.append((label, bg_idle, bg_active))
         return frame
+
+    def set_zoom_handlers(self, on_zoom_out=None, on_zoom_in=None):
+        self._on_zoom_out = on_zoom_out
+        self._on_zoom_in = on_zoom_in
+
+    def _emit_zoom_out(self):
+        if self._on_zoom_out:
+            self._on_zoom_out()
+
+    def _emit_zoom_in(self):
+        if self._on_zoom_in:
+            self._on_zoom_in()
 
     def select(self, idx):
         if idx < 0 or idx >= len(self._frames):
@@ -135,9 +196,18 @@ class SS26App:
         except Exception:
             pass
 
+    def _adjust_ui_scale(self, delta):
+        new_scale = scale() + float(delta)
+        if set_scale(new_scale, self.root):
+            self._on_ui_scale_changed()
+
     def _build_ui(self, initial_tab):
         tabs = _ColoredNotebook(self.root)
         self._tabs = tabs
+        tabs.set_zoom_handlers(
+            on_zoom_out=lambda: self._adjust_ui_scale(-0.05),
+            on_zoom_in=lambda: self._adjust_ui_scale(0.05),
+        )
 
         tab_map = tabs.add(*_TAB_COLORS[0])
         tab_lab = tabs.add(*_TAB_COLORS[1])

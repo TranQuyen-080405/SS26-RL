@@ -257,23 +257,47 @@ def train_multi(
     block_start = 0
     block_map = "?"
     block_episodes = 0
+    summary_log = on_step is None
+    block_include_map = True
 
-    def _flush_episode_block():
-        if block_episodes > 0 and episodes_done % LOG_EVERY_EPISODES != 0:
-            train_log.print_episode(block_start, block_map, block_goals)
+    def _reset_block(ep_index, map_name):
+        nonlocal block_start, block_map, block_goals, block_episodes
+        block_start = ep_index
+        block_map = map_name or "?"
+        block_goals = 0
+        block_episodes = 0
+
+    def _flush_block():
+        nonlocal block_episodes, block_goals
+        if not summary_log or block_episodes <= 0:
+            block_episodes = 0
+            block_goals = 0
+            return
+        train_log.print_train_block(
+            block_start, block_episodes, block_map, block_goals, include_map=block_include_map
+        )
+        block_episodes = 0
+        block_goals = 0
+
+    def _note_episode_result(reached_goal):
+        nonlocal block_episodes, block_goals
+        block_episodes += 1
+        if reached_goal:
+            block_goals += 1
+
+    def _maybe_flush_random_batch(next_ep_index, map_name):
+        if not summary_log:
+            return
+        if block_episodes >= LOG_EVERY_EPISODES:
+            _flush_block()
+            _reset_block(next_ep_index, map_name)
 
     def _run_one_episode(sim, ep_index, eps, total_eps):
         nonlocal n_goal, episodes_done, stopped, best_q, best_label, best_steps, best_tier
-        nonlocal block_goals, block_start, block_map, block_episodes
         if should_stop and should_stop():
             stopped = True
             return False
         _gate_pause(pause_gate, should_stop)
-        if ep_index % LOG_EVERY_EPISODES == 0:
-            block_start = ep_index
-            block_map = sim.get("name", "?")
-            block_goals = 0
-            block_episodes = 0
         if on_episode_start:
             on_episode_start(sim, ep_index, eps, total_eps)
         if should_stop and should_stop():
@@ -291,13 +315,12 @@ def train_multi(
             pause_gate=pause_gate,
         )
         episodes_done = ep_index + 1
-        block_episodes += 1
+        _note_episode_result(reached_goal)
         if should_stop and should_stop():
             stopped = True
             return False
         if reached_goal:
             n_goal += 1
-            block_goals += 1
             if ep_index % 500 == 0 or ep_index == total_eps - 1:
                 best_q, best_label, best_steps, best_tier = _maybe_save_best(
                     q,
@@ -309,8 +332,6 @@ def train_multi(
                     best_steps,
                     best_tier,
                 )
-        if (ep_index + 1) % LOG_EVERY_EPISODES == 0:
-            train_log.print_episode(block_start, block_map, block_goals)
         return True
 
     if map_mode == "sequential" and sequential_plan:
@@ -322,9 +343,12 @@ def train_multi(
         )
         train_log.print_sequential_plan(sequential_plan)
         ep_global = 0
+        block_include_map = True
         for sim, n_map_ep in sequential_plan:
             if stopped:
                 break
+            map_name = sim.get("name", "?")
+            _reset_block(ep_global, map_name)
             for _ in range(n_map_ep):
                 _gate_pause(pause_gate, should_stop)
                 if stopped:
@@ -335,18 +359,32 @@ def train_multi(
                 if not _run_one_episode(sim, ep_global, eps, total_eps):
                     break
                 ep_global += 1
+                _maybe_flush_random_batch(ep_global, map_name)
+            _flush_block()
         n_episodes = total_eps
     elif map_mode == "curriculum":
-        goal_target = max(1, int(curriculum_goal_hits or 10))
-        total_target = max(1, goal_target * len(train_sims))
+        if isinstance(curriculum_goal_hits, (list, tuple)):
+            goals_per_map = [max(1, int(v)) for v in curriculum_goal_hits]
+            if len(goals_per_map) < len(train_sims):
+                goals_per_map.extend([10] * (len(train_sims) - len(goals_per_map)))
+            goals_per_map = goals_per_map[: len(train_sims)]
+        else:
+            goal_target = max(1, int(curriculum_goal_hits or 10))
+            goals_per_map = [goal_target] * len(train_sims)
+        total_target = max(1, sum(goals_per_map))
         train_log.print_train_start(
             map_mode, total_target, len(train_sims), len(q) if resuming else None, resuming
         )
         ep_global = 0
-        for sim in train_sims:
+        for sim_idx, sim in enumerate(train_sims):
             if stopped:
                 break
+            goal_target = goals_per_map[sim_idx]
             map_goals = 0
+            block_episodes = 0
+            block_goals = 0
+            block_start = ep_global
+            block_map = sim.get("name", "?")
             while map_goals < goal_target:
                 _gate_pause(pause_gate, should_stop)
                 if should_stop and should_stop():
@@ -360,16 +398,24 @@ def train_multi(
                 if not _run_one_episode(sim, ep_global, eps, total_target):
                     break
                 if n_goal > before_goal:
-                    map_goals += (n_goal - before_goal)
+                    map_goals += n_goal - before_goal
                 ep_global += 1
                 if stopped:
                     break
+            if summary_log and block_episodes > 0:
+                train_log.print_curriculum_block(sim, block_episodes, block_goals, goal_target)
+            elif not summary_log:
+                pass
+            block_episodes = 0
+            block_goals = 0
         n_episodes = ep_global
     else:
         if n_episodes > 0:
+            block_include_map = map_mode != "random"
             train_log.print_train_start(
                 map_mode, n_episodes, len(train_sims), len(q) if resuming else None, resuming
             )
+            _reset_block(0, "?")
             for ep in range(n_episodes):
                 _gate_pause(pause_gate, should_stop)
                 if should_stop and should_stop():
@@ -378,10 +424,12 @@ def train_multi(
                     break
                 eps = epsilon_min + (epsilon - epsilon_min) * (1.0 - ep / max(n_episodes - 1, 1))
                 sim = random.choice(train_sims)
+                if block_episodes == 0:
+                    block_map = sim.get("name", "?")
                 if not _run_one_episode(sim, ep, eps, n_episodes):
                     break
-
-    _flush_episode_block()
+                _maybe_flush_random_batch(ep + 1, sim.get("name", "?"))
+            _flush_block()
 
     if stopped:
         export_policy(q, export_path)

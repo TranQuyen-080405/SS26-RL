@@ -8,7 +8,7 @@ from tkinter import ttk
 
 from RL_lib.grid import neighbor_xy, is_valid
 from Ui_app.map_layout import apply_fixed_canvas, avail_from_wrap, fit_grid_layout
-from Ui_app.ui_scale import px
+from Ui_app.ui_scale import checkpoint_label_font, checkpoint_label_inset, px
 
 _TAG_STATIC = "static"
 _TAG_DYNAMIC = "dynamic"
@@ -37,6 +37,7 @@ class SimMapCanvas:
         self._layout_key = None
         self._map_fingerprint = None
         self._last_visited_cps = set()
+        self._visited_cps = set()
 
     def pack(self, **kwargs):
         self.frame.pack(**kwargs)
@@ -127,6 +128,7 @@ class SimMapCanvas:
         sx, sy = sim_map["start"]
         self.robot_pos = (sx, sy)
         self.robot_dir = "N"
+        self._visited_cps = set()
         self._layout_key = None
         self.redraw()
 
@@ -136,6 +138,7 @@ class SimMapCanvas:
             sx, sy = self.sim_map["start"]
             self.robot_pos = (sx, sy)
             self.robot_dir = "N"
+            self._visited_cps = set()
         self._redraw_dynamic()
 
     def show_step(self, entry, status_text=""):
@@ -144,6 +147,9 @@ class SimMapCanvas:
             self.robot_dir = entry.get("ndirect", entry["direct"])
             if entry["action"] == "forward" and entry.get("result", {}).get("moved"):
                 self.path.append(self.robot_pos)
+                cps = {tuple(cp) for cp in (self.sim_map.get("checkpoints") or [])} if self.sim_map else set()
+                if self.robot_pos in cps:
+                    self._visited_cps.add(self.robot_pos)
             step = entry["step"]
             act = entry["action"]
             x, y = entry["x"], entry["y"]
@@ -191,9 +197,12 @@ class SimMapCanvas:
         w, h = self.sim_map["width"], self.sim_map["height"]
         start = tuple(self.sim_map["start"])
         goal = tuple(self.sim_map["goal"])
-        cps = {tuple(cp) for cp in self.sim_map.get("checkpoints") or []}
+        cps = [tuple(cp) for cp in self.sim_map.get("checkpoints") or []]
+        cp_index = {cp: i for i, cp in enumerate(cps)}
 
-        visited_cps = {cp for cp in cps if cp in self.path or cp == self.robot_pos}
+        visited_cps = set(self._visited_cps)
+        if self.robot_pos in cps:
+            visited_cps.add(self.robot_pos)
         self._last_visited_cps = visited_cps
 
         for y in range(h):
@@ -204,7 +213,7 @@ class SimMapCanvas:
                     fill = "#a6e3a1"
                 elif (x, y) == goal:
                     fill = "#f38ba8"
-                elif (x, y) in cps:
+                elif (x, y) in cp_index:
                     fill = "#89dceb" if (x, y) in visited_cps else "#f9e2af"
                 c.create_rectangle(
                     px0, py0, px0 + cell, py0 + cell,
@@ -217,6 +226,17 @@ class SimMapCanvas:
                         text="%d,%d" % (x, y),
                         fill="#6c7086",
                         font=("", font_sz),
+                        tags=(_TAG_STATIC,),
+                    )
+                if (x, y) in cp_index:
+                    inset = checkpoint_label_inset(cell)
+                    c.create_text(
+                        px0 + cell - inset,
+                        py0 + inset,
+                        text="%d" % (cp_index[(x, y)] + 1),
+                        fill="#11111b",
+                        font=checkpoint_label_font(cell),
+                        anchor=tk.NE,
                         tags=(_TAG_STATIC,),
                     )
 
@@ -282,7 +302,9 @@ class SimMapCanvas:
         layout_changed = self._update_layout()
 
         cps = {tuple(cp) for cp in self.sim_map.get("checkpoints") or []}
-        visited_cps = {cp for cp in cps if cp in self.path or cp == self.robot_pos}
+        visited_cps = set(self._visited_cps)
+        if self.robot_pos in cps:
+            visited_cps.add(self.robot_pos)
         visited_changed = visited_cps != getattr(self, "_last_visited_cps", set())
 
         if layout_changed or visited_changed or not self.canvas.find_withtag(_TAG_STATIC):

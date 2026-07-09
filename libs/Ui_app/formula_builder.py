@@ -83,7 +83,7 @@ class FormulaBuilder(ttk.Frame):
 
         lbl1 = ttk.Label(
             self,
-            text="Reward list:",
+            text="State list:",
             font=font(9, weight="bold"),
         )
         lbl1.pack(anchor=tk.W)
@@ -163,6 +163,7 @@ class FormulaBuilder(ttk.Frame):
         )
 
         op = ttk.Frame(self)
+        self._op_row = op
         op.pack(fill=tk.X, pady=2)
         op_lbl = ttk.Label(op, text="Phép toán:", font=font(8))
         op_lbl.pack(side=tk.LEFT, padx=(0, px(4)))
@@ -294,10 +295,10 @@ class FormulaBuilder(ttk.Frame):
         if getattr(chip, "_op_sym", None) is not None:
             sym = chip._op_sym
             style = _OP_CHIP.get(sym) or _PAREN_CHIP.get(sym, _DEFAULT_OP)
-            bg = style.get("active", style["bg"]) if pressed else style["bg"]
+            bg = style["bg"]
         else:
             pal = self._reward_palette(chip._palette_label)
-            bg = pal["active"] if pressed else pal["bg"]
+            bg = pal["bg"]
         chip._chip_bg = bg
         chip.inner.configure(bg=bg)
         chip._label.configure(bg=bg)
@@ -435,7 +436,7 @@ class FormulaBuilder(ttk.Frame):
             self._err_lbl.pack_forget()
         else:
             self._err_lbl.config(text=msg or "Công thức không hợp lệ")
-            self._err_lbl.pack(fill=tk.X, pady=(0, 2))
+            self._err_lbl.pack(fill=tk.X, pady=(0, 2), before=self._op_row)
 
     def set_labels(self, labels):
         self._known_labels = list(labels)
@@ -652,17 +653,9 @@ class FormulaBuilder(ttk.Frame):
             self._show_ghost(event, token)
         mode = self._drag.get("mode")
         if mode == "reorder":
-            idx = self._drag["from"]
-            if 0 <= idx < len(self._chip_frames):
-                fr = self._chip_frames[idx]
-                set_rounded_block_bg(fr, "#45475a", "#6c7086")
+            pass
         elif mode in ("new", "new_op", "new_paren") and self._drag.get("source_chip"):
             self._set_palette_chip_pressed(self._drag.get("source_chip"), True)
-        elif mode in ("new", "new_op", "new_paren") and self._drag.get("source_btn"):
-            try:
-                self._drag["source_btn"].configure(relief=tk.SUNKEN)
-            except tk.TclError:
-                pass
 
     def _update_drag(self, event):
         if not self._drag:
@@ -709,11 +702,6 @@ class FormulaBuilder(ttk.Frame):
         self._reset_chip_bar_border()
         self._set_palette_chip_pressed(drag.get("source_chip"), False)
         source_btn = drag.get("source_btn")
-        if source_btn and source_btn.winfo_exists():
-            try:
-                source_btn.configure(relief=tk.RAISED)
-            except tk.TclError:
-                pass
 
         if not drag.get("active"):
             src_chip = drag.get("source_chip")
@@ -970,13 +958,6 @@ class FormulaBuilder(ttk.Frame):
     def _finish_drag_silent(self):
         if self._drag:
             self._set_palette_chip_pressed(self._drag.get("source_chip"), False)
-        if self._drag and self._drag.get("source_btn"):
-            btn = self._drag["source_btn"]
-            if btn.winfo_exists():
-                try:
-                    btn.configure(relief=tk.RAISED)
-                except tk.TclError:
-                    pass
         self._drag = None
         self._hide_ghost()
         self._hide_drop_visual()

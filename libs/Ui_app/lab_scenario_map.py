@@ -4,7 +4,7 @@ import tkinter as tk
 from tkinter import ttk
 
 from RL_lib.grid import neighbor_xy, is_valid
-from Ui_app.ui_scale import font, px as scale_px
+from Ui_app.ui_scale import checkpoint_label_font, checkpoint_label_inset, font, px as scale_px
 from Ui_app.ui_chips import make_result_chip
 from Ui_app.map_layout import apply_fixed_canvas, avail_width_from_wrap, fit_grid_layout_tight
 
@@ -543,6 +543,7 @@ class LabScenarioMap5:
         if (x, y) == tuple(sim.get("goal") or (0, 0)):
             return "goal"
         cps = [tuple(p) for p in (sim.get("checkpoints") or [])]
+        cp_index = {cp: i for i, cp in enumerate(cps)}
         for i, cp in enumerate(cps):
             if (x, y) == cp:
                 return ("cp", i)
@@ -679,6 +680,7 @@ class LabScenarioMap5:
         start = tuple(sim.get("start") or (0, 0))
         goal = tuple(sim.get("goal") or (w - 1, h - 1))
         cps = [tuple(p) for p in (sim.get("checkpoints") or [])]
+        cp_index = {cp: i for i, cp in enumerate(cps)}
         walls = self.world.walls_set()
         rx, ry = self.world.robot["x"], self.world.robot["y"]
         rd = self.world.robot["direct"]
@@ -696,9 +698,9 @@ class LabScenarioMap5:
                     fill = "#a6e3a1"
                 elif (x, y) == goal:
                     fill = "#f38ba8"
-                elif (x, y) in cps:
+                elif (x, y) in cp_index:
                     try:
-                        idx = cps.index((x, y))
+                        idx = cp_index[(x, y)]
                         visited = self.world.robot.get("cp_visited") or []
                         if idx < len(visited) and visited[idx]:
                             fill = "#89dceb"
@@ -707,6 +709,16 @@ class LabScenarioMap5:
                     except ValueError:
                         fill = "#f9e2af"
                 c.create_rectangle(px0, py0, px0 + cell, py0 + cell, fill=fill, outline="#45475a")
+                if (x, y) in cp_index:
+                    inset = checkpoint_label_inset(cell)
+                    c.create_text(
+                        px0 + cell - inset,
+                        py0 + inset,
+                        text="%d" % (cp_index[(x, y)] + 1),
+                        fill="#11111b",
+                        font=checkpoint_label_font(cell),
+                        anchor=tk.NE,
+                    )
 
         sel_cell = self._selection_cell()
         if sel_cell:
