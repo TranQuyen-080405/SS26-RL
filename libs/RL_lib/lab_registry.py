@@ -235,17 +235,14 @@ ELEMENT_WEIGHT_KEY = {
 
 # Ngưỡng (ẩn tên code trong UI — label riêng)
 THRESHOLD_LABELS = {
-    "MAX_ROTATE_STREAK": "Ngưỡng xoay liên tiếp",
-    "MAX_REVISIT_STEPS": "Ngưỡng bước lặp ô",
-    "MAX_CELL_REPEAT": "Ngưỡng quay lại",
-    "MAX_PING_PONG_CYCLES": "Ngưỡng qua lại",
-    "MAX_PING_PONG_SPAN": "Số ô lặp",
+    "MAX_ROTATE_STREAK": "Ngưỡng xoay tính điểm",
+    "MAX_REVISIT_STEPS": "Ngưỡng ô bước khi lặp lại",
+    "MAX_CELL_REPEAT": "Ngưỡng ô lặp lại",
     "MAX_STRAIGHT_REACH": "Ngưỡng giữ hướng",
     "MAX_STRAIGHT_CAP": "Ngưỡng giữ hướng ngắn",
 }
 
-FORMULA_HELP = "Ghép reward + phép + − × ÷ ^ ( ). Ví dụ: 2 ^ Mỗi bước đi + Va chạm tường × 2"
-
+FORMULA_HELP = "Ghép reward + phép + − × ^ ( ). Ví dụ: 2 ^ Mỗi bước đi + Va chạm tường × 2"
 
 def module_by_id(mid):
     for m in STATE_MODULES:
