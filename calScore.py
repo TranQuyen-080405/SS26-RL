@@ -3,8 +3,8 @@
 Submission CSV phải có 5184 dòng và các cột:
     id,q_forward,q_rotate_left,q_rotate_right
 
-Khi đóng gói metric trên Kaggle, đặt thư mục ``libs`` cạnh file này; các map
-ẩn được đọc từ ``map/infer/*.json`` (cạnh main.py).
+Khi đóng gói metric trên Kaggle, đặt thư mục ``libs`` cạnh file này; local
+repo chấm bằng ``libs/latent_map/*.json``.
 """
 
 import math
@@ -41,17 +41,18 @@ from robot import robot as rb
 
 
 POLICY_COLUMNS = ("q_forward", "q_rotate_left", "q_rotate_right")
-KAGGLE_INFER_MAP_DIR = Path(
-    "/kaggle/input/datasets/namphongnguynhu/maze-maps-csess26/map/infer"
+KAGGLE_INFER_MAP_DIRS = (
+    Path("/kaggle/input/datasets/namphongnguynhu/dataset-4/latent_map"),
 )
+LOCAL_INFER_MAP_DIR = Path(_ROOT) / "libs" / "latent_map"
+LEGACY_LOCAL_INFER_MAP_DIR = Path(_ROOT) / "map" / "infer"
 
 
 def _list_infer_map_files():
-    """Dùng dataset Kaggle khi có; local thì dùng map/infer cạnh main.py."""
-    candidates = (
-        KAGGLE_INFER_MAP_DIR,
-        Path("/kaggle/input/maze-maps-csess26/map/infer"),
-        Path(_ROOT) / "map" / "infer",
+    """Dùng dataset Kaggle khi có; local thì dùng libs/latent_map."""
+    candidates = KAGGLE_INFER_MAP_DIRS + (
+        LOCAL_INFER_MAP_DIR,
+        LEGACY_LOCAL_INFER_MAP_DIR,
     )
     for directory in candidates:
         if directory.is_dir():
@@ -59,8 +60,7 @@ def _list_infer_map_files():
             if paths:
                 return paths
     raise RuntimeError(
-        "Không tìm thấy map inference trong dataset maze-maps-csess26 "
-        "hoặc map/infer cạnh main.py."
+        "Không tìm thấy map inference trong dataset Kaggle hoặc libs/latent_map."
     )
 
 
@@ -125,7 +125,7 @@ def calculate_map_score(sim_map, q_table):
     return float(
         (400 if goal_reached else 0)
         + 100 * len(visited_cps)
-        - (100 if collision_occurred else 0)
+        - (200 if collision_occurred else 0)
         - 2 * step_count
     )
 

@@ -153,7 +153,7 @@ def _infer_outcome(sim_map, status, steps, log):
     score = float(
         (400 if status == "goal" else 0)
         + 100 * len(visited)
-        - (100 if status == "collision" else 0)
+        - (200 if status == "collision" else 0)
         - 2 * steps
     )
     return {

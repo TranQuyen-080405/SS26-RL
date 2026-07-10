@@ -21,6 +21,7 @@ INFER_MAPS_DIR = os.path.join(MAP_ROOT, "infer")
 MAX_TRAIN_MAP_DIM = 5
 BUNDLED_MAP_ROOT = bundled_path("map")
 BUNDLED_INFER_MAPS_DIR = os.path.join(BUNDLED_MAP_ROOT, "infer")
+LATENT_INFER_MAPS_DIR = bundled_path("libs", "latent_map")
 # Backward-compatible import name.
 MAPS_DIR = MAP_ROOT
 
@@ -39,11 +40,14 @@ def is_bundled_map_path(path):
     """Return True for read-only maps that came from the packaged exe."""
     if not path or not is_frozen():
         return False
-    try:
-        common = os.path.commonpath([_abs(path), _abs(BUNDLED_MAP_ROOT)])
-    except ValueError:
-        return False
-    return _is_same_path(common, BUNDLED_MAP_ROOT)
+    for root in (BUNDLED_MAP_ROOT, LATENT_INFER_MAPS_DIR):
+        try:
+            common = os.path.commonpath([_abs(path), _abs(root)])
+        except ValueError:
+            continue
+        if _is_same_path(common, root):
+            return True
+    return False
 
 
 def maps_dir_for_kind(kind):
@@ -211,14 +215,19 @@ def _merge_by_name(*path_lists):
 
 
 def list_map_files(kind=None):
-    """List train/infer JSON maps. Bundled infer maps are read-only."""
+    """List train/infer JSON maps. libs/latent_map is the standard infer set."""
     ensure_maps_dir("train")
     ensure_maps_dir("infer")
 
     train_paths = _json_in_dir(TRAIN_MAPS_DIR)
     bundled_infer_paths = _json_in_dir(BUNDLED_INFER_MAPS_DIR)
     external_infer_paths = _json_in_dir(INFER_MAPS_DIR)
-    infer_paths = _merge_by_name(bundled_infer_paths, external_infer_paths)
+    latent_infer_paths = _json_in_dir(LATENT_INFER_MAPS_DIR)
+    infer_paths = _merge_by_name(
+        bundled_infer_paths,
+        external_infer_paths,
+        latent_infer_paths,
+    )
 
     if kind == "train":
         return train_paths
@@ -232,13 +241,17 @@ def maps_storage_snapshot():
     out = []
     for kind, directories in (
         ("train", (TRAIN_MAPS_DIR,)),
-        ("infer", (BUNDLED_INFER_MAPS_DIR, INFER_MAPS_DIR)),
+        ("infer", (BUNDLED_INFER_MAPS_DIR, INFER_MAPS_DIR, LATENT_INFER_MAPS_DIR)),
     ):
         entries = []
         for directory in directories:
             if not os.path.isdir(directory):
                 continue
-            source = "bundled" if _is_same_path(directory, BUNDLED_INFER_MAPS_DIR) else "external"
+            source = (
+                "bundled"
+                if directory in (BUNDLED_INFER_MAPS_DIR, LATENT_INFER_MAPS_DIR)
+                else "external"
+            )
             for name in sorted(os.listdir(directory)):
                 if not name.lower().endswith(".json"):
                     continue
