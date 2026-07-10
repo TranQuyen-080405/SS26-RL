@@ -16,28 +16,7 @@ from Ui_app.ui_scale import (
 )
 from app_tabs.robot_monitor import RobotMonitorApp
 
-
-def _apply_app_icon(root):
-    """Set window icon from project assets/logo.png (fallback res/logo.png)."""
-    if sys.platform.startswith("linux"):
-        # Một số driver X11 (đặc biệt X forwarding) crash BadLength khi iconphoto.
-        return
-    base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
-    candidates = (
-        os.path.join(base_dir, "assets", "logo.png"),
-        os.path.join(base_dir, "res", "logo.png"),
-    )
-    for icon_path in candidates:
-        if not os.path.isfile(icon_path):
-            continue
-        try:
-            icon = tk.PhotoImage(file=icon_path)
-            root.iconphoto(True, icon)
-            root._app_icon = icon  # giữ reference tránh bị GC
-            return
-        except tk.TclError:
-            continue
-
+from app_icon import apply_app_icon
 # (nhãn, nền chưa chọn, nền khi chọn)
 _TAB_COLORS = (
     ("Edit Map", "#3d5240", "#a6e3a1"),
@@ -173,7 +152,7 @@ class SS26App:
     def __init__(self, initial_tab=0):
         self.root = tk.Tk()
         self.root.title("SS26-RL")
-        _apply_app_icon(self.root)
+        apply_app_icon(self.root)
         init_ui_scale(self.root)
         configure_window(self.root, width=1200, height=720, min_width=800, min_height=500)
 

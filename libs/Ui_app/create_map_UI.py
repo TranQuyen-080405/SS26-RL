@@ -30,33 +30,14 @@ from RL_lib.grid import DIRECTIONS, neighbor_xy, is_valid
 from Ui_app.map_layout import apply_fixed_canvas, avail_from_wrap, fit_grid_layout
 from Ui_app.ui_scale import checkpoint_label_font, checkpoint_label_inset, configure_window, init as init_ui_scale, px, font
 
-
-def _apply_app_icon(root):
-    if sys.platform.startswith("linux"):
-        return
-    base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
-    candidates = (
-        os.path.join(base_dir, "assets", "logo.png"),
-        os.path.join(base_dir, "res", "logo.png"),
-    )
-    for icon_path in candidates:
-        if not os.path.isfile(icon_path):
-            continue
-        try:
-            icon = tk.PhotoImage(file=icon_path)
-            root.iconphoto(True, icon)
-            root._app_icon = icon
-            return
-        except tk.TclError:
-            continue
-
+from app_icon import apply_app_icon
 
 class MapEditorApp:
     def __init__(self, parent=None, root=None, on_saved=None):
         if parent is None:
             self.root = tk.Tk()
             self.root.title("SS26 Map Editor")
-            _apply_app_icon(self.root)
+            apply_app_icon(self.root)
             init_ui_scale(self.root)
             configure_window(self.root, width=1000, height=700, min_width=720, min_height=560)
             self.container = self.root

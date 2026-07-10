@@ -7,6 +7,7 @@ from tkinter import ttk
 from RL_lib.lab_registry import REWARD_ELEMENTS
 from RL_lib.student_formula import (
     apply_reward_instance_displays,
+    normalize_op_symbol,
     parse_expr_to_tokens,
     tokens_to_expr,
     validate_formula_tokens,
@@ -231,6 +232,7 @@ class FormulaBuilder(ttk.Frame):
         return {"kind": "reward", "value": label, "display": label}
 
     def _token_for_op(self, sym):
+        sym = normalize_op_symbol(sym)
         return {
             "kind": "op",
             "value": sym,
@@ -256,12 +258,13 @@ class FormulaBuilder(ttk.Frame):
 
     def _make_op_chip(self, parent, sym, disp, style, drag_mode):
         active_bg = style.get("active", style["bg"])
+        op_sym = normalize_op_symbol(sym)
 
-        def _press(event, s=sym, mode=drag_mode):
-            if mode == "new_op":
-                self._op_press(event, s)
+        def _press(event, _label=None):
+            if drag_mode == "new_op":
+                self._op_press(event, op_sym)
             else:
-                self._paren_press(event, s)
+                self._paren_press(event, op_sym)
 
         chip = make_palette_chip(
             parent,
@@ -274,7 +277,7 @@ class FormulaBuilder(ttk.Frame):
             self._palette_motion,
             canvas_bg=chip_container_bg(),
         )
-        chip._op_sym = sym
+        chip._op_sym = op_sym
         chip._drag_mode = drag_mode
         return chip
 

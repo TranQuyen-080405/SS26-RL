@@ -11,24 +11,24 @@ from RL_lib.lab_registry import (
     ELEMENT_WEIGHT_KEY,
 )
 from RL_lib.reward_formula import safe_eval_formula
-from RL_lib.student_formula import default_total_formula, tokens_to_expr, parse_expr_to_tokens
+from RL_lib.student_formula import default_total_formula, normalize_op_symbol, tokens_to_expr, parse_expr_to_tokens
 
 # --- Hằng reward (đặt 0 nếu module tắt / không dùng) ---
 DEFAULT_BLOCK_WEIGHT = 1.0
-R_STEP = 1.0
-R_COLLISION = 1.0
-R_EXCESS_ROTATE = 1.0
-R_GOAL_CLOSER = 1.0
-R_GOAL_FARTHER = 1.0
-R_CP_CLOSER = 1.0
-R_CP_FARTHER = 1.0
-R_CHECKPOINT_FIRST = 1.0
-R_GOAL_REACHED = 1.0
-R_ROTATE_IN_PLACE = 1.0
-R_FACING_CLEAR = 1.0
-R_FORWARD_CLEAR = 1.0
-R_WASTED_ROTATE = 1.0
-R_BLOCKED_ROTATE = 1.0
+R_STEP = -1.2
+R_COLLISION = -220
+R_EXCESS_ROTATE = -60.0
+R_GOAL_CLOSER = 9.0
+R_GOAL_FARTHER = -10.0
+R_CP_CLOSER = 10.0
+R_CP_FARTHER = -4.0
+R_CHECKPOINT_FIRST = 120.0
+R_GOAL_REACHED = 260.0
+R_ROTATE_IN_PLACE = -8.0
+R_FACING_CLEAR = 0.0
+R_FORWARD_CLEAR = 5.0
+R_WASTED_ROTATE = -15.0
+R_BLOCKED_ROTATE = 5.0
 R_ROTATE_TO_N = 1.0
 R_ROTATE_TO_E = 1.0
 R_ROTATE_TO_S = 1.0
@@ -41,12 +41,12 @@ R_FORWARD_NEW = 1.0
 R_STRAIGHT = 1.0
 R_STRAIGHT_REACH = 1.0
 R_STRAIGHT_CAP = 1.0
-R_WALL_DETECT = 1.0
-R_WALL_VISIBLE = 1.0
-R_WALL_ON_ENTRY = 1.0
-R_VISIT_WINDOW = 1.0
-R_VISIT_REPEAT = 1.0
-R_PING_PONG = 1.0
+R_WALL_DETECT = 0.0
+R_WALL_VISIBLE = 0.0
+R_WALL_ON_ENTRY = 0.0
+R_VISIT_WINDOW = -18.0
+R_VISIT_REPEAT = -45.0
+R_PING_PONG = -90.0
 
 MAX_ROTATE_STREAK = 2
 MAX_REVISIT_STEPS = 4
@@ -63,7 +63,7 @@ MAX_STEPS_PER_EPISODE = 600
 FORMULA_NAME = 'Reward_1'
 ENABLED_MODULES = set(['checkpoint', 'explore_penalty', 'goal', 'heading', 'memory_loop', 'obstacle', 'rotation', 'step'])
 ELEMENT_FORMULAS = dict(DEFAULT_ELEMENT_FORMULAS)
-TOTAL_FORMULA_STUDENT = 'Xoay tại chỗ #1 +  (  Lặp ô gần #1 +  Quay lại ô #1 +  Đi qua đi lại liên tục #1 )  +  Mỗi bước đi #1 +  Lại gần goal #1 +  Lại gần checkpoint #1 +  Chạm checkpoint #1 +  Giữ hướng #1 +  Va chạm tường #1'
+TOTAL_FORMULA_STUDENT = 'Xoay tại chỗ #1 +  (  Lặp ô gần #1 +  Quay lại ô #1 +  Đi qua đi lại liên tục #1 )  +  +  Lại gần goal #1 +  Lại gần checkpoint #1 +  Chạm checkpoint #1 +  Giữ hướng #1 +  Va chạm tường #1'
 INSTANCE_CONFIGS = {
     "excess_rotate#1": {"eid": "excess_rotate", "weight": 1.0, "thresholds": {"MAX_ROTATE_STREAK": 2}},
     "excess_rotate#2": {"eid": "excess_rotate", "weight": 1.0, "thresholds": {"MAX_ROTATE_STREAK": 4}},
@@ -392,7 +392,10 @@ def _eval_total_from_tokens(tokens, instance_values):
             expr_parts.append(var_name)
             continue
         if kind in ("op", "paren", "num"):
-            expr_parts.append(str(tok.get("value", "")))
+            if kind == "op":
+                expr_parts.append(str(normalize_op_symbol(tok.get("value", ""))))
+            else:
+                expr_parts.append(str(tok.get("value", "")))
     if not expr_parts:
         return 0.0
     try:

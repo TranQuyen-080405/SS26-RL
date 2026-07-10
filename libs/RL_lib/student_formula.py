@@ -8,10 +8,6 @@ from RL_lib.reward_formula import normalize_student_ops, safe_eval_formula
 
 _PART_PREFIX = "_p_"
 _OP_DISPLAY = {"+": "+", "-": "−", "*": "×", "/": "÷", "^": "^", "(": "(", ")": ")"}
-_BINARY_OPS = {"+", "-", "*", "/", "^"}
-_PAREN_VALS = {"(", ")"}
-_VALUE_KINDS = {"reward", "num"}
-_INSTANCE_SUFFIX_RE = re.compile(r" #(\d+)$")
 _OP_PARSE = {
     "+": "+",
     "-": "-",
@@ -43,6 +39,16 @@ _LABEL_ALIASES = {
     "Chạm checkpoint 3": "Chạm checkpoint",
     "Giữ nguyên hướng đi": "Giữ hướng n lần thì cộng",
 }
+
+
+def normalize_op_symbol(sym):
+    return _OP_PARSE.get(sym, sym)
+
+
+_BINARY_OPS = {"+", "-", "*", "/", "^"}
+_PAREN_VALS = {"(", ")"}
+_VALUE_KINDS = {"reward", "num"}
+_INSTANCE_SUFFIX_RE = re.compile(r" #(\d+)$")
 
 
 def migrate_reward_labels(expr):
@@ -169,6 +175,8 @@ def parse_expr_to_tokens(expr, known_labels):
 def _token_parts(token):
     kind = token.get("kind")
     val = token.get("value")
+    if kind == "op":
+        val = normalize_op_symbol(val)
     if kind == "op" and val in _PAREN_VALS:
         return "paren", val
     return kind, val

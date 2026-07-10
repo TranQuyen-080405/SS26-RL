@@ -2114,7 +2114,7 @@ class RlApp:
 
     @staticmethod
     def _infer_scoring_formula_line():
-        return "scoring: goal +400, checkpoint +100, collision -100, each action -2"
+        return "scoring: goal +400, checkpoint +100, collision -200, each action -2"
 
     @staticmethod
     def _format_infer_map_line(map_label, map_score):

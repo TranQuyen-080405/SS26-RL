@@ -38,16 +38,18 @@ MAIN = ROOT / "main.py"
 DIST = ROOT / "dist"
 BUILD = ROOT / "build"
 SPEC = ROOT / "SS26-RL.spec"
-LOGO_PNG = ROOT / "res" / "logo.png"
+APP_ICON_PNG = ROOT / "assets" / "icon_app.png"
+APP_ICON_ICO = ROOT / "assets" / "icon_app.ico"
 GENERATED_ICON_DIR = BUILD / "icons"
-GENERATED_ICNS = GENERATED_ICON_DIR / "logo.icns"
+GENERATED_ICNS = GENERATED_ICON_DIR / "icon_app.icns"
+GENERATED_ICO = GENERATED_ICON_DIR / "icon_app.ico"
 
 DEFAULT_NAME = "SS26-RL"
 DATA_PATHS = (
     "libs",
     "checkpoints",
     "reward_formula",
-    "res",
+    "assets",
     "calScore.py",
     "requirements.txt",
 )
@@ -71,6 +73,7 @@ HIDDEN_IMPORTS = (
     "Ui_app.rl_app_UI",
     "app_tabs.shell",
     "app_tabs.robot_monitor",
+    "app_icon",
 )
 COLLECT_ALL = (
     "bleak",
@@ -151,11 +154,36 @@ def _add_data_args(exclude_infer_maps: bool) -> list[str]:
     return args
 
 
+def _ensure_pillow():
+    try:
+        import PIL  # noqa: F401
+        return
+    except ImportError:
+        print("Installing Pillow for icon conversion...")
+        _run([sys.executable, "-m", "pip", "install", "pillow"])
+
+
+def _write_ico_from_png(src: Path, dest: Path) -> Path:
+    _ensure_pillow()
+    from PIL import Image
+
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    img = Image.open(src)
+    if img.mode not in ("RGBA", "RGB"):
+        img = img.convert("RGBA")
+    img.save(
+        dest,
+        format="ICO",
+        sizes=[(16, 16), (32, 32), (48, 48), (64, 64), (128, 128), (256, 256)],
+    )
+    return dest
+
+
 def _mac_icon_from_png() -> Optional[Path]:
-    """Convert res/logo.png to a temporary .icns for PyInstaller on macOS."""
-    if sys.platform != "darwin" or not LOGO_PNG.is_file():
+    """Convert assets/icon_app.png to a temporary .icns for PyInstaller on macOS."""
+    if sys.platform != "darwin" or not APP_ICON_PNG.is_file():
         return None
-    iconset = GENERATED_ICON_DIR / "logo.iconset"
+    iconset = GENERATED_ICON_DIR / "icon_app.iconset"
     _remove(iconset)
     GENERATED_ICON_DIR.mkdir(parents=True, exist_ok=True)
     iconset.mkdir(parents=True, exist_ok=True)
@@ -173,15 +201,33 @@ def _mac_icon_from_png() -> Optional[Path]:
         (1024, "icon_512x512@2x.png"),
     )
     for size, filename in sizes:
-        _run(["sips", "-z", str(size), str(size), str(LOGO_PNG), "--out", str(iconset / filename)])
+        _run(["sips", "-z", str(size), str(size), str(APP_ICON_PNG), "--out", str(iconset / filename)])
     _remove(GENERATED_ICNS)
     _run(["iconutil", "-c", "icns", str(iconset), "-o", str(GENERATED_ICNS)])
     return GENERATED_ICNS
 
 
+def _windows_icon_from_png() -> Optional[Path]:
+    """Convert assets/icon_app.png to .ico for PyInstaller on Windows."""
+    if not APP_ICON_PNG.is_file():
+        return None
+    try:
+        return _write_ico_from_png(APP_ICON_PNG, GENERATED_ICO)
+    except Exception as exc:
+        print(f"Note: could not build icon from assets/icon_app.png: {exc}")
+        return None
+
+
 def _windows_icon() -> Optional[Path]:
-    ico = ROOT / "res" / "logo.ico"
-    return ico if ico.is_file() else None
+    if APP_ICON_ICO.is_file():
+        return APP_ICON_ICO
+    icon = _windows_icon_from_png()
+    if icon and not APP_ICON_ICO.is_file():
+        try:
+            shutil.copy2(icon, APP_ICON_ICO)
+        except OSError:
+            pass
+    return icon
 
 
 def _icon_arg(target: str) -> list[str]:
@@ -191,8 +237,6 @@ def _icon_arg(target: str) -> list[str]:
     icon = _windows_icon()
     if icon:
         return ["--icon", str(icon)]
-    if LOGO_PNG.is_file():
-        print("Note: res/logo.png is bundled. For Windows exe icon, add res/logo.ico.")
     return []
 
 
