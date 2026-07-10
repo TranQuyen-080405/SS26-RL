@@ -380,14 +380,6 @@ class LearnLabApp:
         iid = self._reward_instance_id(eid, idx)
         if iid in self._weight_instance_saved_values:
             return self._weight_instance_saved_values[iid]
-        if idx == 1:
-            base_var = self._weight_vars.get(eid)
-            if base_var is not None:
-                raw = base_var.get().strip()
-                try:
-                    return float(raw) if "." in raw else int(raw)
-                except ValueError:
-                    pass
         return _DEFAULT_WEIGHTS.get(eid, _DEFAULT_BLOCK_WEIGHT)
 
     def _threshold_seed_value(self, eid, idx, tk_key):
@@ -887,33 +879,16 @@ class LearnLabApp:
 
     def _load_from_module(self):
         self._cancel_pending_formula_jobs()
-        d = reward_config.get_reward_dict()
-        for eid, wkey in ELEMENT_WEIGHT_KEY.items():
-            if eid in self._weight_vars and wkey in d:
-                raw = d[wkey]
-                try:
-                    num = float(raw)
-                except (TypeError, ValueError):
-                    num = _DEFAULT_WEIGHTS.get(eid, _DEFAULT_BLOCK_WEIGHT)
-                if num == 0:
-                    num = _DEFAULT_WEIGHTS.get(eid, _DEFAULT_BLOCK_WEIGHT)
-                self._weight_vars[eid].set(str(num))
-        for k, var in self._threshold_vars.items():
-            if k in d:
-                var.set(str(d[k]))
+        for eid, var in self._weight_vars.items():
+            var.set(str(_DEFAULT_WEIGHTS.get(eid, _DEFAULT_BLOCK_WEIGHT)))
+        for var in self._threshold_vars.values():
+            var.set("1")
         self._weight_instance_saved_values = {}
         self._threshold_instance_saved_values = {}
         self._clear_weight_panel_widgets()
         self._weight_instance_vars = {}
         self._threshold_instance_vars = {}
         self._weight_panel_sig = None
-        for iid, cfg in (reward_config.get_instance_configs() or {}).items():
-            if not isinstance(cfg, dict):
-                continue
-            if "weight" in cfg:
-                self._weight_instance_saved_values[str(iid)] = cfg.get("weight")
-            for tk_key, val in (cfg.get("thresholds") or {}).items():
-                self._threshold_instance_saved_values["%s:%s" % (iid, tk_key)] = val
         reward_config.set_enabled_modules(self._enabled_modules())
         self.formula_builder.set_labels(self._enabled_labels())
         self.formula_builder.set_expr("")
